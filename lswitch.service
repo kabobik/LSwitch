@@ -1,0 +1,26 @@
+[Unit]
+Description=LSwitch - Layout Switcher (evdev)
+Documentation=https://github.com/yourusername/lswitch
+After=network.target multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -u /usr/local/bin/lswitch
+Restart=on-failure
+RestartSec=5s
+WorkingDirectory=/etc/lswitch
+Environment="PYTHONUNBUFFERED=1"
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/anton/.Xauthority"
+
+# Безопасность
+# NoNewPrivileges=true
+# PrivateTmp=true
+
+# Логирование
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lswitch
+
+[Install]
+WantedBy=multi-user.target

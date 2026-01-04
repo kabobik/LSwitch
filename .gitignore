@@ -8,6 +8,10 @@ venv/
 .venv
 *.log
 .vscode/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
 .idea/
 *.swp
 *.swo

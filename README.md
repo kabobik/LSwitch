@@ -10,8 +10,66 @@
 - ✅ Работает на уровне ядра (evdev) - **максимальная скорость**
 - ✅ Работает везде: X11, Wayland, даже в консоли (tty)
 - ✅ Поддержка EN ⟷ RU раскладок
+- ✅ **Автозапуск через systemd демон**
 
-## Установка
+## Быстрая установка
+
+```bash
+# Клонируйте репозиторий
+git clone https://github.com/yourusername/lswitch.git
+cd lswitch
+
+# Установите в систему (потребуются права root)
+sudo ./install.sh
+```
+
+Скрипт установки автоматически:
+- Установит необходимые зависимости (python3-evdev)
+- Скопирует файлы в систему
+- Настроит systemd демон
+- Предложит включить автозапуск
+
+## Управление сервисом
+
+После установки используйте стандартные команды systemd:
+
+```bash
+# Запустить
+sudo systemctl start lswitch
+
+# Остановить
+sudo systemctl stop lswitch
+
+# Перезапустить
+sudo systemctl restart lswitch
+
+# Статус
+sudo systemctl status lswitch
+
+# Включить автозапуск
+sudo systemctl enable lswitch
+
+# Отключить автозапуск
+sudo systemctl disable lswitch
+
+# Просмотр логов в реальном времени
+sudo journalctl -u lswitch -f
+```
+
+### Или используйте Makefile
+
+```bash
+make install    # Установить
+make start      # Запустить
+make stop       # Остановить
+make restart    # Перезапустить
+make status     # Статус
+make enable     # Включить автозапуск
+make logs       # Просмотр логов
+make uninstall  # Удалить из системы
+```
+
+## Ручной запуск (без установки)
 
 ### Системные зависимости
 
@@ -19,7 +77,7 @@
 sudo apt install python3-evdev
 ```
 
-## Запуск
+### Запуск
 
 ⚠️ **Требуются права root** для доступа к `/dev/input/`:
 
@@ -41,9 +99,36 @@ sudo python3 lswitch.py
 
 ## Конфигурация
 
-Отредактируйте файл `config.json`:
+Файл конфигурации после установки находится в `/etc/lswitch/config.json`:
 
 ```json
+{
+  "double_click_timeout": 0.3,
+  "debug": false,
+  "switch_layout_after_convert": true,
+  "layout_switch_key": "Alt_L+Shift_L"
+}
+```
+
+### Параметры
+
+- `double_click_timeout` - максимальное время между нажатиями Shift (в секундах)
+- `debug` - включить отладочные сообщения
+- `switch_layout_after_convert` - автоматически переключать раскладку после конвертации
+- `layout_switch_key` - комбинация клавиш для переключения раскладки
+
+После изменения конфигурации перезапустите сервис:
+```bash
+sudo systemctl restart lswitch
+```
+
+## Удаление
+
+```bash
+sudo ./uninstall.sh
+# Или
+make uninstall
+```
 { от root: `sudo python3 lswitch.py`
 2. Печатайте текст в любом приложении
 3. Набрали слово не в той раскладке? Нажмите **Shift дважды** быстро

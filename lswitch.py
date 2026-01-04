@@ -4,6 +4,7 @@ LSwitch - Layout Switcher for Linux (evdev version)
 Переключатель раскладки по двойному нажатию Shift
 """
 
+import sys
 import time
 import subprocess
 import json
@@ -26,12 +27,12 @@ EN_TO_RU = {
     'q': 'й', 'w': 'ц', 'e': 'у', 'r': 'к', 't': 'е', 'y': 'н', 'u': 'г', 'i': 'ш', 'o': 'щ', 'p': 'з',
     '[': 'х', ']': 'ъ', 'a': 'ф', 's': 'ы', 'd': 'в', 'f': 'а', 'g': 'п', 'h': 'р', 'j': 'о', 'k': 'л',
     'l': 'д', ';': 'ж', "'": 'э', 'z': 'я', 'x': 'ч', 'c': 'с', 'v': 'м', 'b': 'и', 'n': 'т', 'm': 'ь',
-    '/': '/', '`': 'ё',
+    ',': 'б', '.': 'ю', '/': '.', '`': 'ё',
     'Q': 'Й', 'W': 'Ц', 'E': 'У', 'R': 'К', 'T': 'Е', 'Y': 'Н', 'U': 'Г', 'I': 'Ш', 'O': 'Щ', 'P': 'З',
     '{': 'Х', '}': 'Ъ', 'A': 'Ф', 'S': 'Ы', 'D': 'В', 'F': 'А', 'G': 'П', 'H': 'Р', 'J': 'О', 'K': 'Л',
     'L': 'Д', ':': 'Ж', '"': 'Э', 'Z': 'Я', 'X': 'Ч', 'C': 'С', 'V': 'М', 'B': 'И', 'N': 'Т', 'M': 'Ь',
-    '<': 'Б', '>': 'Ю', '?': '?', '~': 'Ё',
-    '@': '"', '#': '№', '$': ';', '^': ':', '&': '&'
+    '<': 'Б', '>': 'Ю', '?': ',', '~': 'Ё',
+    '@': '"', '#': '№', '$': ';', '^': ':', '&': '?'
 }
 
 # Карта переключения RU -> EN
@@ -39,7 +40,14 @@ RU_TO_EN = {v: k for k, v in EN_TO_RU.items()}
 
 
 class LSwitch:
-    def __init__(self, config_path='config.json'):
+    def __init__(self, config_path=None):
+        # Автоматически определяем путь к конфигурации
+        if config_path is None:
+            if os.path.exists('/etc/lswitch/config.json'):
+                config_path = '/etc/lswitch/config.json'
+            else:
+                config_path = 'config.json'
+        
         self.config = self.load_config(config_path)
         self.last_shift_press = 0
         self.double_click_timeout = self.config.get('double_click_timeout', 0.3)
@@ -56,6 +64,13 @@ class LSwitch:
         self.active_keycodes = set(range(2, 58))  # От '1' до '/'
         self.active_keycodes.add(ecodes.KEY_SPACE)  # Добавляем пробел!
         self.active_keycodes.difference_update((15, 28, 29, 56))  # Убираем Tab, Enter, Ctrl, Alt
+        
+        # Клавиши навигации - очищают буфер
+        self.navigation_keys = {
+            ecodes.KEY_LEFT, ecodes.KEY_RIGHT, ecodes.KEY_UP, ecodes.KEY_DOWN,
+            ecodes.KEY_HOME, ecodes.KEY_END, ecodes.KEY_PAGEUP, ecodes.KEY_PAGEDOWN,
+            ecodes.KEY_TAB
+        }
         
         self.is_converting = False
         self.sleep_time = 0.005  # 5ms между нажатиями
@@ -149,28 +164,43 @@ class LSwitch:
                 if self.config.get('debug'):
                     print(f"Выделенное: '{selected_text}' -> '{converted}'")
                 
-                # Переключаем раскладку если нужно (ДО ввода текста)
+                # Переключаем раскладку если нужно (ДО вставки)
                 if self.config.get('switch_layout_after_convert', True):
                     self.switch_keyboard_layout()
                     time.sleep(0.02)
                 
-                # Явно отпускаем все модификаторы
+                # Сохраняем текущий clipboard пользователя
+                try:
+                    old_clipboard = subprocess.run(
+                        ['xclip', '-o', '-selection', 'clipboard'],
+                        capture_output=True, timeout=0.3, text=True
+                    ).stdout
+                except Exception:
+                    old_clipboard = ''
+                
+                # Помещаем конвертированный текст в clipboard
                 subprocess.run(
-                    ['xdotool', 'keyup', 'shift', 'Shift_L', 'Shift_R', 'ctrl', 'alt', 'super'],
-                    timeout=0.5, stderr=subprocess.DEVNULL
+                    ['xclip', '-selection', 'clipboard'],
+                    input=converted, text=True, timeout=0.5
                 )
                 
                 time.sleep(0.02)
                 
-                # Печатаем конвертированный текст - выделенное автоматически заменится
-                # --clearmodifiers + явный keyup для надёжности
-                timeout_val = max(2.0, len(converted) * 0.01)
+                # Вставляем через Ctrl+V - выделенное заменится!
+                # Не зависит от модификаторов, атомарная операция
                 subprocess.run(
-                    ['xdotool', 'type', '--clearmodifiers', '--', converted],
-                    timeout=timeout_val, stderr=subprocess.DEVNULL
+                    ['xdotool', 'key', 'ctrl+v'],
+                    timeout=1.0, stderr=subprocess.DEVNULL
                 )
                 
-                time.sleep(0.05)  # Даём время системе
+                time.sleep(0.05)
+                
+                # Восстанавливаем clipboard пользователя
+                if old_clipboard:
+                    subprocess.run(
+                        ['xclip', '-selection', 'clipboard'],
+                        input=old_clipboard, text=True, timeout=0.5
+                    )
                 
                 # КРИТИЧНО: Обновляем снимок ПОСЛЕ всех операций
                 # Это выделение уже обработано и не должно считаться новым
@@ -305,6 +335,14 @@ class LSwitch:
         
         current_time = time.time()
         
+        # Навигационные клавиши - очищают буфер (новый контекст ввода)
+        if event.code in self.navigation_keys and event.value == 0:
+            if self.chars_in_buffer > 0:
+                self.clear_buffer()
+                if self.config.get('debug'):
+                    print("Буфер очищен (навигация)")
+            return
+        
         # Shift: проверяем двойное нажатие
         if event.code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
             if event.value == 0:  # Отпускание
@@ -368,12 +406,9 @@ class LSwitch:
             # Считаем символы (только при отпускании клавиши)
             if event.value == 0:  # Отпускание
                 if event.code == ecodes.KEY_BACKSPACE:
+                    # Backspace уменьшает счётчик, но остаётся в буфере для воспроизведения
                     if self.chars_in_buffer > 0:
                         self.chars_in_buffer -= 1
-                        # Удаляем последнее событие из буфера
-                        if len(self.event_buffer) >= 2:
-                            self.event_buffer.pop()  # Удаляем release
-                            self.event_buffer.pop()  # Удаляем press
                 elif event.code not in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
                     self.chars_in_buffer += 1
                     
@@ -430,6 +465,15 @@ class LSwitch:
                 for key, mask in device_selector.select():
                     device = key.fileobj
                     for event in device.read():
+                        # Клик мыши очищает буфер (новый контекст)
+                        if event.type == ecodes.EV_KEY and event.code in (
+                            ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE
+                        ) and event.value == 1:
+                            if self.chars_in_buffer > 0:
+                                self.clear_buffer()
+                                if self.config.get('debug'):
+                                    print("Буфер очищен (клик мыши)")
+                        
                         if self.handle_event(event) is False:
                             return
         except KeyboardInterrupt:
@@ -439,12 +483,32 @@ class LSwitch:
             self.fake_kb.close()
 
 
-if __name__ == "__main__":
+def main():
+    """Точка входа для запуска приложения"""
+    # Отключаем буферизацию вывода для systemd
+    sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
+    sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)
+    
     # Проверяем права root
     if getpass.getuser() != 'root':
-        print("❌ LSwitch должен запускаться от root для доступа к /dev/input/")
-        print("   Запустите: sudo python3 lswitch.py")
+        print("❌ LSwitch должен запускаться от root для доступа к /dev/input/", flush=True)
+        print("   Запустите: sudo python3 lswitch.py", flush=True)
         exit(126)
     
-    app = LSwitch()
-    app.run()
+    print("🚀 LSwitch запущен", flush=True)
+    print("   Двойное нажатие Shift = конвертация последнего слова", flush=True)
+    print("   Ctrl+C = выход", flush=True)
+    print(flush=True)
+    
+    try:
+        app = LSwitch()
+        app.run()
+    except Exception as e:
+        print(f"❌ Критическая ошибка: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        exit(1)
+
+
+if __name__ == "__main__":
+    main()
