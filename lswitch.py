@@ -324,7 +324,20 @@ class LSwitch:
             print("Выход...")
             return False
         
-        # Enter - сбрасываем буфер (конец ввода)
+        # Пробел - граница слова, сбрасываем буфер но ОСТАВЛЯЕМ пробел!
+        if event.code == ecodes.KEY_SPACE and event.value == 0:
+            self.clear_buffer()
+            # Добавляем пробел обратно - он станет частью конвертации
+            self.event_buffer.append(event)
+            self.chars_in_buffer = 1
+            # Обновляем снимок выделения
+            self.update_selection_snapshot()
+            
+            if self.config.get('debug'):
+                print("Буфер сброшен (пробел), пробел оставлен в буфере")
+            return
+        
+        # Enter - сбрасываем буфер полностью (конец ввода)
         if event.code == ecodes.KEY_ENTER and event.value == 0:
             self.clear_buffer()
             # Обновляем снимок выделения - теперь старое выделение не считается новым
