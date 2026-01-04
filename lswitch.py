@@ -157,9 +157,10 @@ class LSwitch:
                 
                 # Печатаем конвертированный текст через xdotool
                 # (не можем через evdev - сложные символы типа кириллицы)
+                timeout_val = max(2.0, len(converted) * 0.01)  # Динамический timeout
                 subprocess.run(
                     ['xdotool', 'type', '--clearmodifiers', '--', converted],
-                    timeout=1, stderr=subprocess.DEVNULL
+                    timeout=timeout_val, stderr=subprocess.DEVNULL
                 )
                 
                 time.sleep(0.05)
@@ -168,7 +169,10 @@ class LSwitch:
                 if self.config.get('switch_layout_after_convert', True):
                     self.switch_keyboard_layout()
                 
-                # Обновляем снимок - это выделение уже обработано
+                time.sleep(0.05)  # Даём время системе
+                
+                # КРИТИЧНО: Обновляем снимок ПОСЛЕ всех операций
+                # Это выделение уже обработано и не должно считаться новым
                 self.update_selection_snapshot()
             else:
                 if self.config.get('debug'):
