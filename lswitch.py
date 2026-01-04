@@ -345,6 +345,8 @@ class LSwitch:
                 self.clear_buffer()
                 # Обновляем снимок выделения
                 self.update_selection_snapshot()
+                # Сбрасываем флаг
+                self.last_was_space = False
                 
                 if self.config.get('debug'):
                     print("Сброс буфера после пробела, начало нового слова")
@@ -364,7 +366,8 @@ class LSwitch:
                     self.chars_in_buffer += 1
                     
                 # Запоминаем если это был пробел
-                self.last_was_space = (event.code == ecodes.KEY_SPACE)
+                if event.code == ecodes.KEY_SPACE:
+                    self.last_was_space = True
             
             if self.config.get('debug'):
                 print(f"Буфер: {self.chars_in_buffer} символов")
