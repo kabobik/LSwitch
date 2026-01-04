@@ -341,28 +341,13 @@ class LSwitch:
         if event.code in self.active_keycodes:
             # Если последний был пробел и это НЕ пробел - сбрасываем старое слово
             if self.last_was_space and event.code != ecodes.KEY_SPACE:
-                # Находим последний пробел в буфере
-                space_events = []
-                for i in range(len(self.event_buffer) - 1, -1, -1):
-                    if self.event_buffer[i].code == ecodes.KEY_SPACE:
-                        # Сохраняем события пробела (press и release)
-                        if i > 0:
-                            space_events = [self.event_buffer[i-1], self.event_buffer[i]]
-                        else:
-                            space_events = [self.event_buffer[i]]
-                        break
-                
-                # Очищаем буфер и оставляем только пробел
+                # Просто очищаем буфер, начинаем новое слово БЕЗ пробела
                 self.clear_buffer()
-                for evt in space_events:
-                    self.event_buffer.append(evt)
-                self.chars_in_buffer = 1  # Один символ (пробел)
-                
                 # Обновляем снимок выделения
                 self.update_selection_snapshot()
                 
                 if self.config.get('debug'):
-                    print("Сброс буфера после пробела, оставлен пробел")
+                    print("Сброс буфера после пробела, начало нового слова")
             
             self.event_buffer.append(event)
             
