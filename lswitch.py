@@ -347,13 +347,20 @@ class LSwitch:
             if self.last_was_space and event.code != ecodes.KEY_SPACE:
                 # Просто очищаем буфер, начинаем новое слово БЕЗ пробела
                 self.clear_buffer()
-                # Обновляем снимок выделения
+                # Обновляем снимок выделения - пользователь начал печатать новое слово
                 self.update_selection_snapshot()
                 # Сбрасываем флаг
                 self.last_was_space = False
                 
                 if self.config.get('debug'):
                     print("Сброс буфера после пробела, начало нового слова")
+            
+            # КРИТИЧНО: При первом символе в буфере - обновляем снимок выделения
+            # Это значит пользователь начал печатать (а не конвертировать выделенное)
+            if len(self.event_buffer) == 0 and event.value == 1:  # Press первого символа
+                self.update_selection_snapshot()
+                if self.config.get('debug'):
+                    print("Первый символ - снимок выделения обновлён")
             
             self.event_buffer.append(event)
             
