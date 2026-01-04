@@ -58,6 +58,10 @@ class LSwitch:
         
         self.is_converting = False
         self.sleep_time = 0.005  # 5ms между нажатиями
+        
+        # Отслеживание реального выделения
+        self.last_known_selection = ''  # Последняя известная PRIMARY selection
+        self.selection_timestamp = 0  # Время последнего изменения выделения
     
     def load_config(self, config_path):
         """Загружает конфигурацию из файла"""
@@ -159,6 +163,9 @@ class LSwitch:
                 # Переключаем раскладку если нужно
                 if self.config.get('switch_layout_after_convert', True):
                     self.switch_keyboard_layout()
+                
+                # Обновляем снимок - это выделение уже обработано
+                self.update_selection_snapshot()
             else:
                 if self.config.get('debug'):
                     print("⚠️  Нет выделенного текста")
@@ -206,15 +213,34 @@ class LSwitch:
                 print(f"⚠️  Ошибка переключения раскладки: {e}")
     
     def has_selection(self):
-        """Проверяет есть ли выделенный текст в PRIMARY selection"""
+        """Проверяет есть ли СВЕЖЕЕ выделение (изменилось с прошлого раза)"""
         try:
             result = subprocess.run(
                 ['xclip', '-o', '-selection', 'primary'],
                 capture_output=True, timeout=0.3, text=True
             )
-            return bool(result.stdout.strip())
+            current_selection = result.stdout
+            
+            # Есть выделение только если:
+            # 1. PRIMARY не пустая
+            # 2. PRIMARY изменилась с последнего раза (свежее выделение!)
+            if current_selection and current_selection != self.last_known_selection:
+                return True
+            return False
         except Exception:
             return False
+    
+    def update_selection_snapshot(self):
+        """Обновляет снимок текущей PRIMARY selection"""
+        try:
+            result = subprocess.run(
+                ['xclip', '-o', '-selection', 'primary'],
+                capture_output=True, timeout=0.3, text=True
+            )
+            self.last_known_selection = result.stdout
+            self.selection_timestamp = time.time()
+        except Exception:
+            pass
     
     def convert_and_retype(self):
         """Конвертирует и перепечатывает последнее слово"""
@@ -295,8 +321,11 @@ class LSwitch:
         # Пробел или Enter - сбрасываем буфер (граница слова)
         if event.code in (ecodes.KEY_SPACE, ecodes.KEY_ENTER) and event.value == 0:
             self.clear_buffer()
+            # Обновляем снимок выделения - теперь старое выделение не считается новым
+            self.update_selection_snapshot()
+            
             if self.config.get('debug'):
-                print("Буфер очищен (пробел/enter)")
+                print("Буфер очищен (пробел/enter), снимок выделения обновлён")
             return
         
         # Активные клавиши - добавляем в буфер
