@@ -245,6 +245,8 @@ class LSwitch:
         except Exception as e:
             print(f"⚠️  Ошибка: {e}")
         finally:
+            # КРИТИЧНО: очищаем буфер после конвертации!
+            self.clear_buffer()
             self.is_converting = False
     
     def handle_event(self, event):
