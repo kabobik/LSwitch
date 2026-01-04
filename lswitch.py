@@ -227,8 +227,15 @@ class LSwitch:
             if self.config.get('debug'):
                 print(f"Конвертирую {self.chars_in_buffer} символов...")
             
+            # КРИТИЧНО: сохраняем копию событий ДО очистки буфера!
+            events_to_replay = list(self.event_buffer)
+            num_chars = self.chars_in_buffer
+            
+            # Очищаем буфер сразу (чтобы не накапливались события)
+            self.clear_buffer()
+            
             # Удаляем введённые символы
-            self.tap_key(ecodes.KEY_BACKSPACE, self.chars_in_buffer)
+            self.tap_key(ecodes.KEY_BACKSPACE, num_chars)
             
             # Переключаем раскладку
             if self.config.get('switch_layout_after_convert', True):
@@ -236,8 +243,8 @@ class LSwitch:
             
             time.sleep(0.02)  # Маленькая задержка перед вводом
             
-            # Воспроизводим события в новой раскладке
-            self.replay_events(self.event_buffer)
+            # Воспроизводим сохранённые события в новой раскладке
+            self.replay_events(events_to_replay)
             
             if self.config.get('debug'):
                 print("✓ Конвертация завершена")
@@ -245,8 +252,6 @@ class LSwitch:
         except Exception as e:
             print(f"⚠️  Ошибка: {e}")
         finally:
-            # КРИТИЧНО: очищаем буфер после конвертации!
-            self.clear_buffer()
             self.is_converting = False
     
     def handle_event(self, event):
