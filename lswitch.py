@@ -149,25 +149,26 @@ class LSwitch:
                 if self.config.get('debug'):
                     print(f"Выделенное: '{selected_text}' -> '{converted}'")
                 
-                # Удаляем выделенное через BackSpace
-                num_chars = len(selected_text)
-                self.tap_key(ecodes.KEY_BACKSPACE, num_chars)
+                # Переключаем раскладку если нужно (ДО ввода текста)
+                if self.config.get('switch_layout_after_convert', True):
+                    self.switch_keyboard_layout()
+                    time.sleep(0.02)
+                
+                # Явно отпускаем все модификаторы
+                subprocess.run(
+                    ['xdotool', 'keyup', 'shift', 'Shift_L', 'Shift_R', 'ctrl', 'alt', 'super'],
+                    timeout=0.5, stderr=subprocess.DEVNULL
+                )
                 
                 time.sleep(0.02)
                 
-                # Печатаем конвертированный текст через xdotool
-                # (не можем через evdev - сложные символы типа кириллицы)
-                timeout_val = max(2.0, len(converted) * 0.01)  # Динамический timeout
+                # Печатаем конвертированный текст - выделенное автоматически заменится
+                # --clearmodifiers + явный keyup для надёжности
+                timeout_val = max(2.0, len(converted) * 0.01)
                 subprocess.run(
                     ['xdotool', 'type', '--clearmodifiers', '--', converted],
                     timeout=timeout_val, stderr=subprocess.DEVNULL
                 )
-                
-                time.sleep(0.05)
-                
-                # Переключаем раскладку если нужно
-                if self.config.get('switch_layout_after_convert', True):
-                    self.switch_keyboard_layout()
                 
                 time.sleep(0.05)  # Даём время системе
                 
