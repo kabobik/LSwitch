@@ -21,6 +21,23 @@ except ImportError:
     exit(1)
 
 
+# Карта переключения EN -> RU
+EN_TO_RU = {
+    'q': 'й', 'w': 'ц', 'e': 'у', 'r': 'к', 't': 'е', 'y': 'н', 'u': 'г', 'i': 'ш', 'o': 'щ', 'p': 'з',
+    '[': 'х', ']': 'ъ', 'a': 'ф', 's': 'ы', 'd': 'в', 'f': 'а', 'g': 'п', 'h': 'р', 'j': 'о', 'k': 'л',
+    'l': 'д', ';': 'ж', "'": 'э', 'z': 'я', 'x': 'ч', 'c': 'с', 'v': 'м', 'b': 'и', 'n': 'т', 'm': 'ь',
+    '/': '/', '`': 'ё',
+    'Q': 'Й', 'W': 'Ц', 'E': 'У', 'R': 'К', 'T': 'Е', 'Y': 'Н', 'U': 'Г', 'I': 'Ш', 'O': 'Щ', 'P': 'З',
+    '{': 'Х', '}': 'Ъ', 'A': 'Ф', 'S': 'Ы', 'D': 'В', 'F': 'А', 'G': 'П', 'H': 'Р', 'J': 'О', 'K': 'Л',
+    'L': 'Д', ':': 'Ж', '"': 'Э', 'Z': 'Я', 'X': 'Ч', 'C': 'С', 'V': 'М', 'B': 'И', 'N': 'Т', 'M': 'Ь',
+    '<': 'Б', '>': 'Ю', '?': '?', '~': 'Ё',
+    '@': '"', '#': '№', '$': ';', '^': ':', '&': '&'
+}
+
+# Карта переключения RU -> EN
+RU_TO_EN = {v: k for k, v in EN_TO_RU.items()}
+
+
 class LSwitch:
     def __init__(self, config_path='config.json'):
         self.config = self.load_config(config_path)
@@ -48,7 +65,8 @@ class LSwitch:
             'double_click_timeout': 0.3,
             'debug': False,
             'switch_layout_after_convert': True,
-            'layout_switch_key': 'Alt_L+Shift_L'
+            'layout_switch_key': 'Alt_L+Shift_L',
+            'convert_selection_key': 'KEY_PAUSE'  # Pause/Break для конвертации выделенного
         }
         
         if os.path.exists(config_path):
@@ -83,6 +101,96 @@ class LSwitch:
         """Очищает буфер событий"""
         self.event_buffer.clear()
         self.chars_in_buffer = 0
+    
+    def convert_text(self, text):
+        """Конвертирует текст между раскладками"""
+        if not text:
+            return text
+        
+        # Определяем раскладку по количеству символов
+        ru_chars = sum(1 for c in text if c in RU_TO_EN)
+        en_chars = sum(1 for c in text if c in EN_TO_RU)
+        
+        if ru_chars > en_chars:
+            # Конвертируем RU -> EN
+            return ''.join(RU_TO_EN.get(c, c) for c in text)
+        else:
+            # Конвертируем EN -> RU
+            return ''.join(EN_TO_RU.get(c, c) for c in text)
+    
+    def convert_selection(self):
+        """Конвертирует выделенный текст через буфер обмена"""
+        if self.is_converting:
+            return
+        
+        self.is_converting = True
+        
+        try:
+            # Сохраняем текущий буфер обмена
+            try:
+                clipboard_backup = subprocess.run(
+                    ['xclip', '-o', '-selection', 'clipboard'],
+                    capture_output=True, timeout=0.5, text=True
+                ).stdout
+            except Exception:
+                clipboard_backup = ''
+            
+            # Копируем выделенное
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+c'], timeout=0.5)
+            time.sleep(0.05)
+            
+            # Получаем текст
+            try:
+                selected_text = subprocess.run(
+                    ['xclip', '-o', '-selection', 'clipboard'],
+                    capture_output=True, timeout=0.5, text=True
+                ).stdout
+            except Exception:
+                selected_text = ''
+            
+            if selected_text:
+                # Конвертируем
+                converted = self.convert_text(selected_text)
+                
+                if self.config.get('debug'):
+                    print(f"Выделенное: '{selected_text}' -> '{converted}'")
+                
+                # Записываем в буфер
+                subprocess.run(
+                    ['xclip', '-selection', 'clipboard'],
+                    input=converted.encode(), timeout=0.5
+                )
+                
+                time.sleep(0.05)
+                
+                # Вставляем
+                subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+v'], timeout=0.5)
+                
+                time.sleep(0.05)
+                
+                # Переключаем раскладку если нужно
+                if self.config.get('switch_layout_after_convert', True):
+                    self.switch_keyboard_layout()
+            else:
+                if self.config.get('debug'):
+                    print("⚠️  Нет выделенного текста")
+            
+            # Восстанавливаем буфер
+            time.sleep(0.05)
+            if clipboard_backup:
+                subprocess.run(
+                    ['xclip', '-selection', 'clipboard'],
+                    input=clipboard_backup.encode(), timeout=0.5
+                )
+                
+        except Exception as e:
+            print(f"⚠️  Ошибка конвертации выделенного: {e}")
+            if self.config.get('debug'):
+                import traceback
+                traceback.print_exc()
+        finally:
+            time.sleep(0.1)
+            self.is_converting = False
     
     def switch_keyboard_layout(self):
         """Переключает раскладку клавиатуры через setxkbmap"""
@@ -175,6 +283,15 @@ class LSwitch:
         if event.code == ecodes.KEY_ESC and event.value == 0:
             print("Выход...")
             return False
+        
+        # Pause/Break (или другая настроенная клавиша) - конвертация выделенного
+        convert_key_name = self.config.get('convert_selection_key', 'KEY_PAUSE')
+        convert_key_code = getattr(ecodes, convert_key_name, ecodes.KEY_PAUSE)
+        if event.code == convert_key_code and event.value == 0:
+            if self.config.get('debug'):
+                print("✓ Клавиша конвертации выделенного обнаружена!")
+            self.convert_selection()
+            return
         
         # Пробел или Enter - сбрасываем буфер (граница слова)
         if event.code in (ecodes.KEY_SPACE, ecodes.KEY_ENTER) and event.value == 0:
