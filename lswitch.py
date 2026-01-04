@@ -63,6 +63,9 @@ class LSwitch:
         # Отслеживание реального выделения
         self.last_known_selection = ''  # Последняя известная PRIMARY selection
         self.selection_timestamp = 0  # Время последнего изменения выделения
+        
+        # Флаг: последний введённый символ был пробелом
+        self.last_was_space = False
     
     def load_config(self, config_path):
         """Загружает конфигурацию из файла"""
@@ -324,31 +327,43 @@ class LSwitch:
             print("Выход...")
             return False
         
-        # Пробел - граница слова, сбрасываем буфер но ОСТАВЛЯЕМ пробел!
-        if event.code == ecodes.KEY_SPACE and event.value == 0:
-            self.clear_buffer()
-            # Добавляем пробел обратно - он станет частью конвертации
-            self.event_buffer.append(event)
-            self.chars_in_buffer = 1
-            # Обновляем снимок выделения
-            self.update_selection_snapshot()
-            
-            if self.config.get('debug'):
-                print("Буфер сброшен (пробел), пробел оставлен в буфере")
-            return
-        
         # Enter - сбрасываем буфер полностью (конец ввода)
         if event.code == ecodes.KEY_ENTER and event.value == 0:
             self.clear_buffer()
-            # Обновляем снимок выделения - теперь старое выделение не считается новым
+            self.last_was_space = False
             self.update_selection_snapshot()
             
             if self.config.get('debug'):
-                print("Буфер очищен (enter), снимок выделения обновлён")
+                print("Буфер очищен (enter)")
             return
         
         # Активные клавиши - добавляем в буфер
         if event.code in self.active_keycodes:
+            # Если последний был пробел и это НЕ пробел - сбрасываем старое слово
+            if self.last_was_space and event.code != ecodes.KEY_SPACE:
+                # Находим последний пробел в буфере
+                space_events = []
+                for i in range(len(self.event_buffer) - 1, -1, -1):
+                    if self.event_buffer[i].code == ecodes.KEY_SPACE:
+                        # Сохраняем события пробела (press и release)
+                        if i > 0:
+                            space_events = [self.event_buffer[i-1], self.event_buffer[i]]
+                        else:
+                            space_events = [self.event_buffer[i]]
+                        break
+                
+                # Очищаем буфер и оставляем только пробел
+                self.clear_buffer()
+                for evt in space_events:
+                    self.event_buffer.append(evt)
+                self.chars_in_buffer = 1  # Один символ (пробел)
+                
+                # Обновляем снимок выделения
+                self.update_selection_snapshot()
+                
+                if self.config.get('debug'):
+                    print("Сброс буфера после пробела, оставлен пробел")
+            
             self.event_buffer.append(event)
             
             # Считаем символы (только при отпускании клавиши)
@@ -362,6 +377,9 @@ class LSwitch:
                             self.event_buffer.pop()  # Удаляем press
                 elif event.code not in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
                     self.chars_in_buffer += 1
+                    
+                # Запоминаем если это был пробел
+                self.last_was_space = (event.code == ecodes.KEY_SPACE)
             
             if self.config.get('debug'):
                 print(f"Буфер: {self.chars_in_buffer} символов")
