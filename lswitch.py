@@ -257,7 +257,7 @@ class LSwitch:
             events_to_replay = list(self.event_buffer)
             num_chars = self.chars_in_buffer
             
-            # Очищаем буфер сразу (чтобы не накапливались события)
+            # Очищаем буфер (чтобы не накапливались события)
             self.clear_buffer()
             
             # Удаляем введённые символы
@@ -271,6 +271,11 @@ class LSwitch:
             
             # Воспроизводим сохранённые события в новой раскладке
             self.replay_events(events_to_replay)
+            
+            # КРИТИЧНО: заполняем буфер заново конвертированными событиями!
+            # Это позволяет конвертировать назад при повторном двойном Shift
+            self.event_buffer = collections.deque(events_to_replay, maxlen=1000)
+            self.chars_in_buffer = num_chars
             
             if self.config.get('debug'):
                 print("✓ Конвертация завершена")
@@ -383,8 +388,9 @@ class LSwitch:
         print(f"✓ Мониторинг {len(devices)} устройств")
         print("-" * 50)
         
-        # КРИТИЧНО: очищаем буфер при старте (убираем события запуска программы)
+        # КРИТИЧНО: очищаем буфер и обновляем снимок выделения при старте
         self.clear_buffer()
+        self.update_selection_snapshot()
         
         # Основной цикл обработки событий
         try:
