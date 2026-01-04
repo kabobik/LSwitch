@@ -65,8 +65,7 @@ class LSwitch:
             'double_click_timeout': 0.3,
             'debug': False,
             'switch_layout_after_convert': True,
-            'layout_switch_key': 'Alt_L+Shift_L',
-            'convert_selection_key': 'KEY_PAUSE'  # Pause/Break для конвертации выделенного
+            'layout_switch_key': 'Alt_L+Shift_L'
         }
         
         if os.path.exists(config_path):
@@ -206,6 +205,17 @@ class LSwitch:
             if self.config.get('debug'):
                 print(f"⚠️  Ошибка переключения раскладки: {e}")
     
+    def has_selection(self):
+        """Проверяет есть ли выделенный текст в PRIMARY selection"""
+        try:
+            result = subprocess.run(
+                ['xclip', '-o', '-selection', 'primary'],
+                capture_output=True, timeout=0.3, text=True
+            )
+            return bool(result.stdout.strip())
+        except Exception:
+            return False
+    
     def convert_and_retype(self):
         """Конвертирует и перепечатывает последнее слово"""
         if self.is_converting or self.chars_in_buffer == 0:
@@ -254,7 +264,17 @@ class LSwitch:
                 if current_time - self.last_shift_press < self.double_click_timeout:
                     if self.config.get('debug'):
                         print("✓ Двойной Shift обнаружен!")
-                    self.convert_and_retype()
+                    
+                    # Интуитивная логика: есть выделение → конвертируем выделенное
+                    if self.has_selection():
+                        if self.config.get('debug'):
+                            print("→ Конвертирую выделенный текст")
+                        self.convert_selection()
+                    else:
+                        if self.config.get('debug'):
+                            print("→ Конвертирую последнее слово")
+                        self.convert_and_retype()
+                    
                     self.last_shift_press = 0
                 else:
                     self.last_shift_press = current_time
@@ -264,15 +284,6 @@ class LSwitch:
         if event.code == ecodes.KEY_ESC and event.value == 0:
             print("Выход...")
             return False
-        
-        # Pause/Break (или другая настроенная клавиша) - конвертация выделенного
-        convert_key_name = self.config.get('convert_selection_key', 'KEY_PAUSE')
-        convert_key_code = getattr(ecodes, convert_key_name, ecodes.KEY_PAUSE)
-        if event.code == convert_key_code and event.value == 0:
-            if self.config.get('debug'):
-                print("✓ Клавиша конвертации выделенного обнаружена!")
-            self.convert_selection()
-            return
         
         # Пробел или Enter - сбрасываем буфер (граница слова)
         if event.code in (ecodes.KEY_SPACE, ecodes.KEY_ENTER) and event.value == 0:
