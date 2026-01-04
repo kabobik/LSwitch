@@ -52,8 +52,9 @@ class LSwitch:
         self.event_buffer = collections.deque(maxlen=1000)
         self.chars_in_buffer = 0
         
-        # Коды клавиш для отслеживания (алфавитно-цифровые, БЕЗ пробела)
+        # Коды клавиш для отслеживания (алфавитно-цифровые + пробел)
         self.active_keycodes = set(range(2, 58))  # От '1' до '/'
+        self.active_keycodes.add(ecodes.KEY_SPACE)  # Добавляем пробел!
         self.active_keycodes.difference_update((15, 28, 29, 56))  # Убираем Tab, Enter, Ctrl, Alt
         
         self.is_converting = False
@@ -323,14 +324,14 @@ class LSwitch:
             print("Выход...")
             return False
         
-        # Пробел или Enter - сбрасываем буфер (граница слова)
-        if event.code in (ecodes.KEY_SPACE, ecodes.KEY_ENTER) and event.value == 0:
+        # Enter - сбрасываем буфер (конец ввода)
+        if event.code == ecodes.KEY_ENTER and event.value == 0:
             self.clear_buffer()
             # Обновляем снимок выделения - теперь старое выделение не считается новым
             self.update_selection_snapshot()
             
             if self.config.get('debug'):
-                print("Буфер очищен (пробел/enter), снимок выделения обновлён")
+                print("Буфер очищен (enter), снимок выделения обновлён")
             return
         
         # Активные клавиши - добавляем в буфер
