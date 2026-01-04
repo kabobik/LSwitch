@@ -119,30 +119,17 @@ class LSwitch:
             return ''.join(EN_TO_RU.get(c, c) for c in text)
     
     def convert_selection(self):
-        """Конвертирует выделенный текст через буфер обмена"""
+        """Конвертирует выделенный текст через PRIMARY selection (без порчи clipboard)"""
         if self.is_converting:
             return
         
         self.is_converting = True
         
         try:
-            # Сохраняем текущий буфер обмена
-            try:
-                clipboard_backup = subprocess.run(
-                    ['xclip', '-o', '-selection', 'clipboard'],
-                    capture_output=True, timeout=0.5, text=True
-                ).stdout
-            except Exception:
-                clipboard_backup = ''
-            
-            # Копируем выделенное
-            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+c'], timeout=0.5)
-            time.sleep(0.05)
-            
-            # Получаем текст
+            # Получаем выделенный текст из PRIMARY selection (не трогаем clipboard!)
             try:
                 selected_text = subprocess.run(
-                    ['xclip', '-o', '-selection', 'clipboard'],
+                    ['xclip', '-o', '-selection', 'primary'],
                     capture_output=True, timeout=0.5, text=True
                 ).stdout
             except Exception:
@@ -155,16 +142,18 @@ class LSwitch:
                 if self.config.get('debug'):
                     print(f"Выделенное: '{selected_text}' -> '{converted}'")
                 
-                # Записываем в буфер
+                # Удаляем выделенное через BackSpace
+                num_chars = len(selected_text)
+                self.tap_key(ecodes.KEY_BACKSPACE, num_chars)
+                
+                time.sleep(0.02)
+                
+                # Печатаем конвертированный текст через xdotool
+                # (не можем через evdev - сложные символы типа кириллицы)
                 subprocess.run(
-                    ['xclip', '-selection', 'clipboard'],
-                    input=converted.encode(), timeout=0.5
+                    ['xdotool', 'type', '--clearmodifiers', '--', converted],
+                    timeout=1, stderr=subprocess.DEVNULL
                 )
-                
-                time.sleep(0.05)
-                
-                # Вставляем
-                subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+v'], timeout=0.5)
                 
                 time.sleep(0.05)
                 
@@ -174,14 +163,6 @@ class LSwitch:
             else:
                 if self.config.get('debug'):
                     print("⚠️  Нет выделенного текста")
-            
-            # Восстанавливаем буфер
-            time.sleep(0.05)
-            if clipboard_backup:
-                subprocess.run(
-                    ['xclip', '-selection', 'clipboard'],
-                    input=clipboard_backup.encode(), timeout=0.5
-                )
                 
         except Exception as e:
             print(f"⚠️  Ошибка конвертации выделенного: {e}")
