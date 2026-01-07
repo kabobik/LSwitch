@@ -29,8 +29,10 @@ echo -e "${YELLOW}📁 Копирование файлов...${NC}"
 # Копируем основной скрипт
 install -m 755 lswitch.py /usr/local/bin/lswitch
 
-# Копируем модуль словаря (для автопереключения)
+# Копируем модули
 install -m 644 dictionary.py /usr/local/bin/dictionary.py
+install -m 644 ngrams.py /usr/local/bin/ngrams.py
+install -m 644 user_dictionary.py /usr/local/bin/user_dictionary.py
 
 # Копируем GUI версии
 install -m 755 lswitch_tray.py /usr/local/bin/lswitch-tray  # Старая версия (запускает процесс)

@@ -55,6 +55,13 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.auto_switch_action.triggered.connect(self.toggle_auto_switch)
         self.menu.addAction(self.auto_switch_action)
         
+        # Чекбокс для пользовательского словаря (самообучение)
+        self.user_dict_action = QAction("📚 Самообучающийся словарь", self.menu)
+        self.user_dict_action.setCheckable(True)
+        self.user_dict_action.setChecked(self.config.get('user_dict_enabled', False))
+        self.user_dict_action.triggered.connect(self.toggle_user_dict)
+        self.menu.addAction(self.user_dict_action)
+        
         self.menu.addSeparator()
         
         # Автозапуск службы
@@ -256,6 +263,24 @@ class LSwitchControlPanel(QSystemTrayIcon):
                 f"Автопереключение {status}",
                 QSystemTrayIcon.Information,
                 2000
+            )
+    
+    def toggle_user_dict(self, checked):
+        """Переключает режим самообучающегося словаря"""
+        self.config['user_dict_enabled'] = checked
+        if self.save_config():
+            # Отправляем сигнал службе для перезагрузки конфига
+            self.reload_service_config()
+            
+            status = "включён" if checked else "выключен"
+            msg = f"Самообучающийся словарь {status}"
+            if checked:
+                msg += "\n\nСистема будет запоминать ваши корректировки"
+            self.showMessage(
+                "LSwitch",
+                msg,
+                QSystemTrayIcon.Information,
+                3000
             )
     
     def reload_service_config(self):

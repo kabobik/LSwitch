@@ -3,5 +3,7 @@
   "debug": true,
   "switch_layout_after_convert": true,
   "layout_switch_key": "Alt_L+Shift_L",
-  "auto_switch": true
+  "auto_switch": true,
+  "user_dict_enabled": true,
+  "user_dict_min_weight": 2
 }
