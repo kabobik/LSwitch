@@ -25,9 +25,17 @@ echo -e "${YELLOW}Остановка сервиса...${NC}"
 systemctl stop lswitch 2>/dev/null || true
 systemctl disable lswitch 2>/dev/null || true
 
+# Останавливаем GUI процессы
+pkill -f lswitch-tray 2>/dev/null || true
+pkill -f lswitch_tray.py 2>/dev/null || true
+
 echo -e "${YELLOW}Удаление файлов...${NC}"
 rm -f /etc/systemd/system/lswitch.service
 rm -f /usr/local/bin/lswitch
+rm -f /usr/local/bin/lswitch-tray
+rm -f /usr/share/pixmaps/lswitch.svg
+rm -f /usr/share/applications/lswitch-tray.desktop
+rm -f /etc/xdg/autostart/lswitch-tray.desktop
 rm -rf /etc/lswitch
 
 echo -e "${YELLOW}Перезагрузка systemd...${NC}"

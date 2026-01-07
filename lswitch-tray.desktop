@@ -1,0 +1,17 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=LSwitch
+Name[ru]=LSwitch
+GenericName=Keyboard Layout Switcher
+GenericName[ru]=Переключатель раскладки клавиатуры
+Comment=Smart keyboard layout switcher with tray icon
+Comment[ru]=Умный переключатель раскладки с иконкой в трее
+Icon=lswitch
+Exec=/usr/local/bin/lswitch-tray
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=keyboard;layout;switch;language;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel

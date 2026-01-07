@@ -12,6 +12,13 @@ import os
 import collections
 import selectors
 import getpass
+import signal
+import threading
+import ctypes
+import ctypes.util
+
+# Добавляем /usr/local/bin в путь для импорта dictionary.py
+sys.path.insert(0, '/usr/local/bin')
 
 try:
     import evdev
@@ -20,6 +27,73 @@ except ImportError:
     print("❌ Ошибка: установите python3-evdev")
     print("   sudo apt install python3-evdev")
     exit(1)
+
+try:
+    from Xlib import display, X
+    XLIB_AVAILABLE = True
+except ImportError as e:
+    XLIB_AVAILABLE = False
+    print(f"⚠️  python-xlib не найден: {e}")
+    print("   sudo apt install python3-xlib")
+
+# Загружаем libX11 для XKB функций
+try:
+    libX11_path = ctypes.util.find_library('X11')
+    if libX11_path:
+        libX11 = ctypes.CDLL(libX11_path)
+        
+        # Структура XkbStateRec для получения состояния XKB
+        class XkbStateRec(ctypes.Structure):
+            _fields_ = [
+                ("group", ctypes.c_ubyte),           # Текущая группа раскладки
+                ("locked_group", ctypes.c_ubyte),
+                ("base_group", ctypes.c_ushort),
+                ("latched_group", ctypes.c_ushort),
+                ("mods", ctypes.c_ubyte),
+                ("base_mods", ctypes.c_ubyte),
+                ("latched_mods", ctypes.c_ubyte),
+                ("locked_mods", ctypes.c_ubyte),
+                ("compat_state", ctypes.c_ubyte),
+                ("grab_mods", ctypes.c_ubyte),
+                ("compat_grab_mods", ctypes.c_ubyte),
+                ("lookup_mods", ctypes.c_ubyte),
+                ("compat_lookup_mods", ctypes.c_ubyte),
+                ("ptr_buttons", ctypes.c_ushort),
+            ]
+        
+        # Настройка XKB функций
+        libX11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        libX11.XOpenDisplay.restype = ctypes.c_void_p
+        
+        libX11.XkbGetState.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(XkbStateRec)]
+        libX11.XkbGetState.restype = ctypes.c_int
+        
+        libX11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        
+        # Функции для получения символов из KeyCode
+        libX11.XkbKeycodeToKeysym.argtypes = [ctypes.c_void_p, ctypes.c_ubyte, ctypes.c_uint, ctypes.c_uint]
+        libX11.XkbKeycodeToKeysym.restype = ctypes.c_ulong
+        
+        libX11.XKeysymToString.argtypes = [ctypes.c_ulong]
+        libX11.XKeysymToString.restype = ctypes.c_char_p
+        
+        XKB_AVAILABLE = True
+    else:
+        XKB_AVAILABLE = False
+        libX11 = None
+        print("⚠️  libX11 не найдена")
+except Exception as e:
+    XKB_AVAILABLE = False
+    libX11 = None
+    print(f"⚠️  Ошибка загрузки XKB: {e}")
+
+# Импортируем словарь для автопереключения
+try:
+    from dictionary import is_likely_wrong_layout
+    DICT_AVAILABLE = True
+except ImportError:
+    DICT_AVAILABLE = False
+    print("⚠️  Словарь не найден, автопереключение недоступно")
 
 
 # Карта переключения EN -> RU
@@ -60,6 +134,22 @@ class LSwitch:
         self.event_buffer = collections.deque(maxlen=1000)
         self.chars_in_buffer = 0
         
+        # Текстовый буфер - реально набранные символы с раскладкой
+        self.text_buffer = []  # Список кортежей (символ, раскладка)
+        
+        # X11 для определения раскладки через XKB
+        self.x11_display = display.Display() if XLIB_AVAILABLE else None
+        self.layouts = self.get_layouts_from_xkb()
+        
+        # Синхронизация текущей раскладки
+        self.current_layout = self.get_current_layout()
+        self.layout_lock = threading.Lock()
+        self.running = True
+        
+        # Запускаем поток мониторинга раскладки
+        self.layout_thread = threading.Thread(target=self.monitor_layout_changes, daemon=True)
+        self.layout_thread.start()
+        
         # Коды клавиш для отслеживания (алфавитно-цифровые + пробел)
         self.active_keycodes = set(range(2, 58))  # От '1' до '/'
         self.active_keycodes.add(ecodes.KEY_SPACE)  # Добавляем пробел!
@@ -81,6 +171,339 @@ class LSwitch:
         
         # Флаг: последний введённый символ был пробелом
         self.last_was_space = False
+        
+        # Для автопереключения
+        self.auto_switch_enabled = self.config.get('auto_switch', False)
+        
+        # Флаг для перезагрузки конфигурации
+        self.config_reload_requested = False
+        
+        # Отслеживание изменений конфига
+        self.config_mtime = os.path.getmtime(self.config.get('_config_path', '/etc/lswitch/config.json'))
+        self.last_config_check = time.time()
+    
+    def get_layouts_from_xkb(self):
+        """Получает список раскладок из XKB конфигурации"""
+        try:
+            root = self.x11_display.screen().root
+            prop = root.get_full_property(
+                self.x11_display.intern_atom('_XKB_RULES_NAMES'),
+                X.AnyPropertyType
+            )
+            if prop:
+                parts = prop.value.decode('utf-8', errors='ignore').split('\x00')
+                if len(parts) >= 3:
+                    layouts_str = parts[2]
+                    layouts = layouts_str.split(',')
+                    # Нормализуем: us -> en
+                    return ['en' if l == 'us' else l for l in layouts]
+        except Exception as e:
+            logging.warning(f"Не удалось получить список раскладок: {e}")
+        return ['en', 'ru']  # Fallback
+    
+    def get_current_layout(self):
+        """Получает текущую активную раскладку через XKB GetState"""
+        if not XKB_AVAILABLE or not libX11:
+            # Fallback к первой раскладке
+            return self.layouts[0] if self.layouts else 'en'
+        
+        try:
+            # Открываем Display
+            display_ptr = libX11.XOpenDisplay(None)
+            if not display_ptr:
+                return self.layouts[0] if self.layouts else 'en'
+            
+            try:
+                # Создаём структуру для результата
+                state = XkbStateRec()
+                
+                # Вызываем XkbGetState (0x100 = XkbUseCoreKbd)
+                status = libX11.XkbGetState(display_ptr, 0x100, ctypes.byref(state))
+                
+                if status == 0:  # Success
+                    group = state.group
+                    # Возвращаем соответствующую раскладку
+                    if group < len(self.layouts):
+                        return self.layouts[group]
+                    else:
+                        return self.layouts[0] if self.layouts else 'en'
+            finally:
+                libX11.XCloseDisplay(display_ptr)
+        except Exception as e:
+            logging.warning(f"Ошибка получения раскладки через XKB: {e}")
+        
+        return self.layouts[0] if self.layouts else 'en'
+    
+    def keycode_to_char(self, keycode, layout='en', shift=False):
+        """Преобразует evdev keycode в символ согласно раскладке используя XKB"""
+        if not XKB_AVAILABLE or not libX11:
+            return ''
+        
+        try:
+            # Открываем Display
+            display_ptr = libX11.XOpenDisplay(None)
+            if not display_ptr:
+                return ''
+            
+            try:
+                # Преобразуем evdev keycode в X11 keycode (evdev + 8)
+                x11_keycode = keycode + 8
+                
+                # Определяем группу раскладки (0=en, 1=ru, ...)
+                group = 0
+                if layout == 'en':
+                    # Ищем индекс английской раскладки
+                    for i, lay in enumerate(self.layouts):
+                        if lay == 'en':
+                            group = i
+                            break
+                elif layout == 'ru':
+                    # Ищем индекс русской раскладки
+                    for i, lay in enumerate(self.layouts):
+                        if lay == 'ru':
+                            group = i
+                            break
+                
+                # level: 0 = без shift, 1 = с shift
+                level = 1 if shift else 0
+                
+                # Получаем KeySym для указанной группы и уровня
+                keysym = libX11.XkbKeycodeToKeysym(display_ptr, x11_keycode, group, level)
+                
+                if keysym == 0:
+                    return ''
+                
+                # Конвертируем KeySym в строку
+                keysym_str = libX11.XKeysymToString(keysym)
+                if not keysym_str:
+                    return ''
+                
+                keysym_name = keysym_str.decode('utf-8')
+                
+                # Простые символы (1 буква) - возвращаем как есть
+                if len(keysym_name) == 1:
+                    return keysym_name
+                
+                # Cyrillic буквы вида "Cyrillic_a" -> "а"
+                if keysym_name.startswith('Cyrillic_'):
+                    cyrillic_map = {
+                        'io': 'ё', 'IO': 'Ё',
+                        'a': 'а', 'A': 'А', 'be': 'б', 'BE': 'Б',
+                        've': 'в', 'VE': 'В', 'ghe': 'г', 'GHE': 'Г',
+                        'de': 'д', 'DE': 'Д', 'ie': 'е', 'IE': 'Е',
+                        'zhe': 'ж', 'ZHE': 'Ж', 'ze': 'з', 'ZE': 'З',
+                        'i': 'и', 'I': 'И', 'shorti': 'й', 'SHORTI': 'Й',
+                        'ka': 'к', 'KA': 'К', 'el': 'л', 'EL': 'Л',
+                        'em': 'м', 'EM': 'М', 'en': 'н', 'EN': 'Н',
+                        'o': 'о', 'O': 'О', 'pe': 'п', 'PE': 'П',
+                        'er': 'р', 'ER': 'Р', 'es': 'с', 'ES': 'С',
+                        'te': 'т', 'TE': 'Т', 'u': 'у', 'U': 'У',
+                        'ef': 'ф', 'EF': 'Ф', 'ha': 'х', 'HA': 'Х',
+                        'tse': 'ц', 'TSE': 'Ц', 'che': 'ч', 'CHE': 'Ч',
+                        'sha': 'ш', 'SHA': 'Ш', 'shcha': 'щ', 'SHCHA': 'Щ',
+                        'hardsign': 'ъ', 'HARDSIGN': 'Ъ',
+                        'yeru': 'ы', 'YERU': 'Ы',
+                        'softsign': 'ь', 'SOFTSIGN': 'Ь',
+                        'e': 'э', 'E': 'Э', 'yu': 'ю', 'YU': 'Ю',
+                        'ya': 'я', 'YA': 'Я'
+                    }
+                    key = keysym_name[9:]  # Убираем "Cyrillic_"
+                    return cyrillic_map.get(key, '')
+                
+                return ''
+                
+            finally:
+                libX11.XCloseDisplay(display_ptr)
+        except Exception as e:
+            if self.config.get('debug'):
+                logging.warning(f"Ошибка keycode_to_char({keycode}, {layout}): {e}")
+            return ''
+    
+    def get_buffer_text(self):
+        """Извлекает текст из буфера событий"""
+        text = []
+        for event in self.event_buffer:
+            if event.value == 0:  # Отпускание клавиши
+                if event.code == ecodes.KEY_BACKSPACE:
+                    if text:
+                        text.pop()
+                elif event.code == ecodes.KEY_SPACE:
+                    text.append(' ')
+                elif event.code in range(2, 14):  # Цифры
+                    keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=']
+                    if event.code - 2 < len(keys):
+                        text.append(keys[event.code - 2])
+                elif event.code in range(16, 28):  # QWERTY верхний ряд
+                    keys = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']']
+                    if event.code - 16 < len(keys):
+                        text.append(keys[event.code - 16])
+                elif event.code in range(30, 41):  # ASDF средний ряд
+                    keys = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', "'"]
+                    if event.code - 30 < len(keys):
+                        text.append(keys[event.code - 30])
+                elif event.code in range(44, 54):  # ZXCV нижний ряд
+                    keys = ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/']
+                    if event.code - 44 < len(keys):
+                        text.append(keys[event.code - 44])
+        return ''.join(text)
+    
+    def monitor_layout_changes(self):
+        """Мониторинг событий смены раскладки через X11 PropertyNotify"""
+        if not XLIB_AVAILABLE:
+            # Фолбэк на опрос если Xlib недоступен
+            last_layout = self.get_current_layout()
+            if self.config.get('debug'):
+                print(f"⚠️  X11 недоступен, используем опрос (раз в секунду, текущая: {last_layout})")
+            
+            while self.running:
+                try:
+                    time.sleep(1)
+                    new_layout = self.get_current_layout()
+                    
+                    with self.layout_lock:
+                        if new_layout != last_layout:
+                            old_layout = last_layout
+                            last_layout = new_layout
+                            self.current_layout = new_layout
+                            
+                            if self.config.get('debug'):
+                                print(f"🔄 Раскладка изменена: {old_layout} → {new_layout}")
+                except Exception as e:
+                    if self.config.get('debug'):
+                        print(f"⚠️  Ошибка опроса раскладки: {e}")
+                    time.sleep(5)
+            return
+        
+        # X11 мониторинг через события
+        try:
+            disp = display.Display()
+            root = disp.screen().root
+            
+            # Подписываемся на PropertyNotify события
+            root.change_attributes(event_mask=X.PropertyChangeMask)
+            
+            if self.config.get('debug'):
+                print(f"✓ X11: Подписка на события смены раскладки активна (текущая: {self.current_layout})")
+            
+            last_check_time = time.time()
+            
+            while self.running:
+                # Проверяем наличие событий
+                while disp.pending_events() > 0:
+                    event = disp.next_event()
+                    
+                    # При PropertyNotify проверяем раскладку
+                    current_time = time.time()
+                    if current_time - last_check_time >= 0.1:  # Не чаще 10 раз/сек
+                        last_check_time = current_time
+                        new_layout = self.get_current_layout()
+                        
+                        with self.layout_lock:
+                            if new_layout != self.current_layout:
+                                old_layout = self.current_layout
+                                self.current_layout = new_layout
+                                
+                                if self.config.get('debug'):
+                                    print(f"🔄 X11: Раскладка изменена {old_layout} → {new_layout}")
+                
+                # Небольшая задержка
+                time.sleep(0.05)
+                
+        except Exception as e:
+            if self.config.get('debug'):
+                print(f"⚠️  Ошибка X11 мониторинга: {e}, переключаемся на опрос")
+            
+            # Фолбэк на опрос при ошибке X11
+            last_layout = self.current_layout
+            while self.running:
+                try:
+                    time.sleep(1)
+                    new_layout = self.get_current_layout()
+                    
+                    with self.layout_lock:
+                        if new_layout != last_layout:
+                            old_layout = last_layout
+                            last_layout = new_layout
+                            self.current_layout = new_layout
+                            
+                            if self.config.get('debug'):
+                                print(f"🔄 Раскладка изменена: {old_layout} → {new_layout}")
+                except:
+                    pass
+    
+    def check_and_auto_convert(self):
+        """Проверяет и автоматически конвертирует при пробеле"""
+        if not self.auto_switch_enabled or not DICT_AVAILABLE:
+            return
+        
+        # Проверяем текущую раскладку - поддерживаем только ru/en
+        if self.current_layout not in ['ru', 'en']:
+            if self.config.get('debug'):
+                print(f"  ⏭️  Пропуск автоконвертации: неподдерживаемая раскладка '{self.current_layout}'")
+            return
+        
+        if self.chars_in_buffer == 0:
+            return
+        
+        # Импортируем словари и функцию конвертации
+        from dictionary import RUSSIAN_WORDS, ENGLISH_WORDS
+        
+        # Получаем слово из текстового буфера
+        text = ''.join(self.text_buffer).strip()
+        
+        if not text:
+            if self.config.get('debug'):
+                print(f"  ⏭️  Пропуск автоконвертации: пустой буфер")
+            return
+        
+        # Определяем раскладку ПО СОДЕРЖИМОМУ текста
+        # Если есть русские буквы - раскладка русская (А-Я, а-я, Ё, ё)
+        has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'Ёё' for c in text)
+        # Если есть латинские буквы - раскладка английская или немецкая
+        has_latin = any('a' <= c.lower() <= 'z' for c in text)
+        
+        if has_cyrillic:
+            text_layout = 'ru'
+        elif has_latin:
+            text_layout = 'en'
+        else:
+            # Нет букв - пропускаем
+            return
+        
+        if self.config.get('debug'):
+            print(f"🔍 Автопроверка: '{text}' (определена раскладка: {text_layout})")
+        
+        # Проверяем в зависимости от раскладки текста
+        needs_convert = False
+        
+        if text_layout == 'en':
+            # Проверяем: слова НЕТ в английском словаре
+            if text.lower() not in ENGLISH_WORDS:
+                # Конвертируем EN->RU и проверяем в русском словаре
+                converted = ''.join(EN_TO_RU.get(c, c) for c in text)
+                if converted.lower() in RUSSIAN_WORDS:
+                    needs_convert = True
+                    if self.config.get('debug'):
+                        print(f"  ✓ Найдено русское слово '{converted}' (набрано в EN)")
+        
+        elif text_layout == 'ru':
+            # Проверяем: слова НЕТ в русском словаре
+            if text.lower() not in RUSSIAN_WORDS:
+                # Конвертируем RU->EN и проверяем в английском словаре
+                converted = ''.join(RU_TO_EN.get(c, c) for c in text)
+                if converted.lower() in ENGLISH_WORDS:
+                    needs_convert = True
+                    if self.config.get('debug'):
+                        print(f"  ✓ Найдено английское слово '{converted}' (набрано в RU)")
+        
+        if needs_convert:
+            if self.config.get('debug'):
+                print(f"🤖 Автоконвертация: '{text}'")
+            # Используем ту же функцию что и для двойного Shift
+            self.convert_and_retype()
+        else:
+            if self.config.get('debug'):
+                print(f"  ⏭️  Слово корректное, конвертация не нужна")
     
     def load_config(self, config_path):
         """Загружает конфигурацию из файла"""
@@ -88,7 +511,8 @@ class LSwitch:
             'double_click_timeout': 0.3,
             'debug': False,
             'switch_layout_after_convert': True,
-            'layout_switch_key': 'Alt_L+Shift_L'
+            'layout_switch_key': 'Alt_L+Shift_L',
+            'auto_switch': False
         }
         
         if os.path.exists(config_path):
@@ -101,6 +525,24 @@ class LSwitch:
                 print(f"⚠️  Ошибка чтения конфига: {e}")
         
         return default_config
+    
+    def reload_config(self):
+        """Перезагружает конфигурацию без перезапуска"""
+        print("🔄 Перезагрузка конфигурации...", flush=True)
+        old_config = self.config.copy()
+        self.config = self.load_config(self.config.get('_config_path', '/etc/lswitch/config.json'))
+        
+        # Обновляем параметры
+        self.double_click_timeout = self.config.get('double_click_timeout', 0.3)
+        self.auto_switch_enabled = self.config.get('auto_switch', False)
+        
+        # Показываем что изменилось
+        if old_config.get('auto_switch') != self.auto_switch_enabled:
+            status = "включено" if self.auto_switch_enabled else "выключено"
+            print(f"✓ Автопереключение {status}", flush=True)
+        
+        print("✓ Конфигурация перезагружена", flush=True)
+        self.config_reload_requested = False
     
     def tap_key(self, keycode, n_times=1):
         """Эмулирует нажатие клавиши через виртуальную клавиатуру"""
@@ -120,25 +562,35 @@ class LSwitch:
             self.fake_kb.syn()
     
     def clear_buffer(self):
-        """Очищает буфер событий"""
+        """Очищает буфер событий и текстовый буфер"""
         self.event_buffer.clear()
         self.chars_in_buffer = 0
+        self.text_buffer.clear()
     
     def convert_text(self, text):
-        """Конвертирует текст между раскладками"""
+        """Конвертирует текст между раскладками с сохранением регистра"""
         if not text:
             return text
         
         # Определяем раскладку по количеству символов
-        ru_chars = sum(1 for c in text if c in RU_TO_EN)
-        en_chars = sum(1 for c in text if c in EN_TO_RU)
+        ru_chars = sum(1 for c in text.lower() if c in RU_TO_EN)
+        en_chars = sum(1 for c in text.lower() if c in EN_TO_RU)
         
+        result = []
         if ru_chars > en_chars:
             # Конвертируем RU -> EN
-            return ''.join(RU_TO_EN.get(c, c) for c in text)
+            for c in text:
+                is_upper = c.isupper()
+                converted = RU_TO_EN.get(c.lower(), c)
+                result.append(converted.upper() if is_upper else converted)
         else:
             # Конвертируем EN -> RU
-            return ''.join(EN_TO_RU.get(c, c) for c in text)
+            for c in text:
+                is_upper = c.isupper()
+                converted = EN_TO_RU.get(c.lower(), c)
+                result.append(converted.upper() if is_upper else converted)
+        
+        return ''.join(result)
     
     def convert_selection(self):
         """Конвертирует выделенный текст через PRIMARY selection (без порчи clipboard)"""
@@ -406,18 +858,29 @@ class LSwitch:
             # Считаем символы (только при отпускании клавиши)
             if event.value == 0:  # Отпускание
                 if event.code == ecodes.KEY_BACKSPACE:
-                    # Backspace уменьшает счётчик, но остаётся в буфере для воспроизведения
+                    # Backspace уменьшает счётчик и удаляет символ из текстового буфера
                     if self.chars_in_buffer > 0:
                         self.chars_in_buffer -= 1
+                        if self.text_buffer:
+                            self.text_buffer.pop()
                 elif event.code not in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
                     self.chars_in_buffer += 1
+                    # Добавляем реальный символ в текстовый буфер
+                    # Получаем раскладку напрямую из системы в момент нажатия
+                    layout = self.get_current_layout()
+                    char = self.keycode_to_char(event.code, layout)
+                    if char:
+                        self.text_buffer.append(char)
                     
                 # Запоминаем если это был пробел
                 if event.code == ecodes.KEY_SPACE:
                     self.last_was_space = True
-            
-            if self.config.get('debug'):
-                print(f"Буфер: {self.chars_in_buffer} символов")
+                    # При пробеле показываем буфер и проверяем автопереключение (только при нажатии)
+                    if event.value == 1:  # Только при нажатии, не при отпускании или повторе
+                        if self.config.get('debug') and len(self.text_buffer) > 0:
+                            print(f"Буфер: {self.chars_in_buffer} символов, текст: '{''.join(self.text_buffer)}'")
+                        self.check_and_auto_convert()
+
         
         # Любая другая клавиша очищает буфер
         else:
@@ -440,13 +903,30 @@ class LSwitch:
         # Регистрируем все устройства ввода, кроме нашей виртуальной клавиатуры
         devices = []
         for path in evdev.list_devices():
-            device = evdev.InputDevice(path)
-            # КРИТИЧНО: пропускаем нашу виртуальную клавиатуру!
-            if device.name != self.fake_kb_name:
+            try:
+                device = evdev.InputDevice(path)
+                # КРИТИЧНО: пропускаем нашу виртуальную клавиатуру!
+                if device.name == self.fake_kb_name:
+                    continue
+                
+                # Проверяем что это клавиатура (имеет KEY события)
+                caps = device.capabilities()
+                if ecodes.EV_KEY not in caps:
+                    continue
+                
+                # Проверяем что есть хотя бы базовые клавиши клавиатуры
+                keys = caps.get(ecodes.EV_KEY, [])
+                if not keys or ecodes.KEY_A not in keys:
+                    continue
+                
                 device_selector.register(device, selectors.EVENT_READ)
                 devices.append(device)
                 if self.config.get('debug'):
                     print(f"   Подключено: {device.name}")
+            except (OSError, PermissionError) as e:
+                # Пропускаем устройства к которым нет доступа
+                if self.config.get('debug'):
+                    print(f"   Пропущено {path}: {e}")
         
         if not devices:
             print("❌ Не найдено устройств ввода")
@@ -462,7 +942,25 @@ class LSwitch:
         # Основной цикл обработки событий
         try:
             while True:
-                for key, mask in device_selector.select():
+                # Проверяем изменение файла конфигурации раз в секунду
+                current_time = time.time()
+                if current_time - self.last_config_check >= 1.0:
+                    self.last_config_check = current_time
+                    config_path = self.config.get('_config_path', '/etc/lswitch/config.json')
+                    try:
+                        current_mtime = os.path.getmtime(config_path)
+                        if current_mtime != self.config_mtime:
+                            self.config_mtime = current_mtime
+                            print(f"📝 Обнаружено изменение {config_path}", flush=True)
+                            self.reload_config()
+                    except OSError:
+                        pass  # Файл не существует или недоступен
+                
+                # Проверяем флаг перезагрузки конфигурации (для SIGHUP)
+                if self.config_reload_requested:
+                    self.reload_config()
+                
+                for key, mask in device_selector.select(timeout=0.1):
                     device = key.fileobj
                     for event in device.read():
                         # Клик мыши очищает буфер (новый контекст)
@@ -500,8 +998,17 @@ def main():
     print("   Ctrl+C = выход", flush=True)
     print(flush=True)
     
+    # Создаем экземпляр приложения
+    app = LSwitch()
+    
+    # Обработчик SIGHUP для перезагрузки конфигурации
+    def handle_sighup(signum, frame):
+        print("📥 Получен сигнал SIGHUP - запрос перезагрузки конфига", flush=True)
+        app.config_reload_requested = True
+    
+    signal.signal(signal.SIGHUP, handle_sighup)
+    
     try:
-        app = LSwitch()
         app.run()
     except Exception as e:
         print(f"❌ Критическая ошибка: {e}", flush=True)

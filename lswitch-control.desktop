@@ -1,0 +1,17 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=LSwitch Control Panel
+Name[ru]=Панель управления LSwitch
+GenericName=Keyboard Layout Switcher Control
+GenericName[ru]=Панель управления переключателем раскладки
+Comment=Control panel for LSwitch systemd service
+Comment[ru]=Панель управления службой LSwitch
+Icon=lswitch
+Exec=/usr/local/bin/lswitch-control
+Terminal=false
+Categories=Utility;Settings;
+Keywords=keyboard;layout;switch;language;control;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel

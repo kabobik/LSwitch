@@ -23,47 +23,15 @@ fi
 
 echo -e "${YELLOW}📦 Установка зависимостей...${NC}"
 apt-get update -qq
-apt-get install -y python3-evdev python3-pyqt5 xclip xdotool
+apt-get install -y python3-evdev
 
 echo -e "${YELLOW}📁 Копирование файлов...${NC}"
 # Копируем основной скрипт
 install -m 755 lswitch.py /usr/local/bin/lswitch
 
-# Копируем модуль словаря (для автопереключения)
-install -m 644 dictionary.py /usr/local/bin/dictionary.py
-
-# Копируем GUI версии
-install -m 755 lswitch_tray.py /usr/local/bin/lswitch-tray  # Старая версия (запускает процесс)
-install -m 755 lswitch_control.py /usr/local/bin/lswitch-control  # Новая версия (панель управления)
-
-# Копируем иконку
-install -Dm644 lswitch.svg /usr/share/pixmaps/lswitch.svg
-
-# Устанавливаем .desktop файлы
-install -Dm644 lswitch-tray.desktop /usr/share/applications/lswitch-tray.desktop
-install -Dm644 lswitch-control.desktop /usr/share/applications/lswitch-control.desktop
-# Автозапуск: используем новую панель управления
-install -Dm644 lswitch-control.desktop /etc/xdg/autostart/lswitch-control.desktop
-
 # Создаём директорию конфигурации
 mkdir -p /etc/lswitch
-install -m 664 config.json /etc/lswitch/config.json
-# Делаем доступным для группы input (для GUI без sudo)
-chgrp input /etc/lswitch/config.json 2>/dev/null || true
-
-echo -e "${YELLOW}🔐 Настройка прав доступа (input devices)...${NC}"
-# Устанавливаем udev правило для доступа к input устройствам
-install -Dm644 99-lswitch.rules /etc/udev/rules.d/99-lswitch.rules
-
-# Перезагружаем udev правила
-udevadm control --reload-rules
-udevadm trigger
-
-# Создаём группу input если её нет
-if ! getent group input > /dev/null 2>&1; then
-    groupadd -r input
-    echo -e "   ✓ Группа input создана"
-fi
+install -m 644 config.json /etc/lswitch/config.json
 
 echo -e "${YELLOW}⚙️  Установка systemd сервиса...${NC}"
 
@@ -80,13 +48,6 @@ if [ -z "$X_USER" ]; then
 fi
 
 echo -e "   Пользователь X-сессии: ${GREEN}$X_USER${NC}"
-
-# Добавляем пользователя в группу input (для работы без root)
-usermod -a -G input $X_USER
-echo -e "   ✓ Пользователь $X_USER добавлен в группу 'input'"
-echo -e "   ${YELLOW}⚠️  ВАЖНО: Перелогиньтесь для применения прав!${NC}"
-echo
-
 X_AUTH="/home/$X_USER/.Xauthority"
 
 # Копируем unit файл и подставляем переменные

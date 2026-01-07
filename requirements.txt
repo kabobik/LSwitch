@@ -1,3 +1,4 @@
-# LSwitch требует python3-evdev
-# Установите: sudo apt install python3-evdev
-# (pip install evdev не рекомендуется для системных утилит)
+# LSwitch требует python3-evdev и python3-pyqt5 для GUI
+# Установите: sudo apt install python3-evdev python3-pyqt5 python3-xlib
+# (pip install evdev PyQt5 python-xlib не рекомендуется для системных утилит)
+python-xlib

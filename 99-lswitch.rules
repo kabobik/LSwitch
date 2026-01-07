@@ -1,0 +1,8 @@
+# udev rules для LSwitch
+# Даёт группе input доступ к устройствам ввода
+
+# Все устройства ввода доступны группе input
+KERNEL=="event*", SUBSYSTEM=="input", MODE="0660", GROUP="input"
+
+# Альтернативно: только клавиатуры
+# KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_KEYBOARD}=="1", MODE="0660", GROUP="input"
