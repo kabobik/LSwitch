@@ -95,6 +95,15 @@ except ImportError:
     DICT_AVAILABLE = False
     print("⚠️  Словарь не найден, автопереключение недоступно")
 
+# Импортируем пользовательский словарь для самообучения
+try:
+    from user_dictionary import UserDictionary
+    USER_DICT_AVAILABLE = True
+except ImportError:
+    USER_DICT_AVAILABLE = False
+    if os.path.exists('/usr/local/bin/user_dictionary.py'):
+        print("⚠️  user_dictionary.py найден но не импортируется")
+
 
 # Карта переключения EN -> RU
 EN_TO_RU = {
@@ -133,6 +142,7 @@ class LSwitch:
         # Буфер событий для повторного ввода
         self.event_buffer = collections.deque(maxlen=1000)
         self.chars_in_buffer = 0
+        self.had_backspace = False  # Флаг: был ли backspace (пользователь исправляет)
         
         # Текстовый буфер - реально набранные символы с раскладкой
         self.text_buffer = []  # Список кортежей (символ, раскладка)
@@ -145,6 +155,21 @@ class LSwitch:
         self.current_layout = self.get_current_layout()
         self.layout_lock = threading.Lock()
         self.running = True
+        
+        # Пользовательский словарь для самообучения
+        self.user_dict = None
+        self.last_auto_convert = None  # {"word": original, "converted_to": result, "time": timestamp, "lang": lang}
+        if USER_DICT_AVAILABLE and self.config.get('user_dict_enabled', False):
+            try:
+                self.user_dict = UserDictionary()
+                min_weight = self.config.get('user_dict_min_weight', 2)
+                self.user_dict.data['settings']['min_weight'] = min_weight
+                if self.config.get('debug'):
+                    stats = self.user_dict.get_stats()
+                    print(f"📚 UserDict загружен: {stats['total_words']} слов, {stats['protected_words']} защищённых")
+            except Exception as e:
+                print(f"⚠️  Ошибка загрузки UserDict: {e}")
+                self.user_dict = None
         
         # Запускаем поток мониторинга раскладки
         self.layout_thread = threading.Thread(target=self.monitor_layout_changes, daemon=True)
@@ -432,8 +457,14 @@ class LSwitch:
                     pass
     
     def check_and_auto_convert(self):
-        """Проверяет и автоматически конвертирует при пробеле"""
+        """Проверяет и автоматически конвертирует при пробеле используя n-граммный анализ"""
         if not self.auto_switch_enabled or not DICT_AVAILABLE:
+            return
+        
+        # Защита: Если был backspace - пользователь контролирует, не трогаем
+        if self.had_backspace:
+            if self.config.get('debug'):
+                print(f"  ⏭️  Пропуск: был backspace (пользователь исправляет)")
             return
         
         # Проверяем текущую раскладку - поддерживаем только ru/en
@@ -445,10 +476,7 @@ class LSwitch:
         if self.chars_in_buffer == 0:
             return
         
-        # Импортируем словари и функцию конвертации
-        from dictionary import RUSSIAN_WORDS, ENGLISH_WORDS
-        
-        # Получаем слово из текстового буфера
+        # Получаем текст из буфера
         text = ''.join(self.text_buffer).strip()
         
         if not text:
@@ -456,54 +484,70 @@ class LSwitch:
                 print(f"  ⏭️  Пропуск автоконвертации: пустой буфер")
             return
         
-        # Определяем раскладку ПО СОДЕРЖИМОМУ текста
-        # Если есть русские буквы - раскладка русская (А-Я, а-я, Ё, ё)
-        has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'Ёё' for c in text)
-        # Если есть латинские буквы - раскладка английская или немецкая
-        has_latin = any('a' <= c.lower() <= 'z' for c in text)
-        
-        if has_cyrillic:
-            text_layout = 'ru'
-        elif has_latin:
-            text_layout = 'en'
-        else:
-            # Нет букв - пропускаем
-            return
-        
-        if self.config.get('debug'):
-            print(f"🔍 Автопроверка: '{text}' (определена раскладка: {text_layout})")
-        
-        # Проверяем в зависимости от раскладки текста
-        needs_convert = False
-        
-        if text_layout == 'en':
-            # Проверяем: слова НЕТ в английском словаре
-            if text.lower() not in ENGLISH_WORDS:
-                # Конвертируем EN->RU и проверяем в русском словаре
-                converted = ''.join(EN_TO_RU.get(c, c) for c in text)
-                if converted.lower() in RUSSIAN_WORDS:
-                    needs_convert = True
-                    if self.config.get('debug'):
-                        print(f"  ✓ Найдено русское слово '{converted}' (набрано в EN)")
-        
-        elif text_layout == 'ru':
-            # Проверяем: слова НЕТ в русском словаре
-            if text.lower() not in RUSSIAN_WORDS:
-                # Конвертируем RU->EN и проверяем в английском словаре
-                converted = ''.join(RU_TO_EN.get(c, c) for c in text)
-                if converted.lower() in ENGLISH_WORDS:
-                    needs_convert = True
-                    if self.config.get('debug'):
-                        print(f"  ✓ Найдено английское слово '{converted}' (набрано в RU)")
-        
-        if needs_convert:
+        # Используем n-граммный анализ для оценки вариантов
+        try:
+            from ngrams import should_convert
+            
+            # Передаём user_dict для проверки защищённых слов
+            should_conv, best_text, reason = should_convert(text, threshold=150, user_dict=self.user_dict)
+            
             if self.config.get('debug'):
-                print(f"🤖 Автоконвертация: '{text}'")
-            # Используем ту же функцию что и для двойного Shift
-            self.convert_and_retype()
-        else:
+                print(f"🔍 N-грамм анализ: '{text}'")
+                print(f"  → {reason}")
+            
+            if should_conv:
+                if self.config.get('debug'):
+                    print(f"🤖 Автоконвертация: '{text}' → '{best_text}'")
+                
+                # Сохраняем информацию для отслеживания корректировок пользователем
+                if self.user_dict:
+                    # Определяем язык по СОДЕРЖИМОМУ текста (а не по раскладке клавиатуры)
+                    has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in text)
+                    text_lang = 'ru' if has_cyrillic else 'en'
+                    
+                    self.last_auto_convert = {
+                        "word": text,
+                        "converted_to": best_text,
+                        "time": time.time(),
+                        "lang": text_lang  # Язык ТЕКСТА, не раскладки клавиатуры
+                    }
+                
+                self.convert_and_retype()
+            else:
+                if self.config.get('debug'):
+                    print(f"  ⏭️  Конвертация не требуется")
+                    
+        except ImportError:
+            # Фолбэк на старую логику если ngrams.py недоступен
             if self.config.get('debug'):
-                print(f"  ⏭️  Слово корректное, конвертация не нужна")
+                print(f"⚠️  ngrams.py недоступен, используем базовую логику")
+            self._check_with_dictionary(text)
+        except Exception as e:
+            if self.config.get('debug'):
+                print(f"⚠️  Ошибка автоконвертации: {e}")
+    
+    def _check_with_dictionary(self, text):
+        """Фолбэк проверка через словарь (старая логика)"""
+        try:
+            from dictionary import check_word, convert_text
+            
+            # Проверяем оригинальный текст
+            is_correct, _ = check_word(text, self.current_layout)
+            
+            if not is_correct:
+                # Пробуем конвертировать
+                converted = convert_text(text, self.current_layout)
+                is_conv_correct, _ = check_word(converted, 
+                    'en' if self.current_layout == 'ru' else 'ru')
+                
+                if is_conv_correct:
+                    if self.config.get('debug'):
+                        print(f"🤖 Автоконвертация (словарь): '{text}' → '{converted}'")
+                    self.convert_and_retype()
+                    
+        except Exception as e:
+            if self.config.get('debug'):
+                print(f"⚠️  Ошибка словаря: {e}")
     
     def load_config(self, config_path):
         """Загружает конфигурацию из файла"""
@@ -565,7 +609,11 @@ class LSwitch:
         """Очищает буфер событий и текстовый буфер"""
         self.event_buffer.clear()
         self.chars_in_buffer = 0
+        self.had_backspace = False  # Сбрасываем флаг при очистке
         self.text_buffer.clear()
+        # Очищаем last_auto_convert при сбросе буфера (новый контекст)
+        if hasattr(self, 'last_auto_convert'):
+            self.last_auto_convert = None
     
     def convert_text(self, text):
         """Конвертирует текст между раскладками с сохранением регистра"""
@@ -740,6 +788,26 @@ class LSwitch:
         
         self.is_converting = True
         
+        # Проверяем: это корректировка пользователя после автоконвертации?
+        if self.user_dict and self.last_auto_convert:
+            time_since_auto = time.time() - self.last_auto_convert['time']
+            timeout = self.user_dict.data['settings'].get('correction_timeout', 5.0)
+            
+            if time_since_auto < timeout:
+                # Пользователь делает ручную корректировку - добавляем в словарь
+                original_word = self.last_auto_convert['word']
+                original_lang = self.last_auto_convert['lang']
+                
+                self.user_dict.add_correction(original_word, original_lang, debug=self.config.get('debug'))
+                
+                if self.config.get('debug'):
+                    protected, weight = self.user_dict.is_protected(original_word, original_lang)
+                    status = f"защищено (вес: {weight})" if protected else f"вес: {weight}"
+                    print(f"📚 Корректировка обнаружена: '{original_word}' → {status}")
+            
+            # Очищаем после обработки
+            self.last_auto_convert = None
+        
         try:
             if self.config.get('debug'):
                 print(f"Конвертирую {self.chars_in_buffer} символов...")
@@ -859,6 +927,7 @@ class LSwitch:
             if event.value == 0:  # Отпускание
                 if event.code == ecodes.KEY_BACKSPACE:
                     # Backspace уменьшает счётчик и удаляет символ из текстового буфера
+                    self.had_backspace = True  # Помечаем что был backspace
                     if self.chars_in_buffer > 0:
                         self.chars_in_buffer -= 1
                         if self.text_buffer:
@@ -875,10 +944,11 @@ class LSwitch:
                 # Запоминаем если это был пробел
                 if event.code == ecodes.KEY_SPACE:
                     self.last_was_space = True
-                    # При пробеле показываем буфер и проверяем автопереключение (только при нажатии)
-                    if event.value == 1:  # Только при нажатии, не при отпускании или повторе
-                        if self.config.get('debug') and len(self.text_buffer) > 0:
-                            print(f"Буфер: {self.chars_in_buffer} символов, текст: '{''.join(self.text_buffer)}'")
+                    # При пробеле показываем буфер и проверяем автопереключение (при отпускании)
+                    if event.value == 0:  # При отпускании клавиши
+                        if self.config.get('debug'):
+                            if len(self.text_buffer) > 0:
+                                print(f"Буфер: {self.chars_in_buffer} символов, текст: '{''.join(self.text_buffer)}'")
                         self.check_and_auto_convert()
 
         

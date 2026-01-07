@@ -1,7 +1,7 @@
 {
   "double_click_timeout": 0.3,
-  "debug": false,
+  "debug": true,
   "switch_layout_after_convert": true,
   "layout_switch_key": "Alt_L+Shift_L",
-  "auto_switch": false
+  "auto_switch": true
 }

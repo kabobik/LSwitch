@@ -168,6 +168,21 @@ def detect_language(word: str) -> str:
     return 'unknown'
 
 
+# Карты конвертации раскладок
+EN_TO_RU = str.maketrans(
+    'qwertyuiop[]asdfghjkl;\'zxcvbnm,./`'
+    'QWERTYUIOP{}ASDFGHJKL:"ZXCVBNM<>?~',
+    'йцукенгшщзхъфывапролджэячсмитьбю.ё'
+    'ЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,Ё'
+)
+
+RU_TO_EN = str.maketrans(
+    'йцукенгшщзхъфывапролджэячсмитьбю.ё'
+    'ЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,Ё',
+    'qwertyuiop[]asdfghjkl;\'zxcvbnm,./`'
+    'QWERTYUIOP{}ASDFGHJKL:"ZXCVBNM<>?~'
+)
+
 def is_likely_wrong_layout(word: str, current_layout: str) -> bool:
     """
     Проверяет, вероятно ли слово набрано в неправильной раскладке
