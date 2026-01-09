@@ -53,7 +53,9 @@ class CustomMenuItem(QWidget):
     def setIcon(self, icon):
         """Обновляет иконку элемента"""
         if not icon.isNull():
-            self.icon_label.setPixmap(icon.pixmap(QSize(24, 24)))
+            pixmap = icon.pixmap(QSize(24, 24))
+            self.icon_label.setPixmap(pixmap)
+            self.icon_label.update()  # Принудительно перерисовываем
         else:
             self.icon_label.clear()
     
