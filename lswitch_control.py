@@ -15,7 +15,7 @@ import time
 from PyQt5.QtWidgets import (QApplication, QSystemTrayIcon, QAction,
                              QMessageBox, QLabel)
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPalette, QCursor
-from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint
+from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, QSize
 
 # Импортируем адаптеры
 sys.path.insert(0, '/home/anton/VsCode/LSwitch')
