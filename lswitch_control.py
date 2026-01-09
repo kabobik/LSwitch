@@ -70,21 +70,6 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.layout_timer.timeout.connect(self.check_and_publish_layouts)
         self.layout_timer.start(300000)  # Каждые 5 минут (редко = меньше глюков)
     
-    def update_checkbox_icon(self, action, checked):
-        """Обновляет иконку чекбокса (галочка или пустой квадрат)"""
-        if checked:
-            # Создаём новую иконку каждый раз, чтобы избежать кэширования
-            icon = QIcon.fromTheme("checkbox-checked", QIcon.fromTheme("emblem-checked"))
-            # Принудительно создаём копию pixmap
-            pixmap = icon.pixmap(QSize(24, 24)).copy()
-            new_icon = QIcon(pixmap)
-            action.setIcon(new_icon)
-        else:
-            icon = QIcon.fromTheme("checkbox", QIcon.fromTheme("emblem-default"))
-            pixmap = icon.pixmap(QSize(24, 24)).copy()
-            new_icon = QIcon(pixmap)
-            action.setIcon(new_icon)
-    
     def create_tray_menu(self):
         """Создаёт контекстное меню трея через адаптер"""
         # Создаём меню через адаптер
@@ -144,23 +129,26 @@ class LSwitchControlPanel(QSystemTrayIcon):
             self.menu.addMenu(service_menu)
             self.menu.addSeparator()
         
-        # Автопереключение (использует иконки вместо чекбокса)
+        # Автопереключение (настоящий checkable action)
         self.auto_switch_action = QAction("Автопереключение", self)
+        self.auto_switch_action.setCheckable(True)
+        self.auto_switch_action.setChecked(self.auto_switch_checked)
         self.auto_switch_action.triggered.connect(self.toggle_auto_switch)
-        self.update_checkbox_icon(self.auto_switch_action, self.auto_switch_checked)
         self.menu.addAction(self.auto_switch_action)
         
-        # Самообучающийся словарь (использует иконки вместо чекбокса)
+        # Самообучающийся словарь (настоящий checkable action)
         self.user_dict_action = QAction("Самообучающийся словарь", self)
+        self.user_dict_action.setCheckable(True)
+        self.user_dict_action.setChecked(self.user_dict_checked)
         self.user_dict_action.triggered.connect(self.toggle_user_dict)
-        self.update_checkbox_icon(self.user_dict_action, self.user_dict_checked)
         self.menu.addAction(self.user_dict_action)
         
-        # Автозапуск (использует иконки вместо чекбокса)
+        # Автозапуск (настоящий checkable action)
         self.autostart_action = QAction("Автозапуск службы", self)
-        self.autostart_action.triggered.connect(self.toggle_autostart)
+        self.autostart_action.setCheckable(True)
         self.autostart_checked = self.get_service_status() == 'enabled'
-        self.update_checkbox_icon(self.autostart_action, self.autostart_checked)
+        self.autostart_action.setChecked(self.autostart_checked)
+        self.autostart_action.triggered.connect(self.toggle_autostart)
         self.menu.addAction(self.autostart_action)
         
         self.menu.addSeparator()
@@ -424,7 +412,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
         """Переключает режим автопереключения"""
         self.auto_switch_checked = not self.auto_switch_checked
         self.config['auto_switch'] = self.auto_switch_checked
-        self.update_checkbox_icon(self.auto_switch_action, self.auto_switch_checked)
+        self.auto_switch_action.setChecked(self.auto_switch_checked)
         if self.save_config():
             # Отправляем сигнал службе для перезагрузки конфига
             self.reload_service_config()
@@ -441,7 +429,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
         """Переключает самообучающийся словарь"""
         self.user_dict_checked = not self.user_dict_checked
         self.config['user_dict_enabled'] = self.user_dict_checked
-        self.update_checkbox_icon(self.user_dict_action, self.user_dict_checked)
+        self.user_dict_action.setChecked(self.user_dict_checked)
         if self.save_config():
             # Отправляем сигнал службе для перезагрузки конфига
             self.reload_service_config()
@@ -477,11 +465,12 @@ class LSwitchControlPanel(QSystemTrayIcon):
                 QSystemTrayIcon.Information,
                 2000
             )
-            # Обновляем иконку чекбокса
-            self.update_checkbox_icon(self.autostart_action, self.autostart_checked)
+            # Обновляем состояние чекбокса
+            self.autostart_action.setChecked(self.autostart_checked)
         else:
             # Откатываем изменение
             self.autostart_checked = not self.autostart_checked
+            self.autostart_action.setChecked(self.autostart_checked)
             self.showMessage(
                 "Ошибка",
                 f"Не удалось изменить автозапуск",

@@ -4,7 +4,7 @@
 import sys
 sys.path.insert(0, '/home/anton/VsCode/LSwitch')
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QSize
 from PyQt5.QtWidgets import QDesktopWidget
 from PyQt5.QtGui import QIcon
@@ -16,12 +16,14 @@ class CustomMenuItem(QWidget):
     """Кастомный пункт меню с темной темой"""
     clicked = pyqtSignal()
     
-    def __init__(self, text, icon=None, bg_color=(46,46,51), fg_color=(255,255,255)):
+    def __init__(self, text, icon=None, bg_color=(46,46,51), fg_color=(255,255,255), checkable=False):
         super().__init__()
         self.bg_color = bg_color
         self.fg_color = fg_color
         self.hover_color = tuple(min(255, c + 20) for c in bg_color)
         self._enabled = True
+        self.checkable = checkable
+        self.checkbox = None
         
         self.setMinimumHeight(48)
         self.setCursor(Qt.PointingHandCursor)
@@ -30,12 +32,35 @@ class CustomMenuItem(QWidget):
         layout.setContentsMargins(20, 12, 20, 12)
         layout.setSpacing(18)
         
-        # Всегда создаём icon_label для возможности обновления
-        self.icon_label = QLabel()
-        self.icon_label.setFixedSize(24, 24)
-        if icon and not icon.isNull():
-            self.icon_label.setPixmap(icon.pixmap(QSize(24, 24)))
-        layout.addWidget(self.icon_label)
+        # Если это checkable элемент, добавляем чекбокс
+        if checkable:
+            self.checkbox = QCheckBox()
+            self.checkbox.setStyleSheet(f"""
+                QCheckBox::indicator {{
+                    width: 20px;
+                    height: 20px;
+                }}
+                QCheckBox::indicator:unchecked {{
+                    background-color: rgb(60, 60, 65);
+                    border: 1px solid rgb(100, 100, 105);
+                    border-radius: 3px;
+                }}
+                QCheckBox::indicator:checked {{
+                    background-color: rgb(52, 152, 219);
+                    border: 1px solid rgb(41, 128, 185);
+                    border-radius: 3px;
+                }}
+            """)
+            self.checkbox.setAttribute(Qt.WA_TransparentForMouseEvents)  # Не перехватывает клики
+            layout.addWidget(self.checkbox)
+            self.icon_label = None
+        else:
+            # Иконка для обычных пунктов
+            self.icon_label = QLabel()
+            self.icon_label.setFixedSize(24, 24)
+            if icon and not icon.isNull():
+                self.icon_label.setPixmap(icon.pixmap(QSize(24, 24)))
+            layout.addWidget(self.icon_label)
         
         self.label = QLabel(text)
         self.label.setStyleSheet(f"""
@@ -50,13 +75,25 @@ class CustomMenuItem(QWidget):
         
         self.updateStyle(False)
     
+    def setChecked(self, checked):
+        """Устанавливает состояние чекбокса"""
+        if self.checkbox:
+            self.checkbox.setChecked(checked)
+    
+    def isChecked(self):
+        """Возвращает состояние чекбокса"""
+        if self.checkbox:
+            return self.checkbox.isChecked()
+        return False
+    
     def setIcon(self, icon):
         """Обновляет иконку элемента"""
-        if not icon.isNull():
+        if self.icon_label and not icon.isNull():
             pixmap = icon.pixmap(QSize(24, 24))
             self.icon_label.setPixmap(pixmap)
-            self.icon_label.update()  # Принудительно перерисовываем
-        else:
+            self.icon_label.repaint()
+            self.update()
+        elif self.icon_label:
             self.icon_label.clear()
     
     def setEnabled(self, enabled):
@@ -131,9 +168,9 @@ class CustomMenu(QWidget):
         
         self.items = []
     
-    def addItem(self, text, callback=None, icon=None):
+    def addItem(self, text, callback=None, icon=None, checkable=False):
         """Добавить пункт меню"""
-        item = CustomMenuItem(text, icon, self.bg_color, self.fg_color)
+        item = CustomMenuItem(text, icon, self.bg_color, self.fg_color, checkable=checkable)
         if callback:
             item.clicked.connect(callback)
         self.layout.addWidget(item)
@@ -184,27 +221,41 @@ class QMenuWrapper:
             text = action.text()
             enabled = action.isEnabled()
             icon = action.icon()
+            checkable = action.isCheckable()
             
-            # Создаём CustomMenuItem с иконкой
-            item = self.custom_menu.addItem(text, None, icon)
+            # Создаём CustomMenuItem с иконкой или чекбоксом
+            item = self.custom_menu.addItem(text, None, icon, checkable=checkable)
             item.setEnabled(enabled)
             
+            # Если checkable, синхронизируем состояние
+            if checkable:
+                item.setChecked(action.isChecked())
+            
             # Связываем triggered с clicked
-            item.clicked.connect(action.trigger)
+            def on_item_clicked():
+                if checkable:
+                    # Для checkable переключаем состояние
+                    new_state = not action.isChecked()
+                    action.setChecked(new_state)
+                    item.setChecked(new_state)
+                action.trigger()
+            
+            item.clicked.connect(on_item_clicked)
             
             # Синхронизируем изменения QAction с CustomMenuItem
-            def sync_icon():
-                new_icon = action.icon()
-                if not new_icon.isNull():
-                    # Получаем pixmap напрямую из иконки
-                    pixmap = new_icon.pixmap(QSize(24, 24))
-                    item.icon_label.setPixmap(pixmap)
-                    item.icon_label.repaint()  # Принудительная перерисовка
+            def sync_state():
+                if checkable:
+                    item.setChecked(action.isChecked())
+                elif not action.icon().isNull():
+                    pixmap = action.icon().pixmap(QSize(24, 24))
+                    if item.icon_label:
+                        item.icon_label.setPixmap(pixmap)
+                        item.icon_label.repaint()
             
             def sync_enabled(enabled):
                 item.setEnabled(enabled)
             
-            action.changed.connect(sync_icon)
+            action.changed.connect(sync_state)
             action.changed.connect(lambda: sync_enabled(action.isEnabled()))
             
             self.actions.append((action, item))

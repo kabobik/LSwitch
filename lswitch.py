@@ -1267,20 +1267,27 @@ class LSwitch:
                 if device.name == self.fake_kb_name:
                     continue
                 
-                # Проверяем что это клавиатура (имеет KEY события)
+                # Проверяем что это клавиатура или мышь (имеет KEY события)
                 caps = device.capabilities()
                 if ecodes.EV_KEY not in caps:
                     continue
                 
-                # Проверяем что есть хотя бы базовые клавиши клавиатуры
                 keys = caps.get(ecodes.EV_KEY, [])
-                if not keys or ecodes.KEY_A not in keys:
+                if not keys:
+                    continue
+                
+                # Проверяем что это клавиатура (есть KEY_A) ИЛИ мышь (есть BTN_LEFT)
+                is_keyboard = ecodes.KEY_A in keys
+                is_mouse = ecodes.BTN_LEFT in keys or ecodes.BTN_RIGHT in keys
+                
+                if not (is_keyboard or is_mouse):
                     continue
                 
                 device_selector.register(device, selectors.EVENT_READ)
                 devices.append(device)
                 if self.config.get('debug'):
-                    print(f"   Подключено: {device.name}")
+                    device_type = "клавиатура" if is_keyboard else "мышь"
+                    print(f"   Подключено: {device.name} ({device_type})")
             except (OSError, PermissionError) as e:
                 # Пропускаем устройства к которым нет доступа
                 if self.config.get('debug'):
