@@ -172,6 +172,7 @@ class LSwitch:
         # Пользовательский словарь для самообучения
         self.user_dict = None
         self.last_auto_convert = None  # {"word": original, "converted_to": result, "time": timestamp, "lang": lang}
+        self.last_manual_convert = None  # {"original": text, "converted": result, "from_lang": lang, "to_lang": lang, "time": timestamp}
         if USER_DICT_AVAILABLE and self.config.get('user_dict_enabled', False):
             try:
                 self.user_dict = UserDictionary()
@@ -622,6 +623,21 @@ class LSwitch:
                 print(f"  ⏭️  Пропуск автоконвертации: пустой буфер")
             return
         
+        # Проверяем словарь конвертаций - возможно это слово надо автоматически конвертировать
+        if self.user_dict and hasattr(self.user_dict, 'should_auto_convert'):
+            # Определяем текущий язык текста
+            has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in text)
+            from_lang = 'ru' if has_cyrillic else 'en'
+            to_lang = 'en' if from_lang == 'ru' else 'ru'
+            
+            if self.user_dict.should_auto_convert(text, from_lang, to_lang, threshold=5):
+                if self.config.get('debug'):
+                    weight = self.user_dict.get_conversion_weight(text, from_lang, to_lang)
+                    print(f"🎯 Автоконвертация по словарю: '{text}' ({from_lang}→{to_lang}), вес: {weight}")
+                
+                self.convert_and_retype()
+                return
+        
         # Используем n-граммный анализ для оценки вариантов
         try:
             from ngrams import should_convert
@@ -1027,6 +1043,25 @@ class LSwitch:
             events_to_replay = list(self.event_buffer)
             num_chars = self.chars_in_buffer
             
+            # Сохраняем информацию для отслеживания успешной ручной конвертации
+            if self.user_dict and len(self.text_buffer) > 0:
+                original_text = ''.join(self.text_buffer)
+                # Определяем язык исходного текста
+                has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in original_text)
+                from_lang = 'ru' if has_cyrillic else 'en'
+                to_lang = 'en' if from_lang == 'ru' else 'ru'
+                
+                # Конвертируем текст чтобы узнать результат
+                converted_text = self.convert_text(original_text)
+                
+                self.last_manual_convert = {
+                    "original": original_text,
+                    "converted": converted_text,
+                    "from_lang": from_lang,
+                    "to_lang": to_lang,
+                    "time": time.time()
+                }
+            
             # Очищаем буфер (чтобы не накапливались события)
             self.clear_buffer()
             
@@ -1149,6 +1184,10 @@ class LSwitch:
                     if self.last_auto_convert:
                         self.last_auto_convert = None
                     
+                    # Сбрасываем отслеживание ручной конвертации (пользователь удаляет = не подходит)
+                    if self.last_manual_convert:
+                        self.last_manual_convert = None
+                    
                     if self.chars_in_buffer > 0:
                         self.chars_in_buffer -= 1
                         if self.text_buffer:
@@ -1161,6 +1200,27 @@ class LSwitch:
                     # (пользователь продолжает печатать = автоконвертация была правильной)
                     if self.last_auto_convert:
                         self.last_auto_convert = None
+                    
+                    # Сохраняем успешную ручную конвертацию в словарь
+                    # Если пользователь продолжает печатать после ручной конвертации - она была правильной!
+                    if self.user_dict and self.last_manual_convert:
+                        time_since_convert = time.time() - self.last_manual_convert['time']
+                        if time_since_convert < 5.0:  # В течение 5 секунд
+                            original = self.last_manual_convert['original']
+                            converted = self.last_manual_convert['converted']
+                            from_lang = self.last_manual_convert['from_lang']
+                            to_lang = self.last_manual_convert['to_lang']
+                            
+                            # Добавляем как успешную конвертацию с направлением
+                            self.user_dict.add_conversion(original, from_lang, to_lang, debug=self.config.get('debug'))
+                            
+                            if self.config.get('debug'):
+                                # Проверяем вес
+                                weight = self.user_dict.get_conversion_weight(original, from_lang, to_lang)
+                                auto_status = " → автоконвертация!" if weight >= 5 else ""
+                                print(f"📚 Успешная конвертация сохранена: '{original}' ({from_lang}→{to_lang}), вес: {weight}{auto_status}")
+                        
+                        self.last_manual_convert = None
                     
                     # Добавляем символ в text_buffer (всегда lowercase - для словаря)
                     # RAW события с Shift остаются в event_buffer для правильного replay

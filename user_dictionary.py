@@ -144,6 +144,83 @@ class UserDictionary:
         
         return (False, entry['weight'])
     
+    def add_conversion(self, word, from_lang, to_lang, debug=False):
+        """
+        Добавляет успешную конвертацию с направлением
+        
+        Args:
+            word: Исходное слово
+            from_lang: Язык исходного слова
+            to_lang: Язык после конвертации
+            debug: Вывод отладочной информации
+        """
+        word_lower = word.lower()
+        
+        # Создаём ключ с направлением конвертации
+        conv_key = f"{word_lower}:{from_lang}->{to_lang}"
+        
+        if 'conversions' not in self.data:
+            self.data['conversions'] = {}
+        
+        if conv_key in self.data['conversions']:
+            # Конвертация уже есть - увеличиваем вес
+            self.data['conversions'][conv_key]['weight'] += 1
+            self.data['conversions'][conv_key]['last_seen'] = datetime.now().isoformat()
+            
+            if debug:
+                weight = self.data['conversions'][conv_key]['weight']
+                print(f"📚 Conversion: '{word}' ({from_lang}→{to_lang}) вес увеличен → {weight}")
+        else:
+            # Новая конвертация
+            self.data['conversions'][conv_key] = {
+                'word': word_lower,
+                'from_lang': from_lang,
+                'to_lang': to_lang,
+                'weight': 1,
+                'added_at': datetime.now().isoformat(),
+                'last_seen': datetime.now().isoformat()
+            }
+            
+            if debug:
+                print(f"📚 Conversion: Добавлена '{word}' ({from_lang}→{to_lang})")
+        
+        # Сохраняем
+        self._save()
+    
+    def get_conversion_weight(self, word, from_lang, to_lang):
+        """
+        Получает вес конвертации
+        
+        Returns:
+            int: Вес конвертации (0 если нет в словаре)
+        """
+        if 'conversions' not in self.data:
+            return 0
+        
+        word_lower = word.lower()
+        conv_key = f"{word_lower}:{from_lang}->{to_lang}"
+        
+        if conv_key in self.data['conversions']:
+            return self.data['conversions'][conv_key]['weight']
+        
+        return 0
+    
+    def should_auto_convert(self, word, from_lang, to_lang, threshold=5):
+        """
+        Проверяет нужна ли автоконвертация для слова
+        
+        Args:
+            word: Слово для проверки
+            from_lang: Текущий язык
+            to_lang: Целевой язык
+            threshold: Минимальный вес для автоконвертации (по умолчанию 5)
+            
+        Returns:
+            bool: True если нужна автоконвертация
+        """
+        weight = self.get_conversion_weight(word, from_lang, to_lang)
+        return weight >= threshold
+    
     def get_stats(self):
         """Возвращает статистику"""
         return {
