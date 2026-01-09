@@ -80,19 +80,23 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.menu.addAction(title_action)
         self.menu.addSeparator()
         
-        # Управление службой
-        self.start_action = QAction("▶️ Запустить службу", self)
+        # Вложенное меню управления службой
+        from PyQt5.QtWidgets import QMenu as QtMenu
+        service_menu = QtMenu("🔧 Управление службой", self.menu)
+        
+        self.start_action = QAction("▶️ Запустить", service_menu)
         self.start_action.triggered.connect(self.start_service)
-        self.menu.addAction(self.start_action)
+        service_menu.addAction(self.start_action)
         
-        self.stop_action = QAction("⏸ Остановить службу", self)
+        self.stop_action = QAction("⏸ Остановить", service_menu)
         self.stop_action.triggered.connect(self.stop_service)
-        self.menu.addAction(self.stop_action)
+        service_menu.addAction(self.stop_action)
         
-        self.restart_action = QAction("🔄 Перезапустить службу", self)
+        self.restart_action = QAction("🔄 Перезапустить", service_menu)
         self.restart_action.triggered.connect(self.restart_service)
-        self.menu.addAction(self.restart_action)
+        service_menu.addAction(self.restart_action)
         
+        self.menu.addMenu(service_menu)
         self.menu.addSeparator()
         
         # Автопереключение
@@ -487,35 +491,56 @@ class LSwitchControlPanel(QSystemTrayIcon):
         QApplication.instance().quit()
 
 
+def create_simple_icon(color):
+    """Создает упрощенную иконку клавиатуры одного цвета"""
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    
+    # Рисуем простую клавиатуру
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(color)
+    
+    # Основной корпус клавиатуры
+    painter.drawRoundedRect(8, 20, 48, 28, 3, 3)
+    
+    # Вырезаем клавиши (создаём эффект углублений)
+    painter.setCompositionMode(QPainter.CompositionMode_DestinationOut)
+    
+    # Ряд 1 - 6 клавиш
+    for col in range(6):
+        x = 12 + col * 7
+        y = 24
+        painter.drawRoundedRect(x, y, 5, 5, 1, 1)
+    
+    # Ряд 2 - 6 клавиш
+    for col in range(6):
+        x = 12 + col * 7
+        y = 32
+        painter.drawRoundedRect(x, y, 5, 5, 1, 1)
+    
+    # Ряд 3 - пробел
+    painter.drawRoundedRect(16, 40, 32, 5, 1, 1)
+    
+    painter.end()
+    return pixmap
+
+
 def create_adaptive_icon():
-    """Создает иконку, адаптированную к теме системы"""
-    icon_path = os.path.join(os.path.dirname(__file__), 'lswitch.svg')
-    if not os.path.exists(icon_path):
-        icon_path = os.path.join(os.path.dirname(__file__), 'lswitch.png')
-    if not os.path.exists(icon_path):
-        icon_path = '/usr/share/pixmaps/lswitch.svg'
+    """Создает упрощенную иконку для системного трея"""
+    # Создаем два варианта иконки - для светлой и темной темы
+    icon = QIcon()
     
-    if os.path.exists(icon_path):
-        icon = QIcon(icon_path)
-    else:
-        icon = QIcon.fromTheme('input-keyboard', QIcon.fromTheme('preferences-desktop-keyboard'))
+    # Белая иконка для тёмной темы (Normal/Active)
+    light_pixmap = create_simple_icon(QColor(255, 255, 255))
+    icon.addPixmap(light_pixmap, QIcon.Normal)
+    icon.addPixmap(light_pixmap, QIcon.Active)
     
-    if icon.isNull():
-        pixmap = QPixmap(64, 64)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        palette = QApplication.instance().palette()
-        text_color = palette.color(palette.WindowText)
-        painter.setPen(text_color)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(8, 20, 48, 24, 4, 4)
-        for row in range(2):
-            for col in range(5):
-                x = 12 + col * 8
-                y = 24 + row * 8
-                painter.fillRect(x, y, 6, 6, text_color)
-        painter.end()
-        icon = QIcon(pixmap)
+    # Тёмная иконка для светлой темы (Disabled/Selected)
+    dark_pixmap = create_simple_icon(QColor(50, 50, 50))
+    icon.addPixmap(dark_pixmap, QIcon.Disabled)
+    icon.addPixmap(dark_pixmap, QIcon.Selected)
     
     return icon
 
