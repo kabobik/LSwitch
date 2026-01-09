@@ -4,9 +4,10 @@
 import sys
 sys.path.insert(0, '/home/anton/VsCode/LSwitch')
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox
-from PyQt5.QtCore import Qt, pyqtSignal, QPoint
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QSize
 from PyQt5.QtWidgets import QDesktopWidget
+from PyQt5.QtGui import QIcon
 from adapters.base import BaseGUIAdapter
 from utils.theme import get_cinnamon_theme_colors, get_default_dark_colors
 
@@ -15,10 +16,8 @@ class CustomMenuItem(QWidget):
     """Кастомный пункт меню с темной темой"""
     clicked = pyqtSignal()
     
-    def __init__(self, text, is_checkable=False, checked=False, bg_color=(46,46,51), fg_color=(255,255,255)):
+    def __init__(self, text, icon=None, bg_color=(46,46,51), fg_color=(255,255,255)):
         super().__init__()
-        self.is_checkable = is_checkable
-        self.checked = checked
         self.bg_color = bg_color
         self.fg_color = fg_color
         self.hover_color = tuple(min(255, c + 20) for c in bg_color)
@@ -31,35 +30,12 @@ class CustomMenuItem(QWidget):
         layout.setContentsMargins(20, 12, 20, 12)
         layout.setSpacing(18)
         
-        if is_checkable:
-            self.checkbox = QCheckBox()
-            self.checkbox.setChecked(checked)
-            self.checkbox.setStyleSheet(f"""
-                QCheckBox {{
-                    spacing: 0px;
-                }}
-                QCheckBox::indicator {{
-                    width: 24px;
-                    height: 24px;
-                    border-radius: 4px;
-                }}
-                QCheckBox::indicator:checked {{
-                    background-color: rgb(66, 133, 244);
-                    border: none;
-                }}
-                QCheckBox::indicator:unchecked {{
-                    background-color: rgba(60, 60, 65, 0.8);
-                    border: 2px solid rgb(120, 120, 125);
-                }}
-                QCheckBox::indicator:hover:unchecked {{
-                    border-color: rgb(150, 150, 155);
-                    background-color: rgba(80, 80, 85, 0.8);
-                }}
-                QCheckBox::indicator:hover:checked {{
-                    background-color: rgb(76, 143, 255);
-                }}
-            """)
-            layout.addWidget(self.checkbox)
+        # Всегда создаём icon_label для возможности обновления
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(24, 24)
+        if icon and not icon.isNull():
+            self.icon_label.setPixmap(icon.pixmap(QSize(24, 24)))
+        layout.addWidget(self.icon_label)
         
         self.label = QLabel(text)
         self.label.setStyleSheet(f"""
@@ -74,13 +50,12 @@ class CustomMenuItem(QWidget):
         
         self.updateStyle(False)
     
-    def setChecked(self, checked):
-        if self.is_checkable:
-            self.checked = checked
-            self.checkbox.setChecked(checked)
-    
-    def isChecked(self):
-        return self.checked if self.is_checkable else False
+    def setIcon(self, icon):
+        """Обновляет иконку элемента"""
+        if not icon.isNull():
+            self.icon_label.setPixmap(icon.pixmap(QSize(24, 24)))
+        else:
+            self.icon_label.clear()
     
     def setEnabled(self, enabled):
         self._enabled = enabled
@@ -118,9 +93,6 @@ class CustomMenuItem(QWidget):
     def mousePressEvent(self, event):
         if not self._enabled:
             return
-        if self.is_checkable:
-            self.checked = not self.checked
-            self.checkbox.setChecked(self.checked)
         self.clicked.emit()
 
 
@@ -157,9 +129,9 @@ class CustomMenu(QWidget):
         
         self.items = []
     
-    def addItem(self, text, callback=None, checkable=False, checked=False):
+    def addItem(self, text, callback=None, icon=None):
         """Добавить пункт меню"""
-        item = CustomMenuItem(text, checkable, checked, self.bg_color, self.fg_color)
+        item = CustomMenuItem(text, icon, self.bg_color, self.fg_color)
         if callback:
             item.clicked.connect(callback)
         self.layout.addWidget(item)
@@ -208,26 +180,24 @@ class QMenuWrapper:
         if isinstance(action_or_text, QAction):
             action = action_or_text
             text = action.text()
-            checkable = action.isCheckable()
-            checked = action.isChecked()
             enabled = action.isEnabled()
+            icon = action.icon()
             
-            # Создаём CustomMenuItem
-            item = self.custom_menu.addItem(text, None, checkable, checked)
+            # Создаём CustomMenuItem с иконкой
+            item = self.custom_menu.addItem(text, None, icon)
             item.setEnabled(enabled)
             
             # Связываем triggered с clicked
             item.clicked.connect(action.trigger)
             
             # Синхронизируем изменения QAction с CustomMenuItem
-            def sync_checked(checked):
-                item.setChecked(checked)
+            def sync_icon():
+                item.setIcon(action.icon())
             
             def sync_enabled(enabled):
                 item.setEnabled(enabled)
             
-            if checkable:
-                action.toggled.connect(sync_checked)
+            action.changed.connect(sync_icon)
             action.changed.connect(lambda: sync_enabled(action.isEnabled()))
             
             self.actions.append((action, item))

@@ -8,8 +8,10 @@ LSwitch - GUI панель управления службой
 import sys
 import os
 import json
+import time
 import signal
 import subprocess
+import time
 from PyQt5.QtWidgets import (QApplication, QSystemTrayIcon, QAction,
                              QMessageBox, QLabel)
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPalette, QCursor
@@ -88,28 +90,47 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.menu.addAction(title_action)
         self.menu.addSeparator()
         
-        # Вложенное меню управления службой
-        from PyQt5.QtWidgets import QMenu as QtMenu
-        service_menu = QtMenu("Управление службой", self.menu)
-        service_menu.setIcon(QIcon.fromTheme("preferences-system"))
-        
-        self.start_action = QAction("Запустить", service_menu)
-        self.start_action.setIcon(QIcon.fromTheme("media-playback-start"))
-        self.start_action.triggered.connect(self.start_service)
-        service_menu.addAction(self.start_action)
-        
-        self.stop_action = QAction("Остановить", service_menu)
-        self.stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
-        self.stop_action.triggered.connect(self.stop_service)
-        service_menu.addAction(self.stop_action)
-        
-        self.restart_action = QAction("Перезапустить", service_menu)
-        self.restart_action.setIcon(QIcon.fromTheme("view-refresh"))
-        self.restart_action.triggered.connect(self.restart_service)
-        service_menu.addAction(self.restart_action)
-        
-        self.menu.addMenu(service_menu)
-        self.menu.addSeparator()
+        # Управление службой (для Cinnamon без вложенного меню)
+        if self.de == 'cinnamon':
+            self.start_action = QAction("Запустить", self)
+            self.start_action.setIcon(QIcon.fromTheme("media-playback-start"))
+            self.start_action.triggered.connect(self.start_service)
+            self.menu.addAction(self.start_action)
+            
+            self.stop_action = QAction("Остановить", self)
+            self.stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
+            self.stop_action.triggered.connect(self.stop_service)
+            self.menu.addAction(self.stop_action)
+            
+            self.restart_action = QAction("Перезапустить", self)
+            self.restart_action.setIcon(QIcon.fromTheme("view-refresh"))
+            self.restart_action.triggered.connect(self.restart_service)
+            self.menu.addAction(self.restart_action)
+            
+            self.menu.addSeparator()
+        else:
+            # Вложенное меню для KDE и других DE
+            from PyQt5.QtWidgets import QMenu as QtMenu
+            service_menu = QtMenu("Управление службой", self)
+            service_menu.setIcon(QIcon.fromTheme("preferences-system"))
+            
+            self.start_action = QAction("Запустить", service_menu)
+            self.start_action.setIcon(QIcon.fromTheme("media-playback-start"))
+            self.start_action.triggered.connect(self.start_service)
+            service_menu.addAction(self.start_action)
+            
+            self.stop_action = QAction("Остановить", service_menu)
+            self.stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
+            self.stop_action.triggered.connect(self.stop_service)
+            service_menu.addAction(self.stop_action)
+            
+            self.restart_action = QAction("Перезапустить", service_menu)
+            self.restart_action.setIcon(QIcon.fromTheme("view-refresh"))
+            self.restart_action.triggered.connect(self.restart_service)
+            service_menu.addAction(self.restart_action)
+            
+            self.menu.addMenu(service_menu)
+            self.menu.addSeparator()
         
         # Автопереключение (использует иконки вместо чекбокса)
         self.auto_switch_action = QAction("Автопереключение", self)
