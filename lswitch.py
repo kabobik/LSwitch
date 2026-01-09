@@ -68,6 +68,12 @@ try:
         libX11.XkbGetState.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(XkbStateRec)]
         libX11.XkbGetState.restype = ctypes.c_int
         
+        libX11.XkbLockGroup.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
+        libX11.XkbLockGroup.restype = ctypes.c_int
+        
+        libX11.XFlush.argtypes = [ctypes.c_void_p]
+        libX11.XFlush.restype = ctypes.c_int
+        
         libX11.XCloseDisplay.argtypes = [ctypes.c_void_p]
         
         # Функции для получения символов из KeyCode
@@ -111,10 +117,7 @@ EN_TO_RU = {
     '[': 'х', ']': 'ъ', 'a': 'ф', 's': 'ы', 'd': 'в', 'f': 'а', 'g': 'п', 'h': 'р', 'j': 'о', 'k': 'л',
     'l': 'д', ';': 'ж', "'": 'э', 'z': 'я', 'x': 'ч', 'c': 'с', 'v': 'м', 'b': 'и', 'n': 'т', 'm': 'ь',
     ',': 'б', '.': 'ю', '/': '.', '`': 'ё',
-    'Q': 'Й', 'W': 'Ц', 'E': 'У', 'R': 'К', 'T': 'Е', 'Y': 'Н', 'U': 'Г', 'I': 'Ш', 'O': 'Щ', 'P': 'З',
-    '{': 'Х', '}': 'Ъ', 'A': 'Ф', 'S': 'Ы', 'D': 'В', 'F': 'А', 'G': 'П', 'H': 'Р', 'J': 'О', 'K': 'Л',
-    'L': 'Д', ':': 'Ж', '"': 'Э', 'Z': 'Я', 'X': 'Ч', 'C': 'С', 'V': 'М', 'B': 'И', 'N': 'Т', 'M': 'Ь',
-    '<': 'Б', '>': 'Ю', '?': ',', '~': 'Ё',
+    '{': 'х', '}': 'ъ', ':': 'ж', '"': 'э', '<': 'б', '>': 'ю', '?': ',', '~': 'ё',
     '@': '"', '#': '№', '$': ';', '^': ':', '&': '?'
 }
 
@@ -147,9 +150,19 @@ class LSwitch:
         # Текстовый буфер - реально набранные символы с раскладкой
         self.text_buffer = []  # Список кортежей (символ, раскладка)
         
+        # Ссылка на текущее устройство для отладки
+        self.current_device = None
+        
         # X11 для определения раскладки через XKB
         self.x11_display = display.Display() if XLIB_AVAILABLE else None
         self.layouts = self.get_layouts_from_xkb()
+        
+        # Проверка минимум 2 раскладок для работы
+        if len(self.layouts) < 2:
+            print(f"⚠️  Обнаружена только {len(self.layouts)} раскладка: {self.layouts}")
+            print("   Программа будет работать в ограниченном режиме (без конвертации)")
+        else:
+            print(f"✓ Раскладки готовы: {self.layouts}")
         
         # Синхронизация текущей раскладки
         self.current_layout = self.get_current_layout()
@@ -175,6 +188,13 @@ class LSwitch:
         self.layout_thread = threading.Thread(target=self.monitor_layout_changes, daemon=True)
         self.layout_thread.start()
         
+        # Запускаем поток мониторинга файла с раскладками
+        self.layouts_file_monitor_thread = threading.Thread(target=self.monitor_layouts_file, daemon=True)
+        self.layouts_file_monitor_thread.start()
+        
+        # Применяем раскладки к виртуальному устройству (иначе KDE глючит)
+        self.configure_virtual_keyboard_layouts()
+        
         # Коды клавиш для отслеживания (алфавитно-цифровые + пробел)
         self.active_keycodes = set(range(2, 58))  # От '1' до '/'
         self.active_keycodes.add(ecodes.KEY_SPACE)  # Добавляем пробел!
@@ -188,7 +208,6 @@ class LSwitch:
         }
         
         self.is_converting = False
-        self.sleep_time = 0.005  # 5ms между нажатиями
         
         # Отслеживание реального выделения
         self.last_known_selection = ''  # Последняя известная PRIMARY selection
@@ -208,23 +227,61 @@ class LSwitch:
         self.last_config_check = time.time()
     
     def get_layouts_from_xkb(self):
-        """Получает список раскладок из XKB конфигурации"""
+        """Получает список раскладок - сначала из файла от control panel, затем через setxkbmap"""
+        # Сначала пробуем прочитать из файла, который публикует lswitch_control.py
         try:
-            root = self.x11_display.screen().root
-            prop = root.get_full_property(
-                self.x11_display.intern_atom('_XKB_RULES_NAMES'),
-                X.AnyPropertyType
-            )
-            if prop:
-                parts = prop.value.decode('utf-8', errors='ignore').split('\x00')
-                if len(parts) >= 3:
-                    layouts_str = parts[2]
-                    layouts = layouts_str.split(',')
-                    # Нормализуем: us -> en
-                    return ['en' if l == 'us' else l for l in layouts]
+            runtime_dir = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+            layouts_file = f'{runtime_dir}/lswitch_layouts.json'
+            
+            if os.path.exists(layouts_file):
+                # Проверяем свежесть файла (не старше 60 секунд)
+                import time as time_module
+                file_age = time_module.time() - os.path.getmtime(layouts_file)
+                
+                if file_age < 60:
+                    with open(layouts_file, 'r') as f:
+                        data = json.load(f)
+                        layouts = data.get('layouts', [])
+                        
+                        if len(layouts) >= 2:
+                            if self.config.get('debug'):
+                                print(f"✓ Раскладки из control panel: {layouts}", flush=True)
+                            return layouts
         except Exception as e:
-            logging.warning(f"Не удалось получить список раскладок: {e}")
-        return ['en', 'ru']  # Fallback
+            if self.config.get('debug'):
+                print(f"⚠️  Не удалось прочитать раскладки из файла: {e}", flush=True)
+        
+        # Фолбэк: читаем через setxkbmap
+        try:
+            result = subprocess.run(
+                ['setxkbmap', '-query'],
+                capture_output=True, text=True, timeout=2
+            )
+            
+            for line in result.stdout.split('\n'):
+                if line.startswith('layout:'):
+                    layouts_str = line.split(':', 1)[1].strip()
+                    layouts = [l.strip() for l in layouts_str.split(',')]
+                    # Нормализуем: us -> en
+                    result = ['en' if l == 'us' else l for l in layouts if l]
+                    
+                    if len(result) >= 2:
+                        if self.config.get('debug'):
+                            print(f"✓ Раскладки: {result}", flush=True)
+                        return result
+                    elif len(result) == 1:
+                        if self.config.get('debug'):
+                            print(f"⚠️  Обнаружена только 1 раскладка: {result}", flush=True)
+                        return result
+                        
+        except Exception as e:
+            if self.config.get('debug'):
+                print(f"⚠️  Ошибка чтения раскладок: {e}", flush=True)
+        
+        # Фолбэк - по умолчанию
+        if self.config.get('debug'):
+            print("⚠️  Использую fallback: ['en', 'ru']", flush=True)
+        return ['en', 'ru']
     
     def get_current_layout(self):
         """Получает текущую активную раскладку через XKB GetState"""
@@ -255,7 +312,8 @@ class LSwitch:
             finally:
                 libX11.XCloseDisplay(display_ptr)
         except Exception as e:
-            logging.warning(f"Ошибка получения раскладки через XKB: {e}")
+            if self.config.get('debug'):
+                print(f"⚠️  Ошибка получения раскладки через XKB: {e}")
         
         return self.layouts[0] if self.layouts else 'en'
     
@@ -341,7 +399,8 @@ class LSwitch:
                 libX11.XCloseDisplay(display_ptr)
         except Exception as e:
             if self.config.get('debug'):
-                logging.warning(f"Ошибка keycode_to_char({keycode}, {layout}): {e}")
+                if self.config.get('debug'):
+                    print(f"⚠️  Ошибка keycode_to_char({keycode}, {layout}): {e}")
             return ''
     
     def get_buffer_text(self):
@@ -455,6 +514,85 @@ class LSwitch:
                                 print(f"🔄 Раскладка изменена: {old_layout} → {new_layout}")
                 except:
                     pass
+    
+    def monitor_layouts_file(self):
+        """Мониторит изменения файла с раскладками от control panel"""
+        runtime_dir = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+        layouts_file = f'{runtime_dir}/lswitch_layouts.json'
+        last_mtime = 0
+        
+        while self.running:
+            try:
+                if os.path.exists(layouts_file):
+                    current_mtime = os.path.getmtime(layouts_file)
+                    
+                    # Если файл изменился
+                    if current_mtime != last_mtime:
+                        last_mtime = current_mtime
+                        
+                        # Читаем новые раскладки
+                        try:
+                            with open(layouts_file, 'r') as f:
+                                data = json.load(f)
+                                new_layouts = data.get('layouts', [])
+                                
+                                if new_layouts and new_layouts != self.layouts:
+                                    old_layouts = self.layouts
+                                    self.layouts = new_layouts
+                                    
+                                    if self.config.get('debug'):
+                                        print(f"🔄 Раскладки обновлены из файла: {old_layouts} → {new_layouts}", flush=True)
+                                    
+                                    # Проверяем достаточность раскладок
+                                    if len(self.layouts) < 2:
+                                        print(f"⚠️  ВНИМАНИЕ: Теперь только {len(self.layouts)} раскладка!")
+                                    
+                        except Exception as e:
+                            if self.config.get('debug'):
+                                print(f"⚠️  Ошибка чтения файла раскладок: {e}", flush=True)
+                
+                time.sleep(2)  # Проверяем каждые 2 секунды
+                
+            except Exception as e:
+                if self.config.get('debug'):
+                    print(f"⚠️  Ошибка мониторинга файла раскладок: {e}", flush=True)
+                time.sleep(5)
+    
+    def configure_virtual_keyboard_layouts(self):
+        """Настраивает раскладки виртуального устройства под системные (фикс для KDE)"""
+        try:
+            # Ищем ID нашего виртуального устройства
+            result = subprocess.run(
+                ['xinput', 'list', '--id-only', self.fake_kb_name],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                env={'DISPLAY': ':0'}
+            )
+            
+            device_id = result.stdout.strip()
+            if not device_id:
+                if self.config.get('debug'):
+                    print(f"⚠️  Не найдено виртуальное устройство '{self.fake_kb_name}'")
+                return
+            
+            # Конвертируем раскладки (en/ru -> us/ru для setxkbmap)
+            xkb_layouts = ','.join('us' if l == 'en' else l for l in self.layouts)
+            
+            # Применяем раскладки к виртуальному устройству
+            subprocess.run(
+                ['setxkbmap', '-device', device_id, '-layout', xkb_layouts],
+                capture_output=True,
+                timeout=2,
+                env={'DISPLAY': ':0'}
+            )
+            
+            if self.config.get('debug'):
+                print(f"✓ Виртуальная клавиатура настроена: раскладки {xkb_layouts}")
+                
+        except Exception as e:
+            if self.config.get('debug'):
+                print(f"⚠️  Не удалось настроить виртуальную клавиатуру: {e}")
     
     def check_and_auto_convert(self):
         """Проверяет и автоматически конвертирует при пробеле используя n-граммный анализ"""
@@ -591,23 +729,52 @@ class LSwitch:
     def tap_key(self, keycode, n_times=1):
         """Эмулирует нажатие клавиши через виртуальную клавиатуру"""
         for _ in range(n_times):
-            time.sleep(self.sleep_time)
             self.fake_kb.write(ecodes.EV_KEY, keycode, 1)  # Нажатие
             self.fake_kb.syn()
-            time.sleep(self.sleep_time)
             self.fake_kb.write(ecodes.EV_KEY, keycode, 0)  # Отпускание
             self.fake_kb.syn()
     
     def replay_events(self, events):
         """Воспроизводит записанные события клавиатуры"""
+        shift_codes = {ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT}
+        
+        if self.config.get('debug'):
+            shift_events = [e for e in events if e.code in shift_codes]
+            letter_events = [e for e in events if e.code not in shift_codes and e.value == 0]
+            print(f"  Воспроизвожу: {len(events)} событий ({len(shift_events)} Shift, {len(letter_events)} букв)", flush=True)
+            
+            # Показываем первые 5 событий для диагностики
+            print("  Первые события:", flush=True)
+            for i, e in enumerate(events[:5]):
+                shift_str = "SHIFT" if e.code in shift_codes else f"KEY_{e.code}"
+                val_str = "↓" if e.value == 1 else "↑"
+                print(f"    {i+1}. {shift_str} {val_str}", flush=True)
+        
         for event in events:
-            time.sleep(self.sleep_time)
+            # Без задержки - evdev обрабатывает события моментально
             self.fake_kb.write(ecodes.EV_KEY, event.code, event.value)
             self.fake_kb.syn()
     
     def clear_buffer(self):
         """Очищает буфер событий и текстовый буфер"""
+        # КРИТИЧНО: сохраняем события нажатия для клавиш, которые всё ещё нажаты
+        # Это предотвращает "съедание" первых букв при быстром вводе
+        currently_pressed = {}  # {код клавиши: событие нажатия}
+        
+        # Анализируем буфер - какие клавиши нажаты но не отпущены
+        for event in self.event_buffer:
+            if event.value == 1:  # Нажатие
+                currently_pressed[event.code] = event
+            elif event.value == 0:  # Отпускание
+                currently_pressed.pop(event.code, None)
+        
+        # Очищаем буфер
         self.event_buffer.clear()
+        
+        # Восстанавливаем события нажатия для клавиш, которые всё ещё нажаты
+        for event in currently_pressed.values():
+            self.event_buffer.append(event)
+        
         self.chars_in_buffer = 0
         self.had_backspace = False  # Сбрасываем флаг при очистке
         self.text_buffer.clear()
@@ -642,6 +809,12 @@ class LSwitch:
     
     def convert_selection(self):
         """Конвертирует выделенный текст через PRIMARY selection (без порчи clipboard)"""
+        # Проверяем наличие минимум 2 раскладок
+        if len(self.layouts) < 2:
+            if self.config.get('debug'):
+                print(f"⚠️  Конвертация невозможна: только {len(self.layouts)} раскладка")
+            return
+        
         if self.is_converting:
             return
         
@@ -719,33 +892,56 @@ class LSwitch:
             self.is_converting = False
     
     def switch_keyboard_layout(self):
-        """Переключает раскладку клавиатуры через setxkbmap"""
+        """Переключает раскладку клавиатуры через XKB LockGroup"""
         try:
-            if self.config.get('debug'):
-                print(f"🔄 Переключаю раскладку...")
-            
-            # Получаем список раскладок
-            result = subprocess.run(
-                ['setxkbmap', '-query'],
-                capture_output=True, text=True, timeout=1
-            )
-            
-            all_layouts = []
-            for line in result.stdout.split('\n'):
-                if line.startswith('layout:'):
-                    layouts_str = line.split(':')[1].strip()
-                    all_layouts = layouts_str.split(',')
-                    break
-            
-            if len(all_layouts) > 1:
-                # Циклически переключаем на следующую раскладку
-                current_layout = all_layouts[0]
-                next_layout = all_layouts[1] if current_layout == all_layouts[0] else all_layouts[0]
-                new_order = ','.join([next_layout] + [l for l in all_layouts if l != next_layout])
-                subprocess.run(['setxkbmap', new_order], timeout=1)
-                
+            # Переключаем через XKB LockGroup (правильный способ)
+            if XKB_AVAILABLE and libX11:
+                display_ptr = libX11.XOpenDisplay(None)
+                if display_ptr:
+                    try:
+                        # Читаем текущее состояние
+                        state_before = XkbStateRec()
+                        status = libX11.XkbGetState(display_ptr, 0x100, ctypes.byref(state_before))
+                        current_index = state_before.group
+                        
+                        if self.config.get('debug'):
+                            print(f"🔄 Переключаю раскладку... (текущая группа: {current_index}, status: {status})")
+                            print(f"   len(self.layouts)={len(self.layouts)}, layouts={self.layouts}")
+                        
+                        # Циклически переключаем на следующую
+                        next_index = (current_index + 1) % len(self.layouts)
+                        
+                        if self.config.get('debug'):
+                            print(f"   Вычислено: ({current_index} + 1) % {len(self.layouts)} = {next_index}")
+                        
+                        # XkbLockGroup(display, device, group)
+                        # device=0x100 = XkbUseCoreKbd
+                        ret = libX11.XkbLockGroup(display_ptr, 0x100, next_index)
+                        libX11.XFlush(display_ptr)
+                        
+                        if self.config.get('debug'):
+                            print(f"   XkbLockGroup вернула: {ret}, переключено на группу {next_index}")
+                        
+                        # Обновляем кеш текущей раскладки
+                        self.current_layout = self.layouts[next_index] if next_index < len(self.layouts) else self.layouts[0]
+                        
+                        if self.config.get('debug'):
+                            current_layout = self.layouts[current_index] if current_index < len(self.layouts) else 'unknown'
+                            print(f"✓ Раскладка переключена: {current_layout} → {self.current_layout}")
+                    finally:
+                        libX11.XCloseDisplay(display_ptr)
+            else:
                 if self.config.get('debug'):
-                    print(f"✓ Раскладка переключена: {current_layout} → {next_layout}")
+                    print(f"🔄 Переключаю раскладку через xdotool...")
+                    
+                # Fallback через xdotool
+                old_layout = self.current_layout
+                subprocess.run(['xdotool', 'key', 'Alt_L+Shift_L'], timeout=1)
+                # Обновляем кеш
+                time.sleep(0.05)
+                self.current_layout = self.get_current_layout()
+                if self.config.get('debug'):
+                    print(f"✓ Раскладка переключена: {old_layout} → {self.current_layout}")
                     
         except Exception as e:
             if self.config.get('debug'):
@@ -783,6 +979,12 @@ class LSwitch:
     
     def convert_and_retype(self):
         """Конвертирует и перепечатывает последнее слово"""
+        # Проверяем наличие минимум 2 раскладок
+        if len(self.layouts) < 2:
+            if self.config.get('debug'):
+                print(f"⚠️  Конвертация невозможна: только {len(self.layouts)} раскладка")
+            return
+        
         if self.is_converting or self.chars_in_buffer == 0:
             return
         
@@ -794,16 +996,20 @@ class LSwitch:
             timeout = self.user_dict.data['settings'].get('correction_timeout', 5.0)
             
             if time_since_auto < timeout:
-                # Пользователь делает ручную корректировку - добавляем в словарь
+                # Пользователь вручную переключает обратно - значит автоконвертация была НЕПРАВИЛЬНОЙ
+                # Добавляем ОРИГИНАЛЬНОЕ слово (в неправильной раскладке) как защищённое
                 original_word = self.last_auto_convert['word']
-                original_lang = self.last_auto_convert['lang']
+                
+                # Язык ОРИГИНАЛЬНОГО слова (текущий/неправильный)
+                has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in original_word)
+                original_lang = 'ru' if has_cyrillic else 'en'
                 
                 self.user_dict.add_correction(original_word, original_lang, debug=self.config.get('debug'))
                 
                 if self.config.get('debug'):
                     protected, weight = self.user_dict.is_protected(original_word, original_lang)
                     status = f"защищено (вес: {weight})" if protected else f"вес: {weight}"
-                    print(f"📚 Корректировка обнаружена: '{original_word}' → {status}")
+                    print(f"📚 Автоконвертация отменена: '{original_word}' (неправильная раскладка) добавлено в защиту → {status}")
             
             # Очищаем после обработки
             self.last_auto_convert = None
@@ -865,7 +1071,12 @@ class LSwitch:
         
         # Shift: проверяем двойное нажатие
         if event.code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
-            if event.value == 0:  # Отпускание
+            # КРИТИЧНО: добавляем события Shift в буфер для правильного воспроизведения
+            self.event_buffer.append(event)
+            
+            if event.value == 1:  # Нажатие
+                pass  # Просто добавляем в буфер, отслеживание не нужно
+            elif event.value == 0:  # Отпускание
                 if current_time - self.last_shift_press < self.double_click_timeout:
                     if self.config.get('debug'):
                         print("✓ Двойной Shift обнаружен!")
@@ -933,11 +1144,13 @@ class LSwitch:
                         if self.text_buffer:
                             self.text_buffer.pop()
                 elif event.code not in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
+                    # Обрабатываем обычные клавиши
                     self.chars_in_buffer += 1
-                    # Добавляем реальный символ в текстовый буфер
-                    # Получаем раскладку напрямую из системы в момент нажатия
+                    
+                    # Добавляем символ в text_buffer (всегда lowercase - для словаря)
+                    # RAW события с Shift остаются в event_buffer для правильного replay
                     layout = self.get_current_layout()
-                    char = self.keycode_to_char(event.code, layout)
+                    char = self.keycode_to_char(event.code, layout, shift=False)
                     if char:
                         self.text_buffer.append(char)
                     
@@ -1042,6 +1255,9 @@ class LSwitch:
                                 if self.config.get('debug'):
                                     print("Буфер очищен (клик мыши)")
                         
+                        # Сохраняем ссылку на устройство для проверки модификаторов
+                        self.current_device = device
+                        
                         if self.handle_event(event) is False:
                             return
         except KeyboardInterrupt:
@@ -1057,10 +1273,17 @@ def main():
     sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
     sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)
     
-    # Проверяем права root
-    if getpass.getuser() != 'root':
-        print("❌ LSwitch должен запускаться от root для доступа к /dev/input/", flush=True)
-        print("   Запустите: sudo python3 lswitch.py", flush=True)
+    # Проверяем доступ к устройствам (не требуем root если пользователь в группе input)
+    try:
+        devices = evdev.list_devices()
+        if not devices:
+            print("❌ Не найдено устройств ввода", flush=True)
+            print("   Проверьте что пользователь в группе input: groups | grep input", flush=True)
+            exit(126)
+    except PermissionError:
+        print("❌ Нет доступа к /dev/input/", flush=True)
+        print("   Добавьте пользователя в группу input: sudo usermod -aG input $USER", flush=True)
+        print("   После этого перезайдите в систему", flush=True)
         exit(126)
     
     print("🚀 LSwitch запущен", flush=True)

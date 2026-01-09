@@ -48,20 +48,10 @@ class LSwitchControlPanel(QSystemTrayIcon):
         # Обновляем статус службы
         self.update_status()
         
-        # Публикуем текущие раскладки для демона
-        self.last_published_layouts = []
-        self.layout_change_history = []  # История изменений для защиты от глюков KDE
-        self.publish_layouts()
-        
-        # Таймер для обновления статуса службы и редких проверок раскладок
+        # Таймер для периодического обновления статуса
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self.update_status)
-        self.status_timer.start(30000)  # Каждые 30 секунд - статус службы
-        
-        # Отдельный таймер для проверки раскладок - РЕДКО, чтобы не триггерить баг KDE
-        self.layout_timer = QTimer()
-        self.layout_timer.timeout.connect(self.check_and_publish_layouts)
-        self.layout_timer.start(300000)  # Каждые 5 минут (редко = меньше глюков)
+        self.status_timer.start(10000)  # Каждые 10 секунд
     
     def create_tray_menu(self):
         """Создаёт контекстное меню трея через адаптер"""
@@ -205,132 +195,6 @@ class LSwitchControlPanel(QSystemTrayIcon):
         except Exception as e:
             print(f"Ошибка systemctl {action}: {e}", file=sys.stderr, flush=True)
             return False
-    
-    def publish_layouts(self):
-        """Публикует текущие раскладки в файл для демона"""
-        try:
-            layouts = []
-            
-            # Приоритет 1: Читаем из конфига KDE (стабильно, не подвержено багам)
-            kde_config = os.path.expanduser('~/.config/kxkbrc')
-            if os.path.exists(kde_config):
-                try:
-                    import configparser
-                    config = configparser.ConfigParser()
-                    config.read(kde_config)
-                    if 'Layout' in config and 'LayoutList' in config['Layout']:
-                        layout_list = config['Layout']['LayoutList']
-                        layouts = [l.strip() for l in layout_list.split(',')]
-                        # Нормализуем us -> en
-                        layouts = ['en' if l == 'us' else l for l in layouts if l]
-                        print(f"✓ Раскладки из конфига KDE: {layouts}", flush=True)
-                except Exception as e:
-                    print(f"⚠️  Ошибка чтения kxkbrc: {e}", flush=True)
-            
-            # Fallback: setxkbmap (может глючить в KDE, но работает в других DE)
-            if not layouts:
-                result = subprocess.run(
-                    ['setxkbmap', '-query'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-                
-                for line in result.stdout.split('\n'):
-                    if line.startswith('layout:'):
-                        layouts_str = line.split(':', 1)[1].strip()
-                        layouts = [l.strip() for l in layouts_str.split(',')]
-                        # Нормализуем us -> en
-                        layouts = ['en' if l == 'us' else l for l in layouts if l]
-                        print(f"✓ Раскладки из setxkbmap: {layouts}", flush=True)
-                        break
-            
-            # ВАЛИДАЦИЯ: НЕ публикуем если меньше 2 раскладок
-            if len(layouts) < 2:
-                print(f"⚠️  Игнорируем некорректные раскладки: {layouts} (ожидается >= 2)", flush=True)
-                return False
-            
-            if layouts:
-                # Пишем в runtime файл
-                runtime_dir = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
-                layouts_file = f'{runtime_dir}/lswitch_layouts.json'
-                
-                import time
-                with open(layouts_file, 'w') as f:
-                    json.dump({
-                        'layouts': layouts, 
-                        'timestamp': int(time.time())
-                    }, f)
-                
-                self.last_published_layouts = layouts
-                return True
-                    
-        except Exception as e:
-            print(f"Ошибка публикации раскладок: {e}", file=sys.stderr, flush=True)
-            return False
-    
-    def check_and_publish_layouts(self):
-        """Проверяет и публикует раскладки только при изменении (с защитой от глюков KDE)"""
-        try:
-            # Очищаем историю старше 60 секунд
-            current_time = time.time()
-            self.layout_change_history = [
-                t for t in self.layout_change_history 
-                if current_time - t < 60
-            ]
-            
-            # Читаем текущие раскладки
-            result = subprocess.run(
-                ['setxkbmap', '-query'],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            
-            current_layouts = []
-            for line in result.stdout.split('\n'):
-                if line.startswith('layout:'):
-                    layouts_str = line.split(':', 1)[1].strip()
-                    current_layouts = [l.strip() for l in layouts_str.split(',')]
-                    current_layouts = ['en' if l == 'us' else l for l in current_layouts if l]
-                    break
-            
-            # Публикуем только если изменились
-            if current_layouts and current_layouts != self.last_published_layouts:
-                # Проверяем: не слишком ли часто меняются?
-                if len(self.layout_change_history) >= 3:
-                    print(f"⚠️  KDE глючит - слишком частые изменения раскладок (игнорируем)", flush=True)
-                    return
-                
-                # KDE Plasma глючит - двойная проверка через 0.5 сек
-                time.sleep(0.5)
-                
-                # Повторная проверка
-                result2 = subprocess.run(
-                    ['setxkbmap', '-query'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-                
-                current_layouts2 = []
-                for line in result2.stdout.split('\n'):
-                    if line.startswith('layout:'):
-                        layouts_str = line.split(':', 1)[1].strip()
-                        current_layouts2 = [l.strip() for l in layouts_str.split(',')]
-                        current_layouts2 = ['en' if l == 'us' else l for l in current_layouts2 if l]
-                        break
-                
-                # Публикуем только если оба раза одинаково
-                if current_layouts == current_layouts2:
-                    print(f"Раскладки изменились: {self.last_published_layouts} → {current_layouts}", flush=True)
-                    self.layout_change_history.append(current_time)
-                    self.publish_layouts()
-                else:
-                    print(f"⚠️  KDE глюк проигнорирован: {current_layouts} != {current_layouts2}", flush=True)
-                
-        except Exception as e:
-            print(f"Ошибка проверки раскладок: {e}", file=sys.stderr, flush=True)
     
     def update_status(self):
         """Обновляет состояние кнопок в зависимости от статуса службы"""
