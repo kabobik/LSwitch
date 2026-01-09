@@ -83,27 +83,27 @@ class LSwitchControlPanel(QSystemTrayIcon):
             print("Используется нативное QMenu", flush=True)
         
         # Заголовок меню
-        title_action = QAction("⚡ LSwitch Control", self)
+        title_action = QAction("LSwitch Control", self)
         title_action.setEnabled(False)
         self.menu.addAction(title_action)
         self.menu.addSeparator()
         
         # Вложенное меню управления службой
         from PyQt5.QtWidgets import QMenu as QtMenu
-        service_menu = QtMenu("🔧 Управление службой", self.menu)
+        service_menu = QtMenu("Управление службой", self.menu)
         service_menu.setIcon(QIcon.fromTheme("preferences-system"))
         
-        self.start_action = QAction("▶️ Запустить", service_menu)
+        self.start_action = QAction("Запустить", service_menu)
         self.start_action.setIcon(QIcon.fromTheme("media-playback-start"))
         self.start_action.triggered.connect(self.start_service)
         service_menu.addAction(self.start_action)
         
-        self.stop_action = QAction("⏸ Остановить", service_menu)
+        self.stop_action = QAction("Остановить", service_menu)
         self.stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
         self.stop_action.triggered.connect(self.stop_service)
         service_menu.addAction(self.stop_action)
         
-        self.restart_action = QAction("🔄 Перезапустить", service_menu)
+        self.restart_action = QAction("Перезапустить", service_menu)
         self.restart_action.setIcon(QIcon.fromTheme("view-refresh"))
         self.restart_action.triggered.connect(self.restart_service)
         service_menu.addAction(self.restart_action)
@@ -136,13 +136,13 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.menu.addSeparator()
         
         # Логи
-        logs_action = QAction("📋 Показать логи", self)
+        logs_action = QAction("Показать логи", self)
         logs_action.setIcon(QIcon.fromTheme("utilities-log-viewer"))
         logs_action.triggered.connect(self.show_logs)
         self.menu.addAction(logs_action)
         
         # О программе
-        about_action = QAction("ℹ️ О программе", self)
+        about_action = QAction("О программе", self)
         about_action.setIcon(QIcon.fromTheme("help-about"))
         about_action.triggered.connect(self.show_about)
         self.menu.addAction(about_action)
@@ -150,7 +150,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.menu.addSeparator()
         
         # Выход
-        quit_action = QAction("❌ Выход из панели", self)
+        quit_action = QAction("Выход из панели", self)
         quit_action.setIcon(QIcon.fromTheme("application-exit"))
         quit_action.triggered.connect(self.quit_application)
         self.menu.addAction(quit_action)

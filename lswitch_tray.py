@@ -47,28 +47,28 @@ class LSwitchTray(QSystemTrayIcon):
         self.menu.addSeparator()
         
         # Вложенное меню управления службой
-        service_menu = QMenu("🔧 Управление службой", self.menu)
+        service_menu = QMenu("Управление службой", self.menu)
         service_menu.setIcon(QIcon.fromTheme("preferences-system"))
         
         # Статус службы
-        self.status_action = QAction("📊 Статус: Запущен", service_menu)
+        self.status_action = QAction("Статус: Запущен", service_menu)
         self.status_action.setEnabled(False)
         service_menu.addAction(self.status_action)
         
         service_menu.addSeparator()
         
         # Кнопки управления службой во вложенном меню
-        start_action = QAction("▶️ Запустить", service_menu)
+        start_action = QAction("Запустить", service_menu)
         start_action.setIcon(QIcon.fromTheme("media-playback-start"))
         start_action.triggered.connect(self.start_lswitch)
         service_menu.addAction(start_action)
         
-        stop_action = QAction("⏸️ Остановить", service_menu)
+        stop_action = QAction("Остановить", service_menu)
         stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
         stop_action.triggered.connect(self.stop_lswitch)
         service_menu.addAction(stop_action)
         
-        restart_action = QAction("🔄 Перезапустить", service_menu)
+        restart_action = QAction("Перезапустить", service_menu)
         restart_action.setIcon(QIcon.fromTheme("view-refresh"))
         restart_action.triggered.connect(self.restart_lswitch)
         service_menu.addAction(restart_action)
@@ -78,7 +78,7 @@ class LSwitchTray(QSystemTrayIcon):
         self.menu.addSeparator()
         
         # О программе
-        about_action = QAction("ℹ️ О программе", self.menu)
+        about_action = QAction("О программе", self.menu)
         about_action.setIcon(QIcon.fromTheme("help-about"))
         about_action.triggered.connect(self.show_about)
         self.menu.addAction(about_action)
@@ -86,7 +86,7 @@ class LSwitchTray(QSystemTrayIcon):
         self.menu.addSeparator()
         
         # Выход
-        exit_action = QAction("❌ Выход", self.menu)
+        exit_action = QAction("Выход", self.menu)
         exit_action.setIcon(QIcon.fromTheme("application-exit"))
         exit_action.triggered.connect(self.quit_application)
         self.menu.addAction(exit_action)
