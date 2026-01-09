@@ -21,6 +21,25 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Определяем пользователя X-сессии для остановки пользовательской службы
+X_USER=$(who | grep -E "\(:0\)" | awk '{print $1}' | head -n1)
+if [ -z "$X_USER" ]; then
+    X_USER=$(logname 2>/dev/null || echo "$SUDO_USER")
+fi
+
+echo -e "${YELLOW}🛑 Остановка старых версий службы...${NC}"
+# Останавливаем системную службу (если запущена)
+systemctl stop lswitch.service 2>/dev/null && echo "   ✓ Системная служба остановлена"
+systemctl disable lswitch.service 2>/dev/null
+
+# Останавливаем пользовательскую службу (если запущена)
+if [ -n "$X_USER" ]; then
+    sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user stop lswitch.service 2>/dev/null && echo "   ✓ Пользовательская служба остановлена"
+fi
+
+# Останавливаем GUI приложения
+pkill -f "lswitch_control.py|lswitch-control" 2>/dev/null && echo "   ✓ GUI приложения остановлены"
+
 echo -e "${YELLOW}📦 Установка зависимостей...${NC}"
 apt-get update -qq
 apt-get install -y python3-evdev python3-pyqt5 xclip xdotool
@@ -104,23 +123,24 @@ systemctl daemon-reload
 echo
 echo -e "${GREEN}✅ Установка завершена!${NC}"
 echo
-echo -e "${YELLOW}Управление сервисом:${NC}"
-echo -e "  • Запустить:           sudo systemctl start lswitch"
-echo -e "  • Остановить:          sudo systemctl stop lswitch"
-echo -e "  • Перезапустить:       sudo systemctl restart lswitch"
-echo -e "  • Статус:              sudo systemctl status lswitch"
-echo -e "  • Включить автозапуск: ${GREEN}sudo systemctl enable lswitch${NC}"
-echo -e "  • Отключить автозапуск: sudo systemctl disable lswitch"
+echo -e "${YELLOW}Управление сервисом (пользовательская служба):${NC}"
+echo -e "  • Запустить:           systemctl --user start lswitch"
+echo -e "  • Остановить:          systemctl --user stop lswitch"
+echo -e "  • Перезапустить:       systemctl --user restart lswitch"
+echo -e "  • Статус:              systemctl --user status lswitch"
+echo -e "  • Включить автозапуск: ${GREEN}systemctl --user enable lswitch${NC}"
+echo -e "  • Отключить автозапуск: systemctl --user disable lswitch"
 echo
 echo -e "${YELLOW}GUI Панель управления:${NC}"
 echo -e "  lswitch-control  ${GREEN}(рекомендуется - полная панель управления)${NC}"
 echo -e "  lswitch-tray     (простой трей для тестирования)"
 echo
 echo -e "${YELLOW}Логи:${NC}"
-echo -e "  sudo journalctl -u lswitch -f"
+echo -e "  journalctl --user -u lswitch -f"
 echo
 echo -e "${YELLOW}Конфигурация:${NC}"
-echo -e "  /etc/lswitch/config.json"
+echo -e "  /etc/lswitch/config.json (системная)"
+echo -e "  ~/.config/lswitch/user_dict.json (пользовательский словарь)"
 echo
 echo -e "${GREEN}Иконки меню:${NC} Используются системные темы Qt"
 echo -e "${GREEN}Чекбоксы:${NC} Отображаются как иконки для выравнивания текста"
@@ -128,11 +148,19 @@ echo
 read -p "Включить автозапуск при загрузке системы? (y/n): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    systemctl enable lswitch
-    systemctl start lswitch
+    # Копируем systemd unit в пользовательскую папку и включаем
+    sudo -u $X_USER mkdir -p /home/$X_USER/.config/systemd/user
+    cp /etc/systemd/system/lswitch.service /home/$X_USER/.config/systemd/user/
+    chown $X_USER:$X_USER /home/$X_USER/.config/systemd/user/lswitch.service
+    
+    sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user daemon-reload
+    sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user enable lswitch
+    sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user start lswitch
+    
     echo -e "${GREEN}✅ Автозапуск включён и сервис запущен!${NC}"
+    echo -e "${YELLOW}Проверьте статус: systemctl --user status lswitch${NC}"
 else
     echo -e "${YELLOW}Сервис установлен, но не запущен.${NC}"
-    echo -e "Запустите вручную: ${GREEN}sudo systemctl start lswitch${NC}"
+    echo -e "Запустите вручную: ${GREEN}systemctl --user start lswitch${NC}"
 fi
 echo
