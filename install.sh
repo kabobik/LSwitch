@@ -47,21 +47,18 @@ install -m 755 lswitch_control.py /usr/local/bin/lswitch-control  # Панель
 # Копируем иконку (программная генерация в runtime)
 install -Dm644 assets/lswitch.svg /usr/share/pixmaps/lswitch.svg
 
-# Устанавливаем .desktop файлы
-install -Dm644 lswitch-tray.desktop /usr/share/applications/lswitch-tray.desktop
-install -Dm644 lswitch-control.desktop /usr/share/applications/lswitch-control.desktop
-# Автозапуск: используем новую панель управления
-install -Dm644 lswitch-control.desktop /etc/xdg/autostart/lswitch-control.desktop
+# .desktop файлы можно создать вручную если нужно
+# GUI запускается напрямую: lswitch-control или lswitch-tray
 
 # Создаём директорию конфигурации
 mkdir -p /etc/lswitch
-install -m 664 config.json /etc/lswitch/config.json
+install -m 664 config/config.json.example /etc/lswitch/config.json
 # Делаем доступным для группы input (для GUI без sudo)
 chgrp input /etc/lswitch/config.json 2>/dev/null || true
 
 echo -e "${YELLOW}🔐 Настройка прав доступа (input devices)...${NC}"
 # Устанавливаем udev правило для доступа к input устройствам
-install -Dm644 99-lswitch.rules /etc/udev/rules.d/99-lswitch.rules
+install -Dm644 config/99-lswitch.rules /etc/udev/rules.d/99-lswitch.rules
 
 # Перезагружаем udev правила
 udevadm control --reload-rules
@@ -99,7 +96,7 @@ X_AUTH="/home/$X_USER/.Xauthority"
 
 # Копируем unit файл и подставляем переменные
 sed -e "s|XAUTHORITY=/home/anton/.Xauthority|XAUTHORITY=$X_AUTH|" \
-    lswitch.service > /etc/systemd/system/lswitch.service
+    config/lswitch.service > /etc/systemd/system/lswitch.service
 
 # Перезагружаем systemd
 systemctl daemon-reload
