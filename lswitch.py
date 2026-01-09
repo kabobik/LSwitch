@@ -1144,6 +1144,11 @@ class LSwitch:
                 if event.code == ecodes.KEY_BACKSPACE:
                     # Backspace уменьшает счётчик и удаляет символ из текстового буфера
                     self.had_backspace = True  # Помечаем что был backspace
+                    
+                    # Сбрасываем отслеживание автоконвертации
+                    if self.last_auto_convert:
+                        self.last_auto_convert = None
+                    
                     if self.chars_in_buffer > 0:
                         self.chars_in_buffer -= 1
                         if self.text_buffer:
@@ -1151,6 +1156,11 @@ class LSwitch:
                 elif event.code not in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
                     # Обрабатываем обычные клавиши
                     self.chars_in_buffer += 1
+                    
+                    # Сбрасываем отслеживание автоконвертации при любом новом символе
+                    # (пользователь продолжает печатать = автоконвертация была правильной)
+                    if self.last_auto_convert:
+                        self.last_auto_convert = None
                     
                     # Добавляем символ в text_buffer (всегда lowercase - для словаря)
                     # RAW события с Shift остаются в event_buffer для правильного replay
