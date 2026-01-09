@@ -763,6 +763,10 @@ class LSwitch:
         
         # Анализируем буфер - какие клавиши нажаты но не отпущены
         for event in self.event_buffer:
+            # Исключаем кнопки мыши - они не должны сохраняться
+            if event.code in (ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE):
+                continue
+            
             if event.value == 1:  # Нажатие
                 currently_pressed[event.code] = event
             elif event.value == 0:  # Отпускание

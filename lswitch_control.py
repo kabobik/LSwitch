@@ -63,6 +63,14 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.layout_timer.timeout.connect(self.check_and_publish_layouts)
         self.layout_timer.start(300000)  # Каждые 5 минут (редко = меньше глюков)
     
+    def update_checkbox_icon(self, action):
+        """Обновляет иконку чекбокса (галочка или пустой квадрат)"""
+        checked = action.property('checked')
+        if checked:
+            action.setIcon(QIcon.fromTheme("checkbox-checked", QIcon.fromTheme("emblem-checked")))
+        else:
+            action.setIcon(QIcon.fromTheme("checkbox", QIcon.fromTheme("emblem-noread")))
+    
     def create_tray_menu(self):
         """Создаёт контекстное меню трея через адаптер"""
         # Создаём меню через адаптер
@@ -103,26 +111,26 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.menu.addMenu(service_menu)
         self.menu.addSeparator()
         
-        # Автопереключение
+        # Автопереключение (использует иконки вместо чекбокса)
         self.auto_switch_action = QAction("Автопереключение", self)
-        self.auto_switch_action.setCheckable(True)
-        self.auto_switch_action.setChecked(self.config.get('auto_switch', True))
-        self.auto_switch_action.triggered.connect(lambda: self.toggle_auto_switch(self.auto_switch_action.isChecked()))
+        self.auto_switch_action.triggered.connect(lambda: self.toggle_auto_switch(not self.auto_switch_action.property('checked')))
+        self.auto_switch_action.setProperty('checked', self.config.get('auto_switch', True))
+        self.update_checkbox_icon(self.auto_switch_action)
         self.menu.addAction(self.auto_switch_action)
         
-        # Самообучающийся словарь
+        # Самообучающийся словарь (использует иконки вместо чекбокса)
         self.user_dict_action = QAction("Самообучающийся словарь", self)
-        self.user_dict_action.setCheckable(True)
-        self.user_dict_action.setChecked(self.config.get('user_dict_enabled', False))
-        self.user_dict_action.triggered.connect(lambda: self.toggle_user_dict(self.user_dict_action.isChecked()))
+        self.user_dict_action.triggered.connect(lambda: self.toggle_user_dict(not self.user_dict_action.property('checked')))
+        self.user_dict_action.setProperty('checked', self.config.get('user_dict_enabled', False))
+        self.update_checkbox_icon(self.user_dict_action)
         self.menu.addAction(self.user_dict_action)
         
-        # Автозапуск
+        # Автозапуск (использует иконки вместо чекбокса)
         self.autostart_action = QAction("Автозапуск службы", self)
-        self.autostart_action.setCheckable(True)
         autostart_enabled = self.get_service_status() == 'enabled'
-        self.autostart_action.setChecked(autostart_enabled)
-        self.autostart_action.triggered.connect(lambda: self.toggle_autostart(self.autostart_action.isChecked()))
+        self.autostart_action.triggered.connect(lambda: self.toggle_autostart(not self.autostart_action.property('checked')))
+        self.autostart_action.setProperty('checked', autostart_enabled)
+        self.update_checkbox_icon(self.autostart_action)
         self.menu.addAction(self.autostart_action)
         
         self.menu.addSeparator()
@@ -385,6 +393,8 @@ class LSwitchControlPanel(QSystemTrayIcon):
     def toggle_auto_switch(self, checked):
         """Переключает режим автопереключения"""
         self.config['auto_switch'] = checked
+        self.auto_switch_action.setProperty('checked', checked)
+        self.update_checkbox_icon(self.auto_switch_action)
         if self.save_config():
             # Отправляем сигнал службе для перезагрузки конфига
             self.reload_service_config()
@@ -400,6 +410,8 @@ class LSwitchControlPanel(QSystemTrayIcon):
     def toggle_user_dict(self, checked):
         """Переключает режим самообучающегося словаря"""
         self.config['user_dict_enabled'] = checked
+        self.user_dict_action.setProperty('checked', checked)
+        self.update_checkbox_icon(self.user_dict_action)
         if self.save_config():
             # Отправляем сигнал службе для перезагрузки конфига
             self.reload_service_config()
@@ -434,8 +446,9 @@ class LSwitchControlPanel(QSystemTrayIcon):
                 QSystemTrayIcon.Information,
                 2000
             )
-            # Обновляем чекбокс
-            self.autostart_action.setChecked(checked)
+            # Обновляем иконку чекбокса
+            self.autostart_action.setProperty('checked', checked)
+            self.update_checkbox_icon(self.autostart_action)
         else:
             self.showMessage(
                 "Ошибка",
@@ -444,7 +457,9 @@ class LSwitchControlPanel(QSystemTrayIcon):
                 3000
             )
             # Возвращаем чекбокс обратно
-            self.autostart_action.setChecked(not checked)
+            checked = not checked
+            self.autostart_action.setProperty('checked', checked)
+            self.update_checkbox_icon(self.autostart_action)
     
     def show_logs(self):
         """Показывает логи в терминале"""
