@@ -194,7 +194,12 @@ class QMenuWrapper:
             
             # Синхронизируем изменения QAction с CustomMenuItem
             def sync_icon():
-                item.setIcon(action.icon())
+                new_icon = action.icon()
+                if not new_icon.isNull():
+                    # Получаем pixmap напрямую из иконки
+                    pixmap = new_icon.pixmap(QSize(24, 24))
+                    item.icon_label.setPixmap(pixmap)
+                    item.icon_label.repaint()  # Принудительная перерисовка
             
             def sync_enabled(enabled):
                 item.setEnabled(enabled)
