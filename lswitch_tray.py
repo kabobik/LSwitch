@@ -35,10 +35,30 @@ class LSwitchTray(QSystemTrayIcon):
         
         self.menu.addSeparator()
         
+        # Вложенное меню управления службой
+        service_menu = QMenu("Управление службой", self.menu)
+        
         # Статус службы
-        self.status_action = QAction("Статус: Запущен", self.menu)
+        self.status_action = QAction("Статус: Запущен", service_menu)
         self.status_action.setEnabled(False)
-        self.menu.addAction(self.status_action)
+        service_menu.addAction(self.status_action)
+        
+        service_menu.addSeparator()
+        
+        # Кнопки управления службой во вложенном меню
+        start_action = QAction("Запустить", service_menu)
+        start_action.triggered.connect(self.start_lswitch)
+        service_menu.addAction(start_action)
+        
+        stop_action = QAction("Остановить", service_menu)
+        stop_action.triggered.connect(self.stop_lswitch)
+        service_menu.addAction(stop_action)
+        
+        restart_action = QAction("Перезапустить", service_menu)
+        restart_action.triggered.connect(self.restart_lswitch)
+        service_menu.addAction(restart_action)
+        
+        self.menu.addMenu(service_menu)
         
         self.menu.addSeparator()
         
@@ -209,47 +229,57 @@ def main():
 
 
 def create_adaptive_icon():
-    """Создает иконку, адаптированную к теме системы"""
-    # Определяем путь к иконке
-    icon_path = os.path.join(os.path.dirname(__file__), 'lswitch.svg')
-    if not os.path.exists(icon_path):
-        icon_path = os.path.join(os.path.dirname(__file__), 'lswitch.png')
-    if not os.path.exists(icon_path):
-        icon_path = '/usr/share/pixmaps/lswitch.svg'
+    """Создает упрощенную иконку для KDE трея"""
+    # Создаем два варианта иконки - для светлой и темной темы
+    icon = QIcon()
     
-    # Пытаемся использовать системную иконку клавиатуры
-    if os.path.exists(icon_path):
-        icon = QIcon(icon_path)
-    else:
-        # Используем стандартную иконку клавиатуры
-        icon = QIcon.fromTheme('input-keyboard', QIcon.fromTheme('preferences-desktop-keyboard'))
+    # Белая иконка для темной темы (Normal/Active)
+    light_pixmap = create_simple_icon(QColor(255, 255, 255))
+    icon.addPixmap(light_pixmap, QIcon.Normal)
+    icon.addPixmap(light_pixmap, QIcon.Active)
     
-    # Если иконка пустая, создаем простую цветную иконку
-    if icon.isNull():
-        pixmap = QPixmap(64, 64)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        
-        # Определяем цвет на основе темы
-        palette = QApplication.instance().palette()
-        text_color = palette.color(palette.WindowText)
-        
-        # Рисуем простой прямоугольник (клавиатура)
-        painter.setPen(text_color)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(8, 20, 48, 24, 4, 4)
-        
-        # Рисуем клавиши
-        for row in range(2):
-            for col in range(5):
-                x = 12 + col * 8
-                y = 24 + row * 8
-                painter.fillRect(x, y, 6, 6, text_color)
-        
-        painter.end()
-        icon = QIcon(pixmap)
+    # Темная иконка для светлой темы (Disabled/Selected)
+    dark_pixmap = create_simple_icon(QColor(50, 50, 50))
+    icon.addPixmap(dark_pixmap, QIcon.Disabled)
+    icon.addPixmap(dark_pixmap, QIcon.Selected)
     
     return icon
+
+
+def create_simple_icon(color):
+    """Создает упрощенную иконку клавиатуры одного цвета"""
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    
+    # Рисуем простую клавиатуру
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(color)
+    
+    # Основной корпус клавиатуры
+    painter.drawRoundedRect(8, 20, 48, 28, 3, 3)
+    
+    # Вырезаем клавиши (создаём эффект углублений)
+    painter.setCompositionMode(QPainter.CompositionMode_DestinationOut)
+    
+    # Ряд 1 - 6 клавиш
+    for col in range(6):
+        x = 12 + col * 7
+        y = 24
+        painter.drawRoundedRect(x, y, 5, 5, 1, 1)
+    
+    # Ряд 2 - 6 клавиш
+    for col in range(6):
+        x = 12 + col * 7
+        y = 32
+        painter.drawRoundedRect(x, y, 5, 5, 1, 1)
+    
+    # Ряд 3 - пробел
+    painter.drawRoundedRect(16, 40, 32, 5, 1, 1)
+    
+    painter.end()
+    return pixmap
 
 
 if __name__ == '__main__':
