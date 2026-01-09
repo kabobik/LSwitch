@@ -25,12 +25,23 @@ class LSwitchTray(QSystemTrayIcon):
         
         # Создаем меню
         self.menu = QMenu()
+    
+    def update_checkbox_icon(self, action):
+        """Обновляет иконку чекбокса (галочка или пустой квадрат)"""
+        checked = action.property('checked')
+        if checked:
+            action.setIcon(QIcon.fromTheme("checkbox-checked", QIcon.fromTheme("emblem-checked")))
+        else:
+            action.setIcon(QIcon.fromTheme("checkbox", QIcon.fromTheme("emblem-noread")))
+    
+    def create_menu(self):
+        """Создает меню трея"""
         
-        # Чекбокс для автопереключения
-        self.auto_switch_action = QAction("Автоперек⁣лючение", self.menu)
-        self.auto_switch_action.setCheckable(True)
-        self.auto_switch_action.setChecked(self.config.get('auto_switch', False))
-        self.auto_switch_action.triggered.connect(self.toggle_auto_switch)
+        # Автопереключение (использует иконки вместо чекбокса)
+        self.auto_switch_action = QAction("Автопереключение", self.menu)
+        self.auto_switch_action.triggered.connect(lambda: self.toggle_auto_switch(not self.auto_switch_action.property('checked')))
+        self.auto_switch_action.setProperty('checked', self.config.get('auto_switch', False))
+        self.update_checkbox_icon(self.auto_switch_action)
         self.menu.addAction(self.auto_switch_action)
         
         self.menu.addSeparator()
@@ -124,6 +135,8 @@ class LSwitchTray(QSystemTrayIcon):
     def toggle_auto_switch(self, checked):
         """Переключает режим автопереключения"""
         self.config['auto_switch'] = checked
+        self.auto_switch_action.setProperty('checked', checked)
+        self.update_checkbox_icon(self.auto_switch_action)
         self.save_config()
         
         status = "включено" if checked else "выключено"
