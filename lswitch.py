@@ -1001,19 +1001,20 @@ class LSwitch:
             
             if time_since_auto < timeout:
                 # Пользователь вручную переключает обратно - значит автоконвертация была НЕПРАВИЛЬНОЙ
-                # Добавляем ОРИГИНАЛЬНОЕ слово (в неправильной раскладке) как защищённое
-                original_word = self.last_auto_convert['word']
+                # Добавляем ИСПРАВЛЕННОЕ слово (то, что получится после ручного переключения) как защищённое
+                # Это и есть правильный вариант, который не надо автоконвертировать
+                corrected_word = self.last_auto_convert['converted_to']  # То, что было после автоконвертации
                 
-                # Язык ОРИГИНАЛЬНОГО слова (текущий/неправильный)
-                has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in original_word)
-                original_lang = 'ru' if has_cyrillic else 'en'
+                # Определяем язык ИСПРАВЛЕННОГО слова
+                has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in corrected_word)
+                corrected_lang = 'ru' if has_cyrillic else 'en'
                 
-                self.user_dict.add_correction(original_word, original_lang, debug=self.config.get('debug'))
+                self.user_dict.add_correction(corrected_word, corrected_lang, debug=self.config.get('debug'))
                 
                 if self.config.get('debug'):
-                    protected, weight = self.user_dict.is_protected(original_word, original_lang)
+                    protected, weight = self.user_dict.is_protected(corrected_word, corrected_lang)
                     status = f"защищено (вес: {weight})" if protected else f"вес: {weight}"
-                    print(f"📚 Автоконвертация отменена: '{original_word}' (неправильная раскладка) добавлено в защиту → {status}")
+                    print(f"📚 Коррекция: '{corrected_word}' добавлено в защиту (не автоконвертировать) → {status}")
             
             # Очищаем после обработки
             self.last_auto_convert = None
