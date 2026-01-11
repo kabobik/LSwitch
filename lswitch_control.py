@@ -146,7 +146,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
         # Автозапуск (настоящий checkable action)
         self.autostart_action = QAction("Автозапуск службы", self)
         self.autostart_action.setCheckable(True)
-        self.autostart_checked = self.get_service_status() == 'enabled'
+        self.autostart_checked = self.is_service_enabled()
         self.autostart_action.setChecked(self.autostart_checked)
         self.autostart_action.triggered.connect(self.toggle_autostart)
         self.menu.addAction(self.autostart_action)
@@ -498,13 +498,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
     
     def on_tray_activated(self, reason):
         """Обработка клика по иконке в трее"""
-        if reason == QSystemTrayIcon.Trigger:  # Левый клик - показываем статус
-            status = self.get_service_status()
-            if status == 'active':
-                self.showMessage("LSwitch", "Служба работает ✅", QSystemTrayIcon.Information, 2000)
-            else:
-                self.showMessage("LSwitch", "Служба остановлена ⏸", QSystemTrayIcon.Warning, 2000)
-        elif reason == QSystemTrayIcon.Context:  # Правый клик
+        if reason == QSystemTrayIcon.Context:  # Правый клик - показываем меню
             # Для CustomMenu показываем меню вручную
             if not self.adapter.supports_native_menu():
                 self.menu.popup(QCursor.pos())
