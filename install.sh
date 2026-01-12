@@ -16,9 +16,10 @@ echo
 
 # Проверка прав root
 if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}❌ Запустите скрипт с правами root:${NC}"
-    echo -e "   sudo ./install.sh"
-    exit 1
+    echo -e "${YELLOW}⚠️  Внимание: скрипт работает без root-прав${NC}"
+    echo -e "${YELLOW}   Некоторые операции могут не выполниться${NC}"
+    echo -e "${YELLOW}   Для полной установки используйте: sudo ./install.sh${NC}"
+    echo
 fi
 
 # Определяем пользователя X-сессии для остановки пользовательской службы
@@ -29,16 +30,19 @@ fi
 
 echo -e "${YELLOW}🛑 Остановка старых версий службы...${NC}"
 # Останавливаем системную службу (если запущена)
-systemctl stop lswitch.service 2>/dev/null && echo "   ✓ Системная служба остановлена"
-systemctl disable lswitch.service 2>/dev/null
+systemctl stop lswitch.service 2>/dev/null && echo "   ✓ Системная служба остановлена" || true
+systemctl disable lswitch.service 2>/dev/null || true
 
 # Останавливаем пользовательскую службу (если запущена)
 if [ -n "$X_USER" ]; then
-    sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user stop lswitch.service 2>/dev/null && echo "   ✓ Пользовательская служба остановлена"
+    USER_ID=$(id -u $X_USER 2>/dev/null || echo "")
+    if [ -n "$USER_ID" ]; then
+        sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$USER_ID systemctl --user stop lswitch.service 2>/dev/null && echo "   ✓ Пользовательская служба остановлена" || true
+    fi
 fi
 
 # Останавливаем GUI приложения
-pkill -f "lswitch_control.py|lswitch-control" 2>/dev/null && echo "   ✓ GUI приложения остановлены"
+pkill -f "lswitch_control.py|lswitch-control" 2>/dev/null && echo "   ✓ GUI приложения остановлены" || true
 
 echo -e "${YELLOW}📦 Установка зависимостей...${NC}"
 apt-get update -qq
@@ -66,8 +70,12 @@ install -m 755 lswitch_control.py /usr/local/bin/lswitch-control  # Панель
 # Копируем иконку (программная генерация в runtime)
 install -Dm644 assets/lswitch.svg /usr/share/pixmaps/lswitch.svg
 
-# .desktop файлы можно создать вручную если нужно
-# GUI запускается напрямую: lswitch-control или lswitch-tray
+# Копируем .desktop файл для системного меню
+install -Dm644 config/lswitch-control.desktop /usr/share/applications/lswitch-control.desktop
+
+# Обновляем базу данных приложений
+echo -e "${YELLOW}📋 Обновление базы данных приложений...${NC}"
+update-desktop-database /usr/share/applications/ 2>/dev/null && echo "   ✓ База данных приложений обновлена" || echo "   ⚠️  Не удалось обновить БД (опционально)"
 
 # Создаём директорию конфигурации
 mkdir -p /etc/lswitch

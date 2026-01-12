@@ -60,9 +60,13 @@ build_deb() {
     # Desktop файл
     cp config/lswitch-control.desktop "$DEB_DIR/usr/share/applications/"
     
+    # udev правила
+    mkdir -p "$DEB_DIR/etc/udev/rules.d"
+    cp config/99-lswitch.rules "$DEB_DIR/etc/udev/rules.d/" 2>/dev/null || true
+    
     # Иконка (если есть)
-    if [ -f "lswitch.svg" ]; then
-        cp lswitch.svg "$DEB_DIR/usr/share/icons/hicolor/scalable/apps/"
+    if [ -f "assets/lswitch.svg" ]; then
+        cp assets/lswitch.svg "$DEB_DIR/usr/share/icons/hicolor/scalable/apps/"
     fi
     
     # Создаём control файл
@@ -230,6 +234,7 @@ rm -rf %{buildroot}
 mkdir -p %{buildroot}/usr/local/bin
 mkdir -p %{buildroot}/usr/local/lib/lswitch/{adapters,utils}
 mkdir -p %{buildroot}/etc/lswitch
+mkdir -p %{buildroot}/etc/udev/rules.d
 mkdir -p %{buildroot}/usr/share/applications
 mkdir -p %{buildroot}/usr/share/icons/hicolor/scalable/apps
 
@@ -238,6 +243,8 @@ install -m 755 lswitch.py %{buildroot}/usr/local/bin/lswitch
 install -m 755 lswitch_control.py %{buildroot}/usr/local/bin/lswitch-control
 install -m 644 config/config.json.example %{buildroot}/etc/lswitch/config.json
 install -m 644 config/lswitch-control.desktop %{buildroot}/usr/share/applications/
+install -m 644 config/99-lswitch.rules %{buildroot}/etc/udev/rules.d/
+install -m 644 assets/lswitch.svg %{buildroot}/usr/share/icons/hicolor/scalable/apps/
 
 cp -r adapters/*.py %{buildroot}/usr/local/lib/lswitch/adapters/
 cp -r utils/*.py %{buildroot}/usr/local/lib/lswitch/utils/
@@ -247,7 +254,9 @@ cp -r utils/*.py %{buildroot}/usr/local/lib/lswitch/utils/
 /usr/local/bin/lswitch-control
 /usr/local/lib/lswitch/
 %config(noreplace) /etc/lswitch/config.json
+/etc/udev/rules.d/99-lswitch.rules
 /usr/share/applications/lswitch-control.desktop
+/usr/share/icons/hicolor/scalable/apps/lswitch.svg
 
 %post
 # Добавляем пользователя в группу input

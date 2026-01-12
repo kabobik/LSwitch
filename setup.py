@@ -30,8 +30,11 @@ setup(
         ],
     },
     data_files=[
-        ('/etc/lswitch', ['config.json']),
-        ('/etc/systemd/system', ['lswitch.service']),
+        ('/etc/lswitch', ['config/config.json.example']),
+        ('/etc/systemd/user', ['config/lswitch.service']),
+        ('/etc/udev/rules.d', ['config/99-lswitch.rules']),
+        ('/usr/share/applications', ['config/lswitch-control.desktop']),
+        ('/usr/share/pixmaps', ['assets/lswitch.svg']),
     ],
     classifiers=[
         'Development Status :: 4 - Beta',

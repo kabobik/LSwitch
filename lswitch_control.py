@@ -23,6 +23,107 @@ from adapters import get_adapter
 from utils.desktop import detect_desktop_environment, detect_display_server
 
 
+def get_system_scale_factor():
+    """
+    Получить коэффициент масштабирования из системы.
+    Проверяет несколько источников:
+    1. Переменные окружения Qt (QT_SCALE_FACTOR, QT_AUTO_SCREEN_SCALE_FACTOR)
+    2. Переменные окружения GTK (GDK_SCALE, GDK_DPI_SCALE)
+    3. GNOME текстовое масштабирование (text-scaling-factor)
+    4. Физический DPI монитора
+    """
+    scale = 1.0
+    
+    try:
+        # 1. Проверяем переменные окружения Qt
+        qt_scale = os.environ.get('QT_SCALE_FACTOR')
+        if qt_scale:
+            try:
+                scale = float(qt_scale)
+                print(f"Найден QT_SCALE_FACTOR: {scale}", flush=True)
+                return scale
+            except ValueError:
+                pass
+        
+        # 2. Проверяем GTK масштабирование
+        gdk_scale = os.environ.get('GDK_SCALE')
+        if gdk_scale:
+            try:
+                scale = float(gdk_scale)
+                print(f"Найден GDK_SCALE: {scale}", flush=True)
+                return scale
+            except ValueError:
+                pass
+        
+        gdk_dpi_scale = os.environ.get('GDK_DPI_SCALE')
+        if gdk_dpi_scale:
+            try:
+                scale = float(gdk_dpi_scale)
+                print(f"Найден GDK_DPI_SCALE: {scale}", flush=True)
+                return scale
+            except ValueError:
+                pass
+        
+        # 3. Проверяем GNOME масштабирование шрифтов
+        try:
+            result = subprocess.run(
+                ['gsettings', 'get', 'org.gnome.desktop.interface', 'text-scaling-factor'],
+                capture_output=True, text=True, timeout=2
+            )
+            if result.returncode == 0:
+                gnome_scale = float(result.stdout.strip())
+                if gnome_scale != 1.0:
+                    scale = gnome_scale
+                    print(f"Найден GNOME text-scaling-factor: {scale}", flush=True)
+                    return scale
+        except Exception:
+            pass
+        
+        # 4. Физический DPI экрана (проверяем через Qt)
+        app = QApplication.instance()
+        if app:
+            screen = app.primaryScreen()
+            if screen:
+                logical_dpi = screen.logicalDotsPerInch()
+                physical_dpi = screen.physicalDotsPerInch()
+                
+                # Сравниваем логический и физический DPI
+                if physical_dpi > 0 and logical_dpi > 0:
+                    dpi_scale = physical_dpi / logical_dpi
+                    if abs(dpi_scale - 1.0) > 0.1:  # Если отличие > 10%
+                        scale = dpi_scale
+                        print(f"Рассчитан DPI масштаб (physical/logical): {physical_dpi}/{logical_dpi} = {scale:.2f}", flush=True)
+                        return scale
+                
+                # Если масштаб не найден, используем логический DPI
+                # (для HiDPI мониторов, где стандартный DPI не 96)
+                if logical_dpi != 96:
+                    scale = logical_dpi / 96.0
+                    print(f"Рассчитан масштаб из логического DPI: {logical_dpi}/96 = {scale:.2f}", flush=True)
+                    return scale
+        
+    except Exception as e:
+        print(f"Ошибка при получении масштаба: {e}", flush=True)
+    
+    print(f"Используется стандартный масштаб: {scale}", flush=True)
+    return max(1.0, scale)
+
+
+def apply_scaling(app, scale_factor=None):
+    """
+    Применить масштабирование к приложению.
+    """
+    if scale_factor is None:
+        scale_factor = get_system_scale_factor()
+    
+    # Информационный вывод
+    if scale_factor > 1.0:
+        app.setApplicationDisplayName(f"LSwitch Control (масштаб x{scale_factor:.2f})")
+    
+    print(f"Финальный коэффициент масштабирования: {scale_factor:.2f}", flush=True)
+    return scale_factor
+
+
 class LSwitchControlPanel(QSystemTrayIcon):
     """Панель управления в системном трее"""
     
@@ -586,8 +687,15 @@ def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     
+    # Устанавливаем атрибуты HiDPI ДО создания приложения
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    
+    # Применяем масштабирование из системы
+    scale_factor = apply_scaling(app)
     
     # Устанавливаем стиль Fusion для кросс-платформенности
     app.setStyle('Fusion')

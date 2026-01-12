@@ -25,30 +25,30 @@ class CustomMenuItem(QWidget):
         self.checkable = checkable
         self.checkbox = None
         
-        self.setMinimumHeight(48)
+        self.setMinimumHeight(24)  # Было 21, увеличили немного
         self.setCursor(Qt.PointingHandCursor)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 12, 20, 12)
-        layout.setSpacing(18)
+        layout.setContentsMargins(9, 5, 9, 5)  # Было (14, 8, 14, 8)
+        layout.setSpacing(8)  # Было 12
         
         # Если это checkable элемент, добавляем чекбокс
         if checkable:
             self.checkbox = QCheckBox()
             self.checkbox.setStyleSheet(f"""
                 QCheckBox::indicator {{
-                    width: 20px;
-                    height: 20px;
+                    width: 12px;
+                    height: 12px;
                 }}
                 QCheckBox::indicator:unchecked {{
                     background-color: rgb(60, 60, 65);
                     border: 1px solid rgb(100, 100, 105);
-                    border-radius: 3px;
+                    border-radius: 2px;
                 }}
                 QCheckBox::indicator:checked {{
                     background-color: rgb(52, 152, 219);
                     border: 1px solid rgb(41, 128, 185);
-                    border-radius: 3px;
+                    border-radius: 2px;
                 }}
             """)
             self.checkbox.setAttribute(Qt.WA_TransparentForMouseEvents)  # Не перехватывает клики
@@ -57,19 +57,19 @@ class CustomMenuItem(QWidget):
         else:
             # Иконка для обычных пунктов
             self.icon_label = QLabel()
-            self.icon_label.setFixedSize(24, 24)
+            self.icon_label.setFixedSize(14, 14)  # Было (10, 10), увеличили
             if icon and not icon.isNull():
-                self.icon_label.setPixmap(icon.pixmap(QSize(24, 24)))
+                self.icon_label.setPixmap(icon.pixmap(QSize(14, 14)))
             layout.addWidget(self.icon_label)
         
         self.label = QLabel(text)
         self.label.setStyleSheet(f"""
             color: rgb({fg_color[0]}, {fg_color[1]}, {fg_color[2]}); 
             background: transparent; 
-            font-size: 24px;
+            font-size: 10px;
             border: none;
             padding: 0;
-        """)
+        """)  # Было 12px, уменьшили до 10px
         layout.addWidget(self.label)
         layout.addStretch()
         
@@ -89,7 +89,7 @@ class CustomMenuItem(QWidget):
     def setIcon(self, icon):
         """Обновляет иконку элемента"""
         if self.icon_label and not icon.isNull():
-            pixmap = icon.pixmap(QSize(24, 24))
+            pixmap = icon.pixmap(QSize(14, 14))  # Было (10, 10), увеличили
             self.icon_label.setPixmap(pixmap)
             self.icon_label.repaint()
             self.update()
@@ -163,8 +163,8 @@ class CustomMenu(QWidget):
         """)
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(6, 8, 6, 8)
-        self.layout.setSpacing(5)
+        self.layout.setContentsMargins(3, 3, 3, 3)  # Было (4, 5, 4, 5)
+        self.layout.setSpacing(2)  # Было 3
         
         self.items = []
     
