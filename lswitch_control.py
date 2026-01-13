@@ -5,6 +5,8 @@ LSwitch - GUI панель управления службой
 Модульная версия с адаптерами под разные DE
 """
 
+__version__ = '1.0.0'
+
 import sys
 import os
 import json
@@ -14,11 +16,14 @@ import subprocess
 import time
 from PyQt5.QtWidgets import (QApplication, QSystemTrayIcon, QAction,
                              QMessageBox, QLabel)
-from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPalette, QCursor
+from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPalette, QCursor, QFont
 from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, QSize
 
+# Импортируем локализацию
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from i18n import t, get_lang
+
 # Импортируем адаптеры
-sys.path.insert(0, '/home/anton/VsCode/LSwitch')
 from adapters import get_adapter
 from utils.desktop import detect_desktop_environment, detect_display_server
 
@@ -178,90 +183,122 @@ class LSwitchControlPanel(QSystemTrayIcon):
         
         # Проверяем, нужно ли использовать кастомное меню
         if not self.adapter.supports_native_menu():
-            print("Используется кастомное меню (CustomMenu)", flush=True)
+            print(t('using_custom_menu'), flush=True)
         else:
-            print("Используется нативное QMenu", flush=True)
+            print(t('using_native_menu'), flush=True)
+        
+        # Настройка шрифта меню (14 пикселей)
+        menu_font = QFont()
+        menu_font.setPointSize(14)
+        self.menu.setFont(menu_font)
         
         # Заголовок меню
-        title_action = QAction("LSwitch Control", self)
+        title_action = QAction(t('lswitch_control'), self)
         title_action.setEnabled(False)
         self.menu.addAction(title_action)
         self.menu.addSeparator()
         
-        # Управление службой (для Cinnamon без вложенного меню)
-        if self.de == 'cinnamon':
-            self.start_action = QAction("Запустить", self)
-            self.start_action.setIcon(QIcon.fromTheme("media-playback-start"))
-            self.start_action.triggered.connect(self.start_service)
-            self.menu.addAction(self.start_action)
-            
-            self.stop_action = QAction("Остановить", self)
-            self.stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
-            self.stop_action.triggered.connect(self.stop_service)
-            self.menu.addAction(self.stop_action)
-            
-            self.restart_action = QAction("Перезапустить", self)
-            self.restart_action.setIcon(QIcon.fromTheme("view-refresh"))
-            self.restart_action.triggered.connect(self.restart_service)
-            self.menu.addAction(self.restart_action)
-            
-            self.menu.addSeparator()
-        else:
-            # Вложенное меню для KDE и других DE
-            from PyQt5.QtWidgets import QMenu as QtMenu
-            service_menu = QtMenu("Управление службой", self)
-            service_menu.setIcon(QIcon.fromTheme("preferences-system"))
-            
-            self.start_action = QAction("Запустить", service_menu)
-            self.start_action.setIcon(QIcon.fromTheme("media-playback-start"))
-            self.start_action.triggered.connect(self.start_service)
-            service_menu.addAction(self.start_action)
-            
-            self.stop_action = QAction("Остановить", service_menu)
-            self.stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
-            self.stop_action.triggered.connect(self.stop_service)
-            service_menu.addAction(self.stop_action)
-            
-            self.restart_action = QAction("Перезапустить", service_menu)
-            self.restart_action.setIcon(QIcon.fromTheme("view-refresh"))
-            self.restart_action.triggered.connect(self.restart_service)
-            service_menu.addAction(self.restart_action)
-            
-            self.menu.addMenu(service_menu)
-            self.menu.addSeparator()
+        # Вложенное меню управления службой (для всех DE)
+        service_menu = self.menu.addMenu(t('service_management'))
+        service_menu.setIcon(QIcon.fromTheme("preferences-system"))
+        service_menu.setFont(menu_font)  # Применяем тот же шрифт
+        
+        self.start_action = QAction("Запустить", service_menu)
+        self.start_action.setIcon(QIcon.fromTheme("media-playback-start"))
+        self.start_action.triggered.connect(self.start_service)
+        service_menu.addAction(self.start_action)
+        
+        self.stop_action = QAction("Остановить", service_menu)
+        self.stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
+        self.stop_action.triggered.connect(self.stop_service)
+        service_menu.addAction(self.stop_action)
+        
+        self.restart_action = QAction("Перезапустить", service_menu)
+        self.restart_action.setIcon(QIcon.fromTheme("view-refresh"))
+        self.restart_action.triggered.connect(self.restart_service)
+        service_menu.addAction(self.restart_action)
+        
+        service_menu.addSeparator()
+        
+        # Автозапуск службы в подменю (checkable action)
+        self.autostart_action = QAction("Автозапуск службы", service_menu)
+        self.autostart_action.setCheckable(True)
+        self.autostart_checked = self.is_service_enabled()
+        self.autostart_action.setChecked(self.autostart_checked)
+        self.autostart_action.triggered.connect(self.toggle_autostart)
+        service_menu.addAction(self.autostart_action)
+        
+        self.menu.addSeparator()
         
         # Автопереключение (настоящий checkable action)
-        self.auto_switch_action = QAction("Автопереключение", self)
+        self.auto_switch_action = QAction(t('auto_switch'), self)
         self.auto_switch_action.setCheckable(True)
         self.auto_switch_action.setChecked(self.auto_switch_checked)
         self.auto_switch_action.triggered.connect(self.toggle_auto_switch)
         self.menu.addAction(self.auto_switch_action)
         
         # Самообучающийся словарь (настоящий checkable action)
-        self.user_dict_action = QAction("Самообучающийся словарь", self)
+        self.user_dict_action = QAction(t('self_learning_dict'), self)
         self.user_dict_action.setCheckable(True)
         self.user_dict_action.setChecked(self.user_dict_checked)
         self.user_dict_action.triggered.connect(self.toggle_user_dict)
         self.menu.addAction(self.user_dict_action)
         
-        # Автозапуск (настоящий checkable action)
-        self.autostart_action = QAction("Автозапуск службы", self)
+        self.menu.addSeparator()
+        
+        # Подменю "Управление службой"
+        from PyQt5.QtWidgets import QMenu as QtMenu
+        self.service_menu = QtMenu("Управление службой")  # Сохраняем ссылку как атрибут класса
+        self.service_menu.setIcon(QIcon.fromTheme("preferences-system"))
+        
+        # Статус службы
+        self.status_action = QAction("Статус: " + self.get_service_status(), self.service_menu)
+        self.status_action.setEnabled(False)
+        self.service_menu.addAction(self.status_action)
+        
+        self.service_menu.addSeparator()
+        
+        # Запустить (сохраняем как атрибут класса)
+        self.start_action = QAction("Запустить", self.service_menu)
+        self.start_action.setIcon(QIcon.fromTheme("media-playback-start"))
+        self.start_action.triggered.connect(self.start_service)
+        self.service_menu.addAction(self.start_action)
+        
+        # Остановить (сохраняем как атрибут класса)
+        self.stop_action = QAction("Остановить", self.service_menu)
+        self.stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
+        self.stop_action.triggered.connect(self.stop_service)
+        self.service_menu.addAction(self.stop_action)
+        
+        # Перезапустить (сохраняем как атрибут класса)
+        self.restart_action = QAction("Перезапустить", self.service_menu)
+        self.restart_action.setIcon(QIcon.fromTheme("view-refresh"))
+        self.restart_action.triggered.connect(self.restart_service)
+        self.service_menu.addAction(self.restart_action)
+        
+        self.service_menu.addSeparator()
+        
+        # Автозапуск службы
+        self.autostart_action = QAction("Автозапуск службы", self.service_menu)
         self.autostart_action.setCheckable(True)
         self.autostart_checked = self.is_service_enabled()
         self.autostart_action.setChecked(self.autostart_checked)
         self.autostart_action.triggered.connect(self.toggle_autostart)
-        self.menu.addAction(self.autostart_action)
+        self.service_menu.addAction(self.autostart_action)
+        
+        # Добавляем подменю в главное меню
+        self.menu.addMenu(self.service_menu)
         
         self.menu.addSeparator()
         
-        # Логи
-        logs_action = QAction("Показать логи", self)
-        logs_action.setIcon(QIcon.fromTheme("utilities-log-viewer"))
-        logs_action.triggered.connect(self.show_logs)
-        self.menu.addAction(logs_action)
+        # Логи (скрыто)
+        # logs_action = QAction("Показать логи", self)
+        # logs_action.setIcon(QIcon.fromTheme("utilities-log-viewer"))
+        # logs_action.triggered.connect(self.show_logs)
+        # self.menu.addAction(logs_action)
         
         # О программе
-        about_action = QAction("О программе", self)
+        about_action = QAction(t('about'), self)
         about_action.setIcon(QIcon.fromTheme("help-about"))
         about_action.triggered.connect(self.show_about)
         self.menu.addAction(about_action)
@@ -269,7 +306,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.menu.addSeparator()
         
         # Выход
-        quit_action = QAction("Выход из панели", self)
+        quit_action = QAction(t('quit_panel'), self)
         quit_action.setIcon(QIcon.fromTheme("application-exit"))
         quit_action.triggered.connect(self.quit_application)
         self.menu.addAction(quit_action)
@@ -318,6 +355,35 @@ class LSwitchControlPanel(QSystemTrayIcon):
         except Exception:
             return 'unknown'
     
+    def update_service_status(self):
+        """Обновляет отображение статуса службы в меню"""
+        status = self.get_service_status()
+        status_map = {
+            'active': t('status_running'),
+            'inactive': t('status_stopped'),
+            'failed': t('status_error'),
+            'unknown': t('status_unknown')
+        }
+        status_text = status_map.get(status, status)
+        self.status_action.setText(f"{t('status')}: {status_text}")
+        
+        # Управление доступностью кнопок в зависимости от статуса
+        if status == 'active':
+            # Служба запущена - можно только остановить или перезапустить
+            self.start_action.setEnabled(False)
+            self.stop_action.setEnabled(True)
+            self.restart_action.setEnabled(True)
+        elif status in ['inactive', 'failed']:
+            # Служба остановлена - можно только запустить
+            self.start_action.setEnabled(True)
+            self.stop_action.setEnabled(False)
+            self.restart_action.setEnabled(False)
+        else:
+            # Статус неизвестен - все кнопки доступны
+            self.start_action.setEnabled(True)
+            self.stop_action.setEnabled(True)
+            self.restart_action.setEnabled(True)
+    
     def is_service_enabled(self):
         """Проверяет, включен ли автозапуск"""
         try:
@@ -361,7 +427,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
                         layouts = [l.strip() for l in layout_list.split(',')]
                         # Нормализуем us -> en
                         layouts = ['en' if l == 'us' else l for l in layouts if l]
-                        print(f"✓ Раскладки из конфига KDE: {layouts}", flush=True)
+                        print(t('detected_layouts', layouts=layouts), flush=True)
                 except Exception as e:
                     print(f"⚠️  Ошибка чтения kxkbrc: {e}", flush=True)
             
@@ -488,26 +554,26 @@ class LSwitchControlPanel(QSystemTrayIcon):
     def start_service(self):
         """Запускает службу"""
         if self.run_systemctl('start'):
-            self.showMessage("LSwitch", "Служба запущена", QSystemTrayIcon.Information, 2000)
+            self.showMessage("LSwitch", t('service_started'), QSystemTrayIcon.Information, 2000)
         else:
-            self.showMessage("Ошибка", "Не удалось запустить службу", QSystemTrayIcon.Critical, 3000)
-        self.update_status()
+            self.showMessage(t('error'), t('failed_to_start'), QSystemTrayIcon.Critical, 3000)
+        self.update_service_status()
     
     def stop_service(self):
         """Останавливает службу"""
         if self.run_systemctl('stop'):
-            self.showMessage("LSwitch", "Служба остановлена", QSystemTrayIcon.Information, 2000)
+            self.showMessage("LSwitch", t('service_stopped'), QSystemTrayIcon.Information, 2000)
         else:
-            self.showMessage("Ошибка", "Не удалось остановить службу", QSystemTrayIcon.Critical, 3000)
-        self.update_status()
+            self.showMessage(t('error'), t('failed_to_stop'), QSystemTrayIcon.Critical, 3000)
+        self.update_service_status()
     
     def restart_service(self):
         """Перезапускает службу"""
         if self.run_systemctl('restart'):
-            self.showMessage("LSwitch", "Служба перезапущена", QSystemTrayIcon.Information, 2000)
+            self.showMessage("LSwitch", t('service_restarted'), QSystemTrayIcon.Information, 2000)
         else:
-            self.showMessage("Ошибка", "Не удалось перезапустить службу", QSystemTrayIcon.Critical, 3000)
-        self.update_status()
+            self.showMessage(t('error'), t('failed_to_restart'), QSystemTrayIcon.Critical, 3000)
+        self.update_service_status()
     
     def toggle_auto_switch(self):
         """Переключает режим автопереключения"""
@@ -518,10 +584,10 @@ class LSwitchControlPanel(QSystemTrayIcon):
             # Отправляем сигнал службе для перезагрузки конфига
             self.reload_service_config()
             
-            status = "включено" if self.auto_switch_checked else "выключено"
+            status_msg = t('auto_switch_enabled') if self.auto_switch_checked else t('auto_switch_disabled')
             self.showMessage(
                 "LSwitch",
-                f"Автопереключение {status}",
+                status_msg,
                 QSystemTrayIcon.Information,
                 2000
             )
@@ -535,13 +601,10 @@ class LSwitchControlPanel(QSystemTrayIcon):
             # Отправляем сигнал службе для перезагрузки конфига
             self.reload_service_config()
             
-            status = "включён" if self.user_dict_checked else "выключен"
-            msg = f"Самообучающийся словарь {status}"
-            if self.user_dict_checked:
-                msg += "\n\nСистема будет запоминать ваши корректировки"
+            status_msg = t('dict_enabled') if self.user_dict_checked else t('dict_disabled')
             self.showMessage(
                 "LSwitch",
-                msg,
+                status_msg,
                 QSystemTrayIcon.Information,
                 3000
             )
@@ -559,10 +622,10 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.autostart_checked = not self.autostart_checked
         action = 'enable' if self.autostart_checked else 'disable'
         if self.run_systemctl(action):
-            status = "включен" if self.autostart_checked else "выключен"
+            status_msg = t('autostart_enabled') if self.autostart_checked else t('autostart_disabled')
             self.showMessage(
                 "LSwitch",
-                f"Автозапуск {status}",
+                status_msg,
                 QSystemTrayIcon.Information,
                 2000
             )
@@ -573,8 +636,8 @@ class LSwitchControlPanel(QSystemTrayIcon):
             self.autostart_checked = not self.autostart_checked
             self.autostart_action.setChecked(self.autostart_checked)
             self.showMessage(
-                "Ошибка",
-                f"Не удалось изменить автозапуск",
+                t('error'),
+                t('failed_to_change_autostart'),
                 QSystemTrayIcon.Critical,
                 3000
             )
@@ -600,22 +663,23 @@ class LSwitchControlPanel(QSystemTrayIcon):
     def on_tray_activated(self, reason):
         """Обработка клика по иконке в трее"""
         if reason == QSystemTrayIcon.Context:  # Правый клик - показываем меню
+            # Обновляем статус службы перед показом меню
+            self.update_service_status()
             # Для CustomMenu показываем меню вручную
             if not self.adapter.supports_native_menu():
                 self.menu.popup(QCursor.pos())
     
     def show_about(self):
         """Показывает информацию о программе"""
-        de_info = f"DE: {self.de}, Display: {self.display_server}"
-        adapter_info = f"Адаптер: {self.adapter.__class__.__name__}"
+        de_info = t('about_de_info', de=self.de, display=self.display_server)
+        adapter_info = t('about_adapter', adapter=self.adapter.__class__.__name__)
         
         self.showMessage(
-            "LSwitch v1.0",
-            f"Панель управления переключателем раскладки\n"
-            f"Двойной Shift для переключения и конвертации текста\n\n"
-            f"{de_info}\n"
-            f"{adapter_info}\n\n"
-            f"© 2026 Anton",
+            t('about_title', version=__version__),
+            f"{t('about_description')}\\n\\n"
+            f"{de_info}\\n"
+            f"{adapter_info}\\n\\n"
+            f"{t('about_copyright')}",
             QSystemTrayIcon.Information,
             5000
         )
@@ -708,7 +772,7 @@ def main():
     panel = LSwitchControlPanel(icon)
     panel.show()
     
-    print("LSwitch Control Panel запущен", flush=True)
+    print(t('panel_started'), flush=True)
     panel.showMessage(
         "LSwitch",
         "Панель управления готова\nСлужба работает независимо",

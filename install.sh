@@ -63,9 +63,8 @@ cp -r adapters /usr/local/lib/lswitch/
 cp -r utils /usr/local/lib/lswitch/
 chmod -R 755 /usr/local/lib/lswitch
 
-# Копируем GUI версии
-install -m 755 lswitch_tray.py /usr/local/bin/lswitch-tray  # Простой трей (для тестирования)
-install -m 755 lswitch_control.py /usr/local/bin/lswitch-control  # Панель управления (рекомендуется)
+# Копируем GUI панель управления
+install -m 755 lswitch_control.py /usr/local/bin/lswitch-control
 
 # Копируем иконку (программная генерация в runtime)
 install -Dm644 assets/lswitch.svg /usr/share/pixmaps/lswitch.svg
@@ -140,8 +139,7 @@ echo -e "  • Включить автозапуск: ${GREEN}systemctl --user e
 echo -e "  • Отключить автозапуск: systemctl --user disable lswitch"
 echo
 echo -e "${YELLOW}GUI Панель управления:${NC}"
-echo -e "  lswitch-control  ${GREEN}(рекомендуется - полная панель управления)${NC}"
-echo -e "  lswitch-tray     (простой трей для тестирования)"
+echo -e "  lswitch-control  ${GREEN}(панель управления с поддержкой всех DE)${NC}"
 echo
 echo -e "${YELLOW}Логи:${NC}"
 echo -e "  journalctl --user -u lswitch -f"

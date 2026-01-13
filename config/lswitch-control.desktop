@@ -1,10 +1,10 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=LSwitch Control Panel
-Name[ru]=Панель управления LSwitch
-GenericName=Keyboard Layout Switcher Control
-GenericName[ru]=Панель управления переключателем раскладки
+Name=LSwitcher
+Name[ru]=LSwitcher
+GenericName=Keyboard Layout Switcher
+GenericName[ru]=Переключатель раскладки клавиатуры
 Comment=Control panel for LSwitch systemd service
 Comment[ru]=Панель управления службой LSwitch
 Icon=lswitch

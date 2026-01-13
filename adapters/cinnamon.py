@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """Адаптер GUI для Cinnamon Desktop Environment"""
 
-import sys
-sys.path.insert(0, '/home/anton/VsCode/LSwitch')
-
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QSize
 from PyQt5.QtWidgets import QDesktopWidget
@@ -25,51 +22,61 @@ class CustomMenuItem(QWidget):
         self.checkable = checkable
         self.checkbox = None
         
-        self.setMinimumHeight(24)  # Было 21, увеличили немного
+        self.setMinimumHeight(28)  # Увеличили для лучшего отображения
         self.setCursor(Qt.PointingHandCursor)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(9, 5, 9, 5)  # Было (14, 8, 14, 8)
-        layout.setSpacing(8)  # Было 12
+        layout.setContentsMargins(8, 4, 8, 4)  # Уменьшили отступы
+        layout.setSpacing(8)
         
         # Если это checkable элемент, добавляем чекбокс
         if checkable:
             self.checkbox = QCheckBox()
+            self.checkbox.setFixedSize(16, 16)  # Фиксированный размер для выравнивания
             self.checkbox.setStyleSheet(f"""
+                QCheckBox {{
+                    spacing: 0px;
+                }}
                 QCheckBox::indicator {{
-                    width: 12px;
-                    height: 12px;
+                    width: 16px;
+                    height: 16px;
                 }}
                 QCheckBox::indicator:unchecked {{
                     background-color: rgb(60, 60, 65);
                     border: 1px solid rgb(100, 100, 105);
-                    border-radius: 2px;
+                    border-radius: 3px;
                 }}
                 QCheckBox::indicator:checked {{
                     background-color: rgb(52, 152, 219);
                     border: 1px solid rgb(41, 128, 185);
-                    border-radius: 2px;
+                    border-radius: 3px;
+                    image: url(none);
+                }}
+                QCheckBox::indicator:checked::after {{
+                    content: "✓";
                 }}
             """)
-            self.checkbox.setAttribute(Qt.WA_TransparentForMouseEvents)  # Не перехватывает клики
+            self.checkbox.setAttribute(Qt.WA_TransparentForMouseEvents)
             layout.addWidget(self.checkbox)
             self.icon_label = None
         else:
-            # Иконка для обычных пунктов
+            # Иконка для обычных пунктов (или пустое место для выравнивания)
             self.icon_label = QLabel()
-            self.icon_label.setFixedSize(14, 14)  # Было (10, 10), увеличили
+            self.icon_label.setFixedSize(16, 16)  # Такой же размер как чекбокс
+            self.icon_label.setScaledContents(True)  # Масштабировать содержимое
             if icon and not icon.isNull():
-                self.icon_label.setPixmap(icon.pixmap(QSize(14, 14)))
+                pixmap = icon.pixmap(QSize(16, 16))
+                self.icon_label.setPixmap(pixmap)
             layout.addWidget(self.icon_label)
         
         self.label = QLabel(text)
         self.label.setStyleSheet(f"""
             color: rgb({fg_color[0]}, {fg_color[1]}, {fg_color[2]}); 
             background: transparent; 
-            font-size: 10px;
+            font-size: 14px;
             border: none;
             padding: 0;
-        """)  # Было 12px, уменьшили до 10px
+        """)
         layout.addWidget(self.label)
         layout.addStretch()
         
@@ -89,7 +96,7 @@ class CustomMenuItem(QWidget):
     def setIcon(self, icon):
         """Обновляет иконку элемента"""
         if self.icon_label and not icon.isNull():
-            pixmap = icon.pixmap(QSize(14, 14))  # Было (10, 10), увеличили
+            pixmap = icon.pixmap(QSize(16, 16))
             self.icon_label.setPixmap(pixmap)
             self.icon_label.repaint()
             self.update()
@@ -115,7 +122,7 @@ class CustomMenuItem(QWidget):
         self.label.setStyleSheet(f"""
             color: {text_color}; 
             background: transparent; 
-            font-size: 24px;
+            font-size: 14px;
             border: none;
             padding: 0;
         """)
@@ -141,6 +148,68 @@ class CustomMenuSeparator(QWidget):
         super().__init__()
         self.setFixedHeight(1)
         self.setStyleSheet(f"background-color: rgb({color[0]}, {color[1]}, {color[2]}); margin: 6px 10px;")
+
+
+class CustomSubmenuItem(QWidget):
+    """Пункт меню с подменю"""
+    def __init__(self, text, submenu, icon=None, bg_color=(46,46,51), fg_color=(255,255,255)):
+        super().__init__()
+        self.bg_color = bg_color
+        self.fg_color = fg_color
+        self.hover_color = tuple(min(255, c + 20) for c in bg_color)
+        self.submenu = submenu
+        
+        self.setMinimumHeight(28)  # Такая же высота как у обычных пунктов
+        self.setCursor(Qt.PointingHandCursor)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)  # Такие же отступы
+        layout.setSpacing(8)
+        
+        # Иконка с фиксированным размером для выравнивания
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(16, 16)  # Такой же размер как у обычных пунктов
+        self.icon_label.setScaledContents(True)
+        if icon and not icon.isNull():
+            pixmap = icon.pixmap(QSize(16, 16))
+            self.icon_label.setPixmap(pixmap)
+        layout.addWidget(self.icon_label)
+        
+        # Текст
+        self.label = QLabel(text)
+        self.label.setStyleSheet(f"""
+            color: rgb({fg_color[0]}, {fg_color[1]}, {fg_color[2]}); 
+            background: transparent; 
+            font-size: 14px;
+            border: none;
+            padding: 0;
+        """)
+        layout.addWidget(self.label)
+        layout.addStretch()
+        
+        # Стрелка вправо
+        arrow = QLabel("▸")
+        arrow.setStyleSheet(f"color: rgb({fg_color[0]}, {fg_color[1]}, {fg_color[2]}); background: transparent; font-size: 12px;")
+        layout.addWidget(arrow)
+        
+        self.updateStyle(False)
+    
+    def updateStyle(self, hover):
+        color = self.hover_color if hover else self.bg_color
+        self.setStyleSheet(f"background-color: rgb({color[0]}, {color[1]}, {color[2]}); border: none;")
+    
+    def enterEvent(self, event):
+        self.updateStyle(True)
+        # Показываем подменю справа от текущего пункта
+        global_pos = self.mapToGlobal(QPoint(self.width(), 0))
+        self.submenu.popup(global_pos)
+    
+    def leaveEvent(self, event):
+        # Проверяем, не навели ли на подменю
+        cursor_pos = self.mapToGlobal(self.mapFromGlobal(self.cursor().pos()))
+        submenu_rect = self.submenu.geometry()
+        if not submenu_rect.contains(self.submenu.mapFromGlobal(self.cursor().pos())):
+            self.updateStyle(False)
 
 
 class CustomMenu(QWidget):
@@ -182,6 +251,12 @@ class CustomMenu(QWidget):
         sep = CustomMenuSeparator(tuple(max(0, c - 10) for c in self.bg_color))
         self.layout.addWidget(sep)
     
+    def addSubmenuItem(self, text, submenu, icon=None):
+        """Добавить пункт с подменю"""
+        item = CustomSubmenuItem(text, submenu, icon, self.bg_color, self.fg_color)
+        self.layout.addWidget(item)
+        return item
+    
     def popup(self, pos):
         """Показать меню в указанной позиции (выше курсора для трея)"""
         self.adjustSize()
@@ -211,6 +286,7 @@ class QMenuWrapper:
     def __init__(self, custom_menu):
         self.custom_menu = custom_menu
         self.actions = []
+        self.submenus = []  # Сохраняем ссылки на подменю
     
     def addAction(self, action_or_text, callback=None):
         """Добавляет QAction или текст в меню"""
@@ -269,6 +345,40 @@ class QMenuWrapper:
     def addSeparator(self):
         """Добавляет разделитель"""
         self.custom_menu.addSeparator()
+    
+    def addMenu(self, submenu_or_text):
+        """Добавляет подменю (настоящее раскрывающееся подменю)"""
+        from PyQt5.QtWidgets import QMenu
+        
+        if isinstance(submenu_or_text, QMenu):
+            # Если это QMenu, создаем CustomMenu для подменю
+            submenu_qmenu = submenu_or_text
+            self.submenus.append(submenu_qmenu)  # Сохраняем ссылку!
+            
+            title = submenu_qmenu.title()
+            icon = submenu_qmenu.icon()
+            
+            # Создаем CustomMenu для отображения подменю
+            submenu_widget = CustomMenu(self.custom_menu.bg_color, self.custom_menu.fg_color)
+            submenu_wrapper = QMenuWrapper(submenu_widget)
+            
+            # Добавляем все action из QMenu в CustomMenu
+            for action in submenu_qmenu.actions():
+                if action.isSeparator():
+                    submenu_wrapper.addSeparator()
+                else:
+                    submenu_wrapper.addAction(action)
+            
+            # Добавляем пункт с подменю
+            self.custom_menu.addSubmenuItem(title, submenu_widget, icon)
+            
+            return submenu_qmenu
+        else:
+            # Создаем новое подменю и возвращаем обертку
+            from PyQt5.QtWidgets import QMenu as QtMenu
+            submenu = QtMenu(submenu_or_text)
+            self.submenus.append(submenu)  # Сохраняем ссылку!
+            return submenu
     
     def popup(self, pos):
         """Показывает меню"""

@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """Адаптер GUI для KDE Plasma Desktop Environment"""
 
-import sys
-sys.path.insert(0, '/home/anton/VsCode/LSwitch')
-
 from PyQt5.QtWidgets import QMenu, QAction
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtCore import Qt
