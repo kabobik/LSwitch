@@ -25,6 +25,11 @@ class UserDictionary:
         self.config_dir = Path(config_dir)
         self.dict_file = self.config_dir / 'user_dict.json'
         
+        # Отложенное сохранение
+        self.pending_save = False
+        self.last_save_time = 0
+        self.save_interval = 3.0  # Сохранять не чаще раз в 3 секунды
+        
         # Создаём директорию если не существует
         self.config_dir.mkdir(parents=True, exist_ok=True)
         
@@ -55,16 +60,37 @@ class UserDictionary:
             return self._load()  # Возвращаем пустой
     
     def _save(self):
-        """Сохраняет словарь в файл"""
+        """Сохраняет словарь в файл (с отложенной записью)"""
+        import time
+        
+        current_time = time.time()
+        
+        # Если прошло достаточно времени - сохраняем сразу
+        if current_time - self.last_save_time >= self.save_interval:
+            self._do_save()
+            self.last_save_time = current_time
+            self.pending_save = False
+        else:
+            # Иначе помечаем что нужно сохранить позже
+            self.pending_save = True
+    
+    def _do_save(self):
+        """Реальное сохранение в файл"""
         try:
             with open(self.dict_file, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"⚠️  Ошибка сохранения user_dict: {e}")
     
+    def flush(self):
+        """Принудительное сохранение (вызывать перед выходом)"""
+        if self.pending_save:
+            self._do_save()
+            self.pending_save = False
+    
     def add_correction(self, word, lang, debug=False):
         """
-        Добавляет слово в словарь или увеличивает его вес
+        Добавляет слово в защищенные (коррекция после автоконвертации)
         
         Args:
             word: Исправленное слово (правильное)
@@ -73,31 +99,31 @@ class UserDictionary:
         """
         word_lower = word.lower()
         
-        if word_lower in self.data['words']:
+        # Инициализируем protected если нет
+        if 'protected' not in self.data:
+            self.data['protected'] = {}
+        if lang not in self.data['protected']:
+            self.data['protected'][lang] = {}
+        
+        if word_lower in self.data['protected'][lang]:
             # Слово уже есть - увеличиваем вес
-            self.data['words'][word_lower]['weight'] += 1
-            self.data['words'][word_lower]['last_seen'] = datetime.now().isoformat()
-            
+            self.data['protected'][lang][word_lower] += 1
             if debug:
-                weight = self.data['words'][word_lower]['weight']
-                print(f"📚 User Dict: '{word}' вес увеличен → {weight}")
+                weight = self.data['protected'][lang][word_lower]
+                print(f"📚 Protected: '{word}' ({lang}) вес увеличен → {weight}")
         else:
-            # Новое слово
-            self.data['words'][word_lower] = {
-                'weight': 1,
-                'lang': lang,
-                'added_at': datetime.now().isoformat(),
-                'last_seen': datetime.now().isoformat()
-            }
-            
+            # Новое защищенное слово
+            self.data['protected'][lang][word_lower] = 1
             if debug:
-                print(f"📚 User Dict: Добавлено '{word}' (lang: {lang})")
+                print(f"📚 Protected: Добавлено '{word}' ({lang}) вес: 1")
         
         # Увеличиваем счётчик
-        self.data['stats']['total_corrections'] += 1
+        if 'stats' not in self.data:
+            self.data['stats'] = {'total_corrections': 0}
+        self.data['stats']['total_corrections'] = self.data['stats'].get('total_corrections', 0) + 1
         
-        # Проверяем лимит слов
-        self._check_limit()
+        # Сохраняем
+        self._save()
         
         # Сохраняем
         self._save()
@@ -120,7 +146,7 @@ class UserDictionary:
     
     def is_protected(self, word, lang):
         """
-        Проверяет защищено ли слово (вес >= min_weight)
+        Проверяет защищено ли слово
         
         Args:
             word: Слово для проверки
@@ -131,18 +157,13 @@ class UserDictionary:
         """
         word_lower = word.lower()
         
-        if word_lower not in self.data['words']:
-            return (False, 0)
+        # Проверяем новую структуру protected
+        if 'protected' in self.data and lang in self.data['protected']:
+            if word_lower in self.data['protected'][lang]:
+                weight = self.data['protected'][lang][word_lower]
+                return (True, weight)
         
-        entry = self.data['words'][word_lower]
-        
-        # Проверяем язык и вес
-        if entry['lang'] == lang:
-            weight = entry['weight']
-            min_weight = self.data['settings']['min_weight']
-            return (weight >= min_weight, weight)
-        
-        return (False, entry['weight'])
+        return (False, 0)
     
     def add_conversion(self, word, from_lang, to_lang, debug=False):
         """

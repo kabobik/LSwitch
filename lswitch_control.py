@@ -8,8 +8,10 @@ LSwitch - GUI панель управления службой
 import sys
 import os
 
-# Импортируем версию
+# Добавляем пути для импорта модулей
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, '/usr/local/lib/lswitch')
+
 from __version__ import __version__
 import json
 import time
@@ -22,7 +24,6 @@ from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPalette, QCursor, QFo
 from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, QSize
 
 # Импортируем локализацию
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n import t, get_lang
 
 # Импортируем адаптеры

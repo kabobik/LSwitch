@@ -49,9 +49,13 @@ build_deb() {
     cp dictionary.py "$DEB_DIR/usr/local/bin/"
     cp ngrams.py "$DEB_DIR/usr/local/bin/"
     cp user_dictionary.py "$DEB_DIR/usr/local/bin/"
-    cp i18n.py "$DEB_DIR/usr/local/bin/"
+    cp __version__.py "$DEB_DIR/usr/local/bin/"
     chmod +x "$DEB_DIR/usr/local/bin/lswitch"
     chmod +x "$DEB_DIR/usr/local/bin/lswitch-control"
+    
+    # Копируем модули в /usr/local/lib/lswitch/ для lswitch-control
+    cp i18n.py "$DEB_DIR/usr/local/lib/lswitch/"
+    cp __version__.py "$DEB_DIR/usr/local/lib/lswitch/"
     
     # Адаптеры
     cp adapters/*.py "$DEB_DIR/usr/local/lib/lswitch/adapters/"
@@ -207,8 +211,9 @@ build_rpm() {
     TARBALL="${PACKAGE_NAME}-${VERSION}.tar.gz"
     tar czf "$RPM_DIR/SOURCES/$TARBALL" \
         --transform "s,^,${PACKAGE_NAME}-${VERSION}/," \
-        lswitch.py lswitch_control.py config/ \
-        adapters/ utils/ 2>/dev/null || true
+        lswitch.py lswitch_control.py dictionary.py ngrams.py \
+        user_dictionary.py __version__.py i18n.py \
+        config/ adapters/ utils/ assets/ 2>/dev/null || true
     
     # Создаём spec файл
     cat > "$RPM_DIR/SPECS/${PACKAGE_NAME}.spec" << EOF
@@ -246,11 +251,17 @@ mkdir -p %{buildroot}/usr/share/icons/hicolor/scalable/apps
 # Устанавливаем файлы
 install -m 755 lswitch.py %{buildroot}/usr/local/bin/lswitch
 install -m 755 lswitch_control.py %{buildroot}/usr/local/bin/lswitch-control
+install -m 644 dictionary.py %{buildroot}/usr/local/bin/
+install -m 644 ngrams.py %{buildroot}/usr/local/bin/
+install -m 644 user_dictionary.py %{buildroot}/usr/local/bin/
+install -m 644 __version__.py %{buildroot}/usr/local/bin/
 install -m 644 config/config.json.example %{buildroot}/etc/lswitch/config.json
 install -m 644 config/lswitch-control.desktop %{buildroot}/usr/share/applications/
-install -m 644 config/99-lswitch.rules %{buildroot}/etc/udev/rules.d/
-install -m 644 assets/lswitch.svg %{buildroot}/usr/share/icons/hicolor/scalable/apps/
+install -m 644 config/99-lswitch.rules %{buildroot}/etc/udev/rules.d/ 2>/dev/null || true
+install -m 644 assets/lswitch.svg %{buildroot}/usr/share/icons/hicolor/scalable/apps/ 2>/dev/null || true
 
+install -m 644 i18n.py %{buildroot}/usr/local/lib/lswitch/
+install -m 644 __version__.py %{buildroot}/usr/local/lib/lswitch/
 cp -r adapters/*.py %{buildroot}/usr/local/lib/lswitch/adapters/
 cp -r utils/*.py %{buildroot}/usr/local/lib/lswitch/utils/
 

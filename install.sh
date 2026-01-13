@@ -56,10 +56,12 @@ install -m 755 lswitch.py /usr/local/bin/lswitch
 install -m 644 dictionary.py /usr/local/bin/dictionary.py
 install -m 644 ngrams.py /usr/local/bin/ngrams.py
 install -m 644 user_dictionary.py /usr/local/bin/user_dictionary.py
-install -m 644 i18n.py /usr/local/bin/i18n.py
+install -m 644 __version__.py /usr/local/bin/__version__.py
 
 # Копируем адаптеры и утилиты
 mkdir -p /usr/local/lib/lswitch
+cp i18n.py /usr/local/lib/lswitch/i18n.py
+cp __version__.py /usr/local/lib/lswitch/__version__.py
 cp -r adapters /usr/local/lib/lswitch/
 cp -r utils /usr/local/lib/lswitch/
 chmod -R 755 /usr/local/lib/lswitch

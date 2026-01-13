@@ -146,6 +146,8 @@ class LSwitch:
         self.event_buffer = collections.deque(maxlen=1000)
         self.chars_in_buffer = 0
         self.had_backspace = False  # Флаг: был ли backspace (пользователь исправляет)
+        self.consecutive_backspace_repeats = 0  # Счетчик подряд идущих repeat Backspace
+        self.backspace_hold_detected = False  # Флаг удержания Backspace
         
         # Текстовый буфер - реально набранные символы с раскладкой
         self.text_buffer = []  # Список кортежей (символ, раскладка)
@@ -798,6 +800,11 @@ class LSwitch:
         self.chars_in_buffer = 0
         self.had_backspace = False  # Сбрасываем флаг при очистке
         self.text_buffer.clear()
+        
+        # Сбрасываем счетчики и флаги Backspace
+        self.consecutive_backspace_repeats = 0
+        self.backspace_hold_detected = False
+        
         # Очищаем last_auto_convert при сбросе буфера (новый контекст)
         if hasattr(self, 'last_auto_convert'):
             self.last_auto_convert = None
@@ -857,6 +864,45 @@ class LSwitch:
                 if self.config.get('debug'):
                     print(f"Выделенное: '{selected_text}' -> '{converted}'")
                 
+                # Сохраняем информацию для отслеживания успешной ручной конвертации
+                # НО только если это НЕ коррекция после автоконвертации!
+                if self.user_dict and not self.last_auto_convert:
+                    original_text = selected_text.strip().lower()
+                    converted_text = converted.strip().lower()
+                    
+                    # Определяем язык исходного текста
+                    has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in original_text)
+                    from_lang = 'ru' if has_cyrillic else 'en'
+                    to_lang = 'en' if from_lang == 'ru' else 'ru'
+                    
+                    self.last_manual_convert = {
+                        "original": original_text,
+                        "converted": converted_text,
+                        "from_lang": from_lang,
+                        "to_lang": to_lang,
+                        "time": time.time()
+                    }
+                elif self.last_auto_convert:
+                    # Это коррекция! Добавляем в защищенные
+                    time_since_auto = time.time() - self.last_auto_convert['time']
+                    timeout = self.user_dict.data['settings'].get('correction_timeout', 5.0) if self.user_dict else 5.0
+                    
+                    if time_since_auto < timeout:
+                        corrected_word = selected_text.strip().lower()
+                        has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in corrected_word)
+                        corrected_lang = 'ru' if has_cyrillic else 'en'
+                        
+                        if self.user_dict:
+                            self.user_dict.add_correction(corrected_word, corrected_lang, debug=self.config.get('debug'))
+                            
+                            if self.config.get('debug'):
+                                protected, weight = self.user_dict.is_protected(corrected_word, corrected_lang)
+                                status = f"защищено (вес: {weight})" if protected else f"вес: {weight}"
+                                print(f"📚 Коррекция (выделение): '{corrected_word}' добавлено в защиту → {status}")
+                    
+                    # Очищаем после обработки
+                    self.last_auto_convert = None
+                
                 # Переключаем раскладку если нужно (ДО вставки)
                 if self.config.get('switch_layout_after_convert', True):
                     self.switch_keyboard_layout()
@@ -898,6 +944,10 @@ class LSwitch:
                 # КРИТИЧНО: Обновляем снимок ПОСЛЕ всех операций
                 # Это выделение уже обработано и не должно считаться новым
                 self.update_selection_snapshot()
+                
+                # КРИТИЧНО: Очищаем буфер после конвертации выделенного
+                # Иначе повторная конвертация попытается использовать старые данные
+                self.clear_buffer()
             else:
                 if self.config.get('debug'):
                     print("⚠️  Нет выделенного текста")
@@ -1031,9 +1081,16 @@ class LSwitch:
                     protected, weight = self.user_dict.is_protected(corrected_word, corrected_lang)
                     status = f"защищено (вес: {weight})" if protected else f"вес: {weight}"
                     print(f"📚 Коррекция: '{corrected_word}' добавлено в защиту (не автоконвертировать) → {status}")
+                
+                # КРИТИЧНО: НЕ сохраняем как last_manual_convert - это коррекция!
             
             # Очищаем после обработки
             self.last_auto_convert = None
+            
+            # Если это была коррекция - не обрабатываем как обычную конвертацию
+            if time_since_auto < timeout:
+                self.is_converting = False
+                return
         
         try:
             if self.config.get('debug'):
@@ -1121,8 +1178,27 @@ class LSwitch:
                     if self.config.get('debug'):
                         print("✓ Двойной Shift обнаружен!")
                     
-                    # Интуитивная логика: есть выделение → конвертируем выделенное
-                    if self.has_selection():
+                    # ПРОСТАЯ ЛОГИКА:
+                    # Если было удержание Backspace ИЛИ буфер пуст → выделяем + convert_selection()
+                    # Иначе если есть выделение → convert_selection()
+                    # Иначе обычная конвертация
+                    
+                    if self.backspace_hold_detected or self.chars_in_buffer == 0:
+                        reason = "удержание Backspace" if self.backspace_hold_detected else "пустой буфер"
+                        if self.config.get('debug'):
+                            print(f"→ Выделение + конвертация ({reason})")
+                        
+                        try:
+                            # Выделяем последнее слово
+                            subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], 
+                                         timeout=0.3, stderr=subprocess.DEVNULL)
+                            time.sleep(0.03)
+                            self.convert_selection()
+                        except:
+                            pass
+                        
+                        self.backspace_hold_detected = False
+                    elif self.has_selection():
                         if self.config.get('debug'):
                             print("→ Конвертирую выделенный текст")
                         self.convert_selection()
@@ -1132,6 +1208,7 @@ class LSwitch:
                         self.convert_and_retype()
                     
                     self.last_shift_press = 0
+                    self.last_shift_press = 0
                 else:
                     self.last_shift_press = current_time
             return
@@ -1139,6 +1216,9 @@ class LSwitch:
         # ESC - выход
         if event.code == ecodes.KEY_ESC and event.value == 0:
             print("Выход...")
+            # Сохраняем словарь перед выходом
+            if self.user_dict:
+                self.user_dict.flush()
             return False
         
         # Enter - сбрасываем буфер полностью (конец ввода)
@@ -1177,57 +1257,77 @@ class LSwitch:
             # Считаем символы (только при отпускании клавиши)
             if event.value == 0:  # Отпускание
                 if event.code == ecodes.KEY_BACKSPACE:
-                    # Backspace уменьшает счётчик и удаляет символ из текстового буфера
-                    self.had_backspace = True  # Помечаем что был backspace
+                    # Простая логика: уменьшаем счетчик
+                    self.had_backspace = True
                     
-                    # Сбрасываем отслеживание автоконвертации
+                    # Сбрасываем счетчик repeats
+                    self.consecutive_backspace_repeats = 0
+                    
+                    # Сбрасываем отслеживание конвертаций
                     if self.last_auto_convert:
                         self.last_auto_convert = None
-                    
-                    # Сбрасываем отслеживание ручной конвертации (пользователь удаляет = не подходит)
                     if self.last_manual_convert:
                         self.last_manual_convert = None
                     
+                    # Уменьшаем счетчики
                     if self.chars_in_buffer > 0:
                         self.chars_in_buffer -= 1
                         if self.text_buffer:
                             self.text_buffer.pop()
-                elif event.code not in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
-                    # Обрабатываем обычные клавиши
-                    self.chars_in_buffer += 1
-                    
-                    # Сбрасываем отслеживание автоконвертации при любом новом символе
-                    # (пользователь продолжает печатать = автоконвертация была правильной)
-                    if self.last_auto_convert:
-                        self.last_auto_convert = None
-                    
-                    # Сохраняем успешную ручную конвертацию в словарь
-                    # Если пользователь продолжает печатать после ручной конвертации - она была правильной!
-                    if self.user_dict and self.last_manual_convert:
-                        time_since_convert = time.time() - self.last_manual_convert['time']
-                        if time_since_convert < 5.0:  # В течение 5 секунд
-                            original = self.last_manual_convert['original']
-                            converted = self.last_manual_convert['converted']
-                            from_lang = self.last_manual_convert['from_lang']
-                            to_lang = self.last_manual_convert['to_lang']
                             
-                            # Добавляем как успешную конвертацию с направлением
-                            self.user_dict.add_conversion(original, from_lang, to_lang, debug=self.config.get('debug'))
-                            
+            elif event.value == 2:  # Repeat (удержание)
+                if event.code == ecodes.KEY_BACKSPACE:
+                    # ПРОСТОЙ детектор: 3+ повтора = удержание
+                    self.consecutive_backspace_repeats += 1
+                    
+                    if self.consecutive_backspace_repeats >= 3:
+                        if not self.backspace_hold_detected:
+                            self.backspace_hold_detected = True
                             if self.config.get('debug'):
-                                # Проверяем вес
-                                weight = self.user_dict.get_conversion_weight(original, from_lang, to_lang)
-                                auto_status = " → автоконвертация!" if weight >= 5 else ""
-                                print(f"📚 Успешная конвертация сохранена: '{original}' ({from_lang}→{to_lang}), вес: {weight}{auto_status}")
-                        
-                        self.last_manual_convert = None
+                                print(f"⚠️ Удержание Backspace обнаружено")
                     
-                    # Добавляем символ в text_buffer (всегда lowercase - для словаря)
-                    # RAW события с Shift остаются в event_buffer для правильного replay
-                    layout = self.get_current_layout()
-                    char = self.keycode_to_char(event.code, layout, shift=False)
-                    if char:
-                        self.text_buffer.append(char)
+                    # НЕ трогаем счетчики - они не точные при repeats!
+                    # Будем использовать выделение слова при конвертации
+                else:
+                    self.consecutive_backspace_repeats = 0
+                    
+            # Обработка обычных клавиш
+            if event.value == 0 and event.code not in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT, ecodes.KEY_BACKSPACE):
+                # Обрабатываем обычные клавиши
+                self.chars_in_buffer += 1
+                
+                # Сбрасываем отслеживание автоконвертации при любом новом символе
+                # (пользователь продолжает печатать = автоконвертация была правильной)
+                if self.last_auto_convert:
+                    self.last_auto_convert = None
+                
+                # Сохраняем успешную ручную конвертацию в словарь
+                # Если пользователь продолжает печатать после ручной конвертации - она была правильной!
+                if self.user_dict and self.last_manual_convert:
+                    time_since_convert = time.time() - self.last_manual_convert['time']
+                    if time_since_convert < 5.0:  # В течение 5 секунд
+                        original = self.last_manual_convert['original']
+                        converted = self.last_manual_convert['converted']
+                        from_lang = self.last_manual_convert['from_lang']
+                        to_lang = self.last_manual_convert['to_lang']
+                        
+                        # Добавляем как успешную конвертацию с направлением
+                        self.user_dict.add_conversion(original, from_lang, to_lang, debug=self.config.get('debug'))
+                        
+                        if self.config.get('debug'):
+                            # Проверяем вес
+                            weight = self.user_dict.get_conversion_weight(original, from_lang, to_lang)
+                            auto_status = " → автоконвертация!" if weight >= 5 else ""
+                            print(f"📚 Успешная конвертация сохранена: '{original}' ({from_lang}→{to_lang}), вес: {weight}{auto_status}")
+                    
+                    self.last_manual_convert = None
+                
+                # Добавляем символ в text_buffer (всегда lowercase - для словаря)
+                # RAW события с Shift остаются в event_buffer для правильного replay
+                layout = self.get_current_layout()
+                char = self.keycode_to_char(event.code, layout, shift=False)
+                if char:
+                    self.text_buffer.append(char)
                     
                 # Запоминаем если это был пробел
                 if event.code == ecodes.KEY_SPACE:
