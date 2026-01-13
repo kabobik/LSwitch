@@ -3,7 +3,8 @@
 
 set -e
 
-VERSION="1.1.0"
+# Читаем версию из __version__.py
+VERSION=$(python3 -c "import sys; sys.path.insert(0, '.'); from __version__ import __version__; print(__version__)")
 PACKAGE_NAME="lswitch"
 BUILD_DIR="build"
 MAINTAINER="Anton <anton@example.com>"

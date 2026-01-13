@@ -5,10 +5,12 @@ LSwitch - GUI панель управления службой
 Модульная версия с адаптерами под разные DE
 """
 
-__version__ = '1.1.0'
-
 import sys
 import os
+
+# Импортируем версию
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from __version__ import __version__
 import json
 import time
 import signal

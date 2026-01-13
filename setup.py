@@ -5,6 +5,11 @@ Setup script для LSwitch
 
 from setuptools import setup
 import os
+import sys
+
+# Импортируем версию
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from __version__ import __version__
 
 # Читаем README для long_description
 def read_file(filename):
@@ -13,7 +18,7 @@ def read_file(filename):
 
 setup(
     name='lswitch',
-    version='1.1.0',
+    version=__version__,
     description='Layout Switcher for Linux - переключатель раскладки по двойному Shift',
     long_description=read_file('README.md'),
     long_description_content_type='text/markdown',
