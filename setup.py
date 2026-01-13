@@ -13,7 +13,7 @@ def read_file(filename):
 
 setup(
     name='lswitch',
-    version='1.0.0',
+    version='1.1.0',
     description='Layout Switcher for Linux - переключатель раскладки по двойному Shift',
     long_description=read_file('README.md'),
     long_description_content_type='text/markdown',
