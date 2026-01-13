@@ -56,6 +56,7 @@ install -m 755 lswitch.py /usr/local/bin/lswitch
 install -m 644 dictionary.py /usr/local/bin/dictionary.py
 install -m 644 ngrams.py /usr/local/bin/ngrams.py
 install -m 644 user_dictionary.py /usr/local/bin/user_dictionary.py
+install -m 644 i18n.py /usr/local/bin/i18n.py
 
 # Копируем адаптеры и утилиты
 mkdir -p /usr/local/lib/lswitch
@@ -63,7 +64,7 @@ cp -r adapters /usr/local/lib/lswitch/
 cp -r utils /usr/local/lib/lswitch/
 chmod -R 755 /usr/local/lib/lswitch
 
-# Копируем GUI панель управления
+# Копируем GUI панель управления (lswitch-control)
 install -m 755 lswitch_control.py /usr/local/bin/lswitch-control
 
 # Копируем иконку (программная генерация в runtime)

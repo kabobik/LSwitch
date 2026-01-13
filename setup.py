@@ -19,7 +19,8 @@ setup(
     long_description_content_type='text/markdown',
     author='Anton',
     url='https://github.com/yourusername/lswitch',
-    py_modules=['lswitch'],
+    py_modules=['lswitch', 'lswitch_control', 'dictionary', 'ngrams', 'user_dictionary', 'i18n'],
+    packages=['adapters', 'utils'],
     python_requires='>=3.6',
     install_requires=[
         # evdev должен быть установлен через системный менеджер пакетов

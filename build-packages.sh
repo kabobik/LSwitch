@@ -45,6 +45,10 @@ build_deb() {
     # Копируем файлы
     cp lswitch.py "$DEB_DIR/usr/local/bin/lswitch"
     cp lswitch_control.py "$DEB_DIR/usr/local/bin/lswitch-control"
+    cp dictionary.py "$DEB_DIR/usr/local/bin/"
+    cp ngrams.py "$DEB_DIR/usr/local/bin/"
+    cp user_dictionary.py "$DEB_DIR/usr/local/bin/"
+    cp i18n.py "$DEB_DIR/usr/local/bin/"
     chmod +x "$DEB_DIR/usr/local/bin/lswitch"
     chmod +x "$DEB_DIR/usr/local/bin/lswitch-control"
     
