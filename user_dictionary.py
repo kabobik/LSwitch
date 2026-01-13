@@ -45,6 +45,9 @@ class UserDictionary:
         self.last_save_time = time.time()
         self.save_interval = 3.0
         self.pending_save = False
+
+        # In-memory маркеры защиты (быстрее, чтобы избежать гонок между коррекцией и автоконвертацией)
+        self._recent_protections = {}  # canonical -> protected_until (timestamp)
     
     def _load(self):
         """Загружает словарь из файла"""
@@ -66,7 +69,10 @@ class UserDictionary:
             'settings': {
                 'auto_convert_threshold': 5,
                 'learning_step': 1,
-                'correction_penalty': 1
+                'correction_penalty': 1,
+                # Защитное окно после ручной коррекции (секунды).
+                # В течение этого времени автоконвертации НЕ будут увеличивать вес обратно.
+                'post_correction_protection': 10.0
             },
             'stats': {
                 'total_conversions': 0,
@@ -81,7 +87,10 @@ class UserDictionary:
             'settings': {
                 'auto_convert_threshold': 5,
                 'learning_step': 1,
-                'correction_penalty': 1
+                'correction_penalty': 1,
+                # Защитное окно после ручной коррекции (секунды).
+                # В течение этого времени автоконвертации НЕ будут увеличивать вес обратно.
+                'post_correction_protection': 10.0
             },
             'stats': {
                 'total_conversions': 0,
@@ -221,7 +230,25 @@ class UserDictionary:
         """
         canonical = self._canonicalize(word, from_lang)
         learning_step = self.data['settings']['learning_step']
+        # Диагностический лог: фиксируем попытку добавления конверсии
+
         
+        # Защита: если недавно была ручная коррекция для этого слова — не позволяем автоконвертациям
+        # немедленно увеличить вес обратно. Проверяем только если запись уже существует.
+        existing = self.data['conversions'].get(canonical)
+        if existing:
+            # Проверяем in-memory защиту и persisted защиту
+            inmem = self._recent_protections.get(canonical)
+            persisted = existing.get('protected_until')
+            now = time.time()
+            if (inmem and now < inmem) or (persisted and now < persisted):
+                if debug:
+                    print(f"📚 Защита от автоконвертации активна для '{canonical}' (inmem={inmem}, persisted={persisted}), изменение веса пропущено")
+                # Обновим время последнего просмотра
+                existing['last_seen'] = datetime.now().isoformat()
+                self._save()
+                return
+
         if canonical not in self.data['conversions']:
             self.data['conversions'][canonical] = {
                 'weight': 0,
@@ -262,13 +289,22 @@ class UserDictionary:
         """
         canonical = self._canonicalize(word, lang)
         penalty = self.data['settings']['correction_penalty']
+        # Диагностический лог: фиксируем коррекцию
+
         
         if canonical not in self.data['conversions']:
-            # Создаем запись с отрицательным весом
+            # Создаем запись с начальным весом (коррекция)
+            initial = -penalty if lang == 'ru' else penalty
             self.data['conversions'][canonical] = {
-                'weight': -penalty if lang == 'ru' else penalty,
+                'weight': initial,
                 'last_seen': datetime.now().isoformat()
             }
+            if debug:
+                print(f"📚 Correction (new): '{canonical}' ({lang}) -> weight {initial}")
+            # Устанавливаем in-memory защиту чтобы предотвратить немедленные автоконвертации
+            protection = self.data['settings'].get('post_correction_protection', 10.0)
+            self._recent_protections[canonical] = time.time() + protection
+            self.data['conversions'][canonical]['protected_until'] = self._recent_protections[canonical]
         else:
             old_weight = self.data['conversions'][canonical]['weight']
             
@@ -289,10 +325,35 @@ class UserDictionary:
             
             # Удаляем если вес стал 0
             if new_weight == 0:
-                del self.data['conversions'][canonical]
+                # Вместо удаления — оставляем запись с weight=0 и отмечаем protected_until,
+                # чтобы немедленные автоконвертации не вернули её обратно.
+                protection = self.data['settings'].get('post_correction_protection', 10.0)
+                self.data['conversions'][canonical]['weight'] = 0
+                self.data['conversions'][canonical]['last_seen'] = datetime.now().isoformat()
+                self.data['conversions'][canonical]['last_correction'] = datetime.now().isoformat()
+                self.data['conversions'][canonical]['protected_until'] = time.time() + protection
                 if debug:
-                    print(f"📚 Удалено: '{canonical}' (вес = 0)")
+                    print(f"📚 Установлен weight=0 и защита для '{canonical}' до {self.data['conversions'][canonical]['protected_until']}")
+            else:
+                # Устанавливаем маркер защиты от немедленных автоконвертаций
+                protection = self.data['settings'].get('post_correction_protection', 10.0)
+                self.data['conversions'][canonical]['last_correction'] = datetime.now().isoformat()
+                self.data['conversions'][canonical]['protected_until'] = time.time() + protection
+                if debug:
+                    print(f"📚 Защита от автоконвертации для '{canonical}' до {self.data['conversions'][canonical]['protected_until']}")
         
+        # Устанавливаем маркер защиты от немедленных автоконвертаций для свежей записи или после коррекции
+        if canonical in self.data['conversions']:
+            cur = self.data['conversions'][canonical]
+            if cur.get('weight', 0) != 0:
+                protection = self.data['settings'].get('post_correction_protection', 10.0)
+                cur['last_correction'] = datetime.now().isoformat()
+                cur['protected_until'] = time.time() + protection
+                if debug:
+                    print(f"📚 Защита от автоконвертации для '{canonical}' до {cur['protected_until']} (persisted) and inmem until {self._recent_protections.get(canonical)}")
+                # Также устанавливаем in-memory маркер защиты на тот же интервал
+                self._recent_protections[canonical] = time.time() + protection
+
         self.data['stats']['total_corrections'] += 1
         self._save()
     

@@ -1,0 +1,38 @@
+{
+  "conversions": {
+    "test": {
+      "weight": -5,
+      "last_seen": "2026-01-14T00:00:03.524235"
+    },
+    "testdfs": {
+      "weight": 1,
+      "last_seen": "2026-01-13T23:48:50.868273"
+    },
+    "ghjdthm": {
+      "weight": -1,
+      "last_seen": "2026-01-13T23:51:04.338065"
+    },
+    "df": {
+      "weight": -1,
+      "last_seen": "2026-01-13T23:56:18.894589"
+    },
+    "njxyj": {
+      "weight": -2,
+      "last_seen": "2026-01-13T23:56:44.741353"
+    },
+    "hfpf": {
+      "weight": -1,
+      "last_seen": "2026-01-14T00:00:14.251498"
+    }
+  },
+  "settings": {
+    "auto_convert_threshold": 5,
+    "learning_step": 1,
+    "correction_penalty": 1,
+    "min_weight": 2
+  },
+  "stats": {
+    "total_conversions": 16,
+    "total_corrections": 5
+  }
+}

@@ -626,52 +626,50 @@ class LSwitch:
             return
         
         # Проверяем словарь конвертаций - возможно это слово надо автоматически конвертировать
-        if self.user_dict and hasattr(self.user_dict, 'should_auto_convert'):
-            # Определяем текущий язык текста
-            has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in text)
-            from_lang = 'ru' if has_cyrillic else 'en'
-            to_lang = 'en' if from_lang == 'ru' else 'ru'
-            
-            if self.user_dict.should_auto_convert(text, from_lang, to_lang, threshold=5):
-                if self.config.get('debug'):
-                    weight = self.user_dict.get_conversion_weight(text, from_lang, to_lang)
-                    print(f"🎯 Автоконвертация по словарю: '{text}' ({from_lang}→{to_lang}), вес: {weight}")
-                
-                self.convert_and_retype()
-                return
-        
-        # Используем n-граммный анализ для оценки вариантов
         try:
-            from ngrams import should_convert
-            
-            # Передаём user_dict для проверки защищённых слов
-            should_conv, best_text, reason = should_convert(text, threshold=150, user_dict=self.user_dict)
-            
-            if self.config.get('debug'):
-                print(f"🔍 N-грамм анализ: '{text}'")
-                print(f"  → {reason}")
-            
-            if should_conv:
-                if self.config.get('debug'):
-                    print(f"🤖 Автоконвертация: '{text}' → '{best_text}'")
+            if self.user_dict and hasattr(self.user_dict, 'should_auto_convert'):
+                # Определяем текущий язык текста
+                has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in text)
+                from_lang = 'ru' if has_cyrillic else 'en'
+                to_lang = 'en' if from_lang == 'ru' else 'ru'
                 
-                # Сохраняем информацию для отслеживания корректировок пользователем
-                if self.user_dict:
-                    # Определяем язык по СОДЕРЖИМОМУ текста (а не по раскладке клавиатуры)
-                    has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in text)
-                    text_lang = 'ru' if has_cyrillic else 'en'
+                if self.user_dict.should_auto_convert(text, from_lang, to_lang, threshold=5):
+                    if self.config.get('debug'):
+                        weight = self.user_dict.get_conversion_weight(text, from_lang, to_lang)
+                        print(f"🎯 Автоконвертация по словарю: '{text}' ({from_lang}→{to_lang}), вес: {weight}")
                     
+                    # Сохраняем информацию о автоконвертации для возможной коррекции
+                    converted_text = self.convert_text(text)
                     self.last_auto_convert = {
                         "word": text,
-                        "converted_to": best_text,
+                        "converted_to": converted_text,
                         "time": time.time(),
-                        "lang": text_lang  # Язык ТЕКСТА, не раскладки клавиатуры
+                        "lang": from_lang
                     }
+                    # Дублируем маркер в резерве, чтобы его не смогли случайно стереть обработчики событий
+                    self._recent_auto_marker = dict(self.last_auto_convert)
+
+                    if self.config.get('debug'):
+                        print(f"🔍 last_auto_convert set: {self.last_auto_convert}")
+
+                    # Выполняем автоконвертацию (не считаем её за manual)
+                    self.convert_and_retype(is_auto=True)
+                    if self.config.get('debug'):
+                        print("  → автоконвертация выполнена (user_dict route)")
                 
-                self.convert_and_retype()
-            else:
+                # (old ngrams path removed) — user_dict path handled above
                 if self.config.get('debug'):
-                    print(f"  ⏭️  Конвертация не требуется")
+                    print(f"  ⏭️  Конвертация не требуется (user_dict)")
+        except ImportError:
+            # Фолбэк на старую логику если ngrams.py недоступен
+            if self.config.get('debug'):
+                print(f"⚠️  ngrams.py недоступен, используем базовую логику")
+            self._check_with_dictionary(text)
+        except Exception as e:
+            if self.config.get('debug'):
+                import traceback
+                print(f"⚠️  Ошибка автоконвертации: {e}")
+                traceback.print_exc()
                     
         except ImportError:
             # Фолбэк на старую логику если ngrams.py недоступен
@@ -680,8 +678,9 @@ class LSwitch:
             self._check_with_dictionary(text)
         except Exception as e:
             if self.config.get('debug'):
+                import traceback
                 print(f"⚠️  Ошибка автоконвертации: {e}")
-    
+                traceback.print_exc()    
     def _check_with_dictionary(self, text):
         """Фолбэк проверка через словарь (старая логика)"""
         try:
@@ -805,9 +804,9 @@ class LSwitch:
         self.consecutive_backspace_repeats = 0
         self.backspace_hold_detected = False
         
-        # Очищаем last_auto_convert при сбросе буфера (новый контекст)
-        if hasattr(self, 'last_auto_convert'):
-            self.last_auto_convert = None
+        # NOTE: раньше тут обнулялся last_auto_convert, но это мешало ручной коррекции сразу после автоконвертации.
+        # Оставляем last_auto_convert до тех пор, пока пользователь не начнёт ввод (в другом месте оно сбрасывается),
+        # либо пока не истечёт timeout correction_timeout при проверке коррекции.
     
     def convert_text(self, text):
         """Конвертирует текст между раскладками с сохранением регистра"""
@@ -1047,7 +1046,9 @@ class LSwitch:
         except Exception:
             pass
     
-    def convert_and_retype(self):
+    def convert_and_retype(self, is_auto=False):  # is_auto=True when conversion was triggered by autocorrect
+        """Переконвертировать текст в буфере и воспроизвести события.
+        Если is_auto=True, не устанавливаем last_manual_convert и не считаем это за ручную конвертацию."""
         """Конвертирует и перепечатывает последнее слово"""
         # Проверяем наличие минимум 2 раскладок
         if len(self.layouts) < 2:
@@ -1060,37 +1061,12 @@ class LSwitch:
         
         self.is_converting = True
         
-        # Проверяем: это корректировка пользователя после автоконвертации?
-        if self.user_dict and self.last_auto_convert:
-            time_since_auto = time.time() - self.last_auto_convert['time']
-            timeout = self.user_dict.data['settings'].get('correction_timeout', 5.0)
-            
-            if time_since_auto < timeout:
-                # Пользователь вручную переключает обратно - значит автоконвертация была НЕПРАВИЛЬНОЙ
-                # Добавляем ИСПРАВЛЕННОЕ слово (то, что получится после ручного переключения) как защищённое
-                # Это и есть правильный вариант, который не надо автоконвертировать
-                corrected_word = self.last_auto_convert['converted_to']  # То, что было после автоконвертации
-                
-                # Определяем язык ИСПРАВЛЕННОГО слова
-                has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in corrected_word)
-                corrected_lang = 'ru' if has_cyrillic else 'en'
-                
-                self.user_dict.add_correction(corrected_word, corrected_lang, debug=self.config.get('debug'))
-                
-                if self.config.get('debug'):
-                    protected, weight = self.user_dict.is_protected(corrected_word, corrected_lang)
-                    status = f"защищено (вес: {weight})" if protected else f"вес: {weight}"
-                    print(f"📚 Коррекция: '{corrected_word}' добавлено в защиту (не автоконвертировать) → {status}")
-                
-                # КРИТИЧНО: НЕ сохраняем как last_manual_convert - это коррекция!
-            
-            # Очищаем после обработки
-            self.last_auto_convert = None
-            
-            # Если это была коррекция - не обрабатываем как обычную конвертацию
-            if time_since_auto < timeout:
-                self.is_converting = False
-                return
+        # Если была недавняя автоконвертация — отметим её в логах, но НЕ очищаем маркер.
+        # Это нужно, чтобы последующая ручная конвертация могла быть распознана как коррекция
+        # (проверка и очистка выполняется в блоке для ручной конвертации ниже).
+        if self.user_dict and self.last_auto_convert and self.config.get('debug'):
+            age = time.time() - self.last_auto_convert['time']
+            print(f"🔍 Обнаружена недавняя автоконвертация (age={age:.2f}s), проверку коррекции выполним позже")
         
         try:
             if self.config.get('debug'):
@@ -1101,7 +1077,8 @@ class LSwitch:
             num_chars = self.chars_in_buffer
             
             # Сохраняем информацию для отслеживания успешной ручной конвертации
-            if self.user_dict and len(self.text_buffer) > 0:
+            # Только если это НЕ автоконвертация
+            if not is_auto and self.user_dict and len(self.text_buffer) > 0:
                 original_text = ''.join(self.text_buffer)
                 # Определяем язык исходного текста
                 has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in original_text)
@@ -1119,10 +1096,54 @@ class LSwitch:
                     "time": time.time()
                 }
                 if self.config.get('debug'):
-                    print(f"🔍 last_manual_convert (convert_and_retype): {self.last_manual_convert}")
-                if self.config.get('debug'):
-                    print(f"🔍 last_manual_convert (selection): {self.last_manual_convert}")
-            
+                    print(f"🔍 last_manual_convert (convert_and_retype - manual): {self.last_manual_convert}")
+
+                # Если сразу после автоконвертации пользователь вручную вернул слово — фиксируем коррекцию
+                auto_marker = self.last_auto_convert or getattr(self, '_recent_auto_marker', None)
+                if self.user_dict and auto_marker:
+                    try:
+                        time_since_auto = time.time() - auto_marker['time']
+                        timeout = self.user_dict.data['settings'].get('correction_timeout', 5.0)
+
+                        # Логируем диагностику для выяснения почему коррекция не срабатывает
+                        print(f"🔍 CHECK CORRECTION: time_since_auto={time_since_auto:.3f}s, timeout={timeout}")
+                        print(f"🔍 auto_marker: {auto_marker}")
+
+                        # Канонизируем и сравниваем, чтобы избежать проблем с кейсом/раскладкой
+                        def canon(s):
+                            s_clean = (s or '').strip()
+                            lang = 'ru' if any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in s_clean) else 'en'
+                            try:
+                                return self.user_dict._canonicalize(s_clean, lang)
+                            except Exception:
+                                return s_clean.lower()
+
+                        orig_canon = canon(original_text)
+                        auto_conv_canon = canon(auto_marker.get('converted_to', ''))
+                        conv_canon = canon(converted_text)
+                        auto_word_canon = canon(auto_marker.get('word', ''))
+
+                        # Печатаем канонические формы для диагностики
+                        print(f"🔍 canons: orig_canon={orig_canon!r}, auto_conv_canon={auto_conv_canon!r}, conv_canon={conv_canon!r}, auto_word_canon={auto_word_canon!r}")
+
+                        if time_since_auto < timeout and orig_canon == auto_conv_canon and conv_canon == auto_word_canon:
+                            corrected_word = converted_text.strip().lower()
+                            has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in corrected_word)
+                            corrected_lang = 'ru' if has_cyrillic else 'en'
+
+                            # Регистрируем коррекцию в словаре
+                            print(f"📚 APPLY CORRECTION: '{corrected_word}' ({corrected_lang})")
+                            self.user_dict.add_correction(corrected_word, corrected_lang, debug=self.config.get('debug'))
+                            print(f"📚 Коррекция (convert_and_retype) применена для '{corrected_word}'")
+
+                            # Очищаем запись о последней автоконвертации
+                            self.last_auto_convert = None
+                            self._recent_auto_marker = None
+                        else:
+                            print("🔍 Условие коррекции не выполнено — не будет add_correction")
+                    except Exception as e:
+                        print(f"⚠️ Ошибка при проверке коррекции: {e}")
+
             # Очищаем буфер (чтобы не накапливались события)
             self.clear_buffer()
             
@@ -1142,6 +1163,26 @@ class LSwitch:
             # Это позволяет конвертировать назад при повторном двойном Shift
             self.event_buffer = collections.deque(events_to_replay, maxlen=1000)
             self.chars_in_buffer = num_chars
+
+            # ВАЖНО: обновляем текстовый буфер, чтобы он отражал текущий (сконвертированный) текст.
+            # Иначе при немедленном ручном возврате (double Shift) мы будем читать старый текст и
+            # неправильно фиксировать направление. Если у нас есть вычисленный converted_text — используем его.
+            try:
+                if 'converted_text' in locals() and converted_text:
+                    # converted_text — строка
+                    self.text_buffer = list(converted_text)
+                else:
+                    # Фолбэк: восстановим из событий, если есть
+                    self.text_buffer = []
+                    layout = self.get_current_layout()
+                    for ev in events_to_replay:
+                        if ev.value == 0:
+                            ch = self.keycode_to_char(ev.code, layout, shift=False)
+                            if ch:
+                                self.text_buffer.append(ch)
+            except Exception:
+                # Не фатально — оставим буфер пустым
+                self.text_buffer = []
             
             if self.config.get('debug'):
                 print("✓ Конвертация завершена")
@@ -1213,6 +1254,8 @@ class LSwitch:
                             print("→ Конвертирую выделенный текст")
                         self.convert_selection()
                     else:
+                        # Диагностика: логируем состояние маркеров автоконвертации/буфера перед ручной конвертацией
+
                         if self.config.get('debug'):
                             print("→ Конвертирую последнее слово")
                         self.convert_and_retype()
