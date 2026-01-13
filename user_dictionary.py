@@ -1,77 +1,141 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Пользовательский словарь - самообучающаяся система
-Запоминает слова, которые пользователь исправляет после автоконвертации
+Пользовательский словарь для LSwitch - UNIFIED VERSION
+Единый словарь с симметричными весами:
+  weight > 0: правильная форма = EN
+  weight < 0: правильная форма = RU
+  weight = 0: удалить запись
 """
 
 import json
 import os
+import time
 from datetime import datetime
-from pathlib import Path
 
 
 class UserDictionary:
-    """Управление пользовательским словарём с весами"""
-    
-    def __init__(self, config_dir=None):
+    def __init__(self, dict_file=None):
         """
+        Инициализация пользовательского словаря
+        
         Args:
-            config_dir: Директория для хранения словаря
-                       По умолчанию: ~/.config/lswitch/
+            dict_file: Путь к файлу словаря
         """
-        if config_dir is None:
+        if dict_file is None:
             config_dir = os.path.expanduser('~/.config/lswitch')
+            os.makedirs(config_dir, exist_ok=True)
+            dict_file = os.path.join(config_dir, 'user_dict.json')
         
-        self.config_dir = Path(config_dir)
-        self.dict_file = self.config_dir / 'user_dict.json'
+        self.dict_file = dict_file
         
-        # Отложенное сохранение
-        self.pending_save = False
-        self.last_save_time = 0
-        self.save_interval = 3.0  # Сохранять не чаще раз в 3 секунды
+        # Таблица конвертации RU↔EN
+        self.ru_to_en = str.maketrans(
+            "йцукенгшщзхъфывапролджэячсмитьбюЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ",
+            "qwertyuiop[]asdfghjkl;'zxcvbnm,.QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>"
+        )
+        self.en_to_ru = str.maketrans(
+            "qwertyuiop[]asdfghjkl;'zxcvbnm,.QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>",
+            "йцукенгшщзхъфывапролджэячсмитьбюЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ"
+        )
         
-        # Создаём директорию если не существует
-        self.config_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Загружаем словарь
         self.data = self._load()
+        
+        # Для отложенного сохранения
+        self.last_save_time = time.time()
+        self.save_interval = 3.0
+        self.pending_save = False
     
     def _load(self):
         """Загружает словарь из файла"""
-        if not self.dict_file.exists():
-            return {
-                'words': {},
-                'settings': {
-                    'min_weight': 2,      # Минимальный вес для применения
-                    'max_words': 1000,    # Максимум слов в словаре
-                    'correction_timeout': 5.0  # Таймаут для связи коррекции с автоконвертацией (сек)
-                },
-                'stats': {
-                    'total_corrections': 0,
-                    'created_at': datetime.now().isoformat()
-                }
-            }
+        if os.path.exists(self.dict_file):
+            try:
+                with open(self.dict_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    # Миграция старого формата
+                    if 'protected' in data or ('conversions' in data and any(':' in k for k in data['conversions'].keys())):
+                        print("📦 Миграция словаря на новый формат...")
+                        return self._migrate_old_format(data)
+                    return data
+            except Exception as e:
+                print(f"⚠️  Ошибка загрузки user_dict: {e}")
         
-        try:
-            with open(self.dict_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"⚠️  Ошибка загрузки user_dict: {e}")
-            return self._load()  # Возвращаем пустой
+        # Новый пустой словарь
+        return {
+            'conversions': {},
+            'settings': {
+                'auto_convert_threshold': 5,
+                'learning_step': 1,
+                'correction_penalty': 1
+            },
+            'stats': {
+                'total_conversions': 0,
+                'total_corrections': 0
+            }
+        }
+    
+    def _migrate_old_format(self, old_data):
+        """Миграция старого формата"""
+        new_data = {
+            'conversions': {},
+            'settings': {
+                'auto_convert_threshold': 5,
+                'learning_step': 1,
+                'correction_penalty': 1
+            },
+            'stats': {
+                'total_conversions': 0,
+                'total_corrections': 0
+            }
+        }
+        
+        migrated = 0
+        
+        # Миграция conversions["word:en->ru"]
+        if 'conversions' in old_data:
+            for key, val in old_data['conversions'].items():
+                if ':' not in key:
+                    continue
+                    
+                parts = key.split(':')
+                word = parts[0]
+                direction = parts[1] if len(parts) > 1 else 'en->ru'
+                
+                if '->' in direction:
+                    from_lang, to_lang = direction.split('->')
+                    
+                    # Канонизируем в EN
+                    canonical = word.lower() if from_lang == 'en' else self._convert_text(word, 'ru', 'en').lower()
+                    
+                    # Определяем знак веса
+                    old_weight = val.get('weight', 0)
+                    if from_lang == 'en':
+                        weight = old_weight  # Положительный
+                    else:
+                        weight = -old_weight  # Отрицательный
+                    
+                    if canonical not in new_data['conversions']:
+                        new_data['conversions'][canonical] = {
+                            'weight': weight,
+                            'last_seen': val.get('last_seen', datetime.now().isoformat())
+                        }
+                        migrated += 1
+                    else:
+                        # Суммируем веса
+                        new_data['conversions'][canonical]['weight'] += weight
+        
+        print(f"✅ Мигрировано {migrated} записей")
+        return new_data
     
     def _save(self):
-        """Сохраняет словарь в файл (с отложенной записью)"""
-        import time
-        
+        """Отложенное сохранение"""
         current_time = time.time()
         
-        # Если прошло достаточно времени - сохраняем сразу
         if current_time - self.last_save_time >= self.save_interval:
             self._do_save()
             self.last_save_time = current_time
             self.pending_save = False
         else:
-            # Иначе помечаем что нужно сохранить позже
             self.pending_save = True
     
     def _do_save(self):
@@ -83,221 +147,190 @@ class UserDictionary:
             print(f"⚠️  Ошибка сохранения user_dict: {e}")
     
     def flush(self):
-        """Принудительное сохранение (вызывать перед выходом)"""
+        """Принудительное сохранение"""
         if self.pending_save:
             self._do_save()
             self.pending_save = False
     
-    def add_correction(self, word, lang, debug=False):
+    def _detect_lang(self, text):
+        """Определяет язык текста по содержимому"""
+        has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in text)
+        return 'ru' if has_cyrillic else 'en'
+    
+    def _convert_text(self, text, from_lang, to_lang):
+        """Конвертирует текст между раскладками"""
+        if from_lang == to_lang:
+            return text
+        if from_lang == 'ru' and to_lang == 'en':
+            return text.translate(self.ru_to_en)
+        if from_lang == 'en' and to_lang == 'ru':
+            return text.translate(self.en_to_ru)
+        return text
+    
+    def _canonicalize(self, text, current_lang):
+        """Канонизация: всегда EN в lowercase"""
+        if current_lang == 'en':
+            return text.lower()
+        return self._convert_text(text, 'ru', 'en').lower()
+    
+    # ========== ПУБЛИЧНЫЕ МЕТОДЫ ==========
+    
+    def should_auto_convert(self, text, from_lang, to_lang, threshold=None):
         """
-        Добавляет слово в защищенные (коррекция после автоконвертации)
+        Проверяет нужна ли автоконвертация
         
         Args:
-            word: Исправленное слово (правильное)
-            lang: Язык слова ('ru' или 'en')
-            debug: Вывод отладочной информации
-        """
-        word_lower = word.lower()
+            text: Текст для проверки
+            from_lang: Текущий язык текста ('ru' или 'en')
+            to_lang: Целевой язык (не используется в новой логике)
+            threshold: Порог автоконвертации (из конфига если None)
         
-        # Инициализируем protected если нет
-        if 'protected' not in self.data:
-            self.data['protected'] = {}
-        if lang not in self.data['protected']:
-            self.data['protected'][lang] = {}
-        
-        if word_lower in self.data['protected'][lang]:
-            # Слово уже есть - увеличиваем вес
-            self.data['protected'][lang][word_lower] += 1
-            if debug:
-                weight = self.data['protected'][lang][word_lower]
-                print(f"📚 Protected: '{word}' ({lang}) вес увеличен → {weight}")
-        else:
-            # Новое защищенное слово
-            self.data['protected'][lang][word_lower] = 1
-            if debug:
-                print(f"📚 Protected: Добавлено '{word}' ({lang}) вес: 1")
-        
-        # Увеличиваем счётчик
-        if 'stats' not in self.data:
-            self.data['stats'] = {'total_corrections': 0}
-        self.data['stats']['total_corrections'] = self.data['stats'].get('total_corrections', 0) + 1
-        
-        # Сохраняем
-        self._save()
-        
-        # Сохраняем
-        self._save()
-    
-    def _check_limit(self):
-        """Проверяет лимит слов и удаляет самые старые с малым весом"""
-        max_words = self.data['settings']['max_words']
-        
-        if len(self.data['words']) > max_words:
-            # Сортируем по весу (меньше) и дате (старее)
-            sorted_words = sorted(
-                self.data['words'].items(),
-                key=lambda x: (x[1]['weight'], x[1]['last_seen'])
-            )
-            
-            # Удаляем 10% самых слабых
-            to_remove = int(max_words * 0.1)
-            for word, _ in sorted_words[:to_remove]:
-                del self.data['words'][word]
-    
-    def is_protected(self, word, lang):
-        """
-        Проверяет защищено ли слово
-        
-        Args:
-            word: Слово для проверки
-            lang: Язык слова
-            
         Returns:
-            (bool, int): (защищено, вес)
+            bool: True если нужна автоконвертация
         """
-        word_lower = word.lower()
+        if threshold is None:
+            threshold = self.data['settings']['auto_convert_threshold']
         
-        # Проверяем новую структуру protected
-        if 'protected' in self.data and lang in self.data['protected']:
-            if word_lower in self.data['protected'][lang]:
-                weight = self.data['protected'][lang][word_lower]
-                return (True, weight)
+        # Канонизируем текст
+        canonical = self._canonicalize(text, from_lang)
         
-        return (False, 0)
+        if canonical not in self.data['conversions']:
+            return False
+        
+        weight = self.data['conversions'][canonical]['weight']
+        
+        # Логика автоконвертации:
+        # from_lang='ru', weight > 0 → конвертировать еуые→test
+        # from_lang='en', weight < 0 → конвертировать test→еуые
+        if from_lang == 'ru' and weight >= threshold:
+            return True
+        if from_lang == 'en' and weight <= -threshold:
+            return True
+        
+        return False
     
     def add_conversion(self, word, from_lang, to_lang, debug=False):
         """
-        Добавляет успешную конвертацию с направлением
+        Добавляет успешную ручную конвертацию
         
         Args:
-            word: Исходное слово
+            word: Исходное слово (ДО конвертации)
             from_lang: Язык исходного слова
-            to_lang: Язык после конвертации
-            debug: Вывод отладочной информации
+            to_lang: Целевой язык
+            debug: Вывод отладки
         """
-        word_lower = word.lower()
+        canonical = self._canonicalize(word, from_lang)
+        learning_step = self.data['settings']['learning_step']
         
-        # Создаём ключ с направлением конвертации
-        conv_key = f"{word_lower}:{from_lang}->{to_lang}"
-        
-        if 'conversions' not in self.data:
-            self.data['conversions'] = {}
-        
-        if conv_key in self.data['conversions']:
-            # Конвертация уже есть - увеличиваем вес
-            self.data['conversions'][conv_key]['weight'] += 1
-            self.data['conversions'][conv_key]['last_seen'] = datetime.now().isoformat()
-            
-            if debug:
-                weight = self.data['conversions'][conv_key]['weight']
-                print(f"📚 Conversion: '{word}' ({from_lang}→{to_lang}) вес увеличен → {weight}")
-        else:
-            # Новая конвертация
-            self.data['conversions'][conv_key] = {
-                'word': word_lower,
-                'from_lang': from_lang,
-                'to_lang': to_lang,
-                'weight': 1,
-                'added_at': datetime.now().isoformat(),
+        if canonical not in self.data['conversions']:
+            self.data['conversions'][canonical] = {
+                'weight': 0,
                 'last_seen': datetime.now().isoformat()
             }
+        
+        # Увеличиваем/уменьшаем вес в зависимости от направления
+        if from_lang == 'ru' and to_lang == 'en':
+            # ru→en: увеличиваем вес (сдвиг к EN)
+            self.data['conversions'][canonical]['weight'] += learning_step
+        elif from_lang == 'en' and to_lang == 'ru':
+            # en→ru: уменьшаем вес (сдвиг к RU)
+            self.data['conversions'][canonical]['weight'] -= learning_step
+        
+        self.data['conversions'][canonical]['last_seen'] = datetime.now().isoformat()
+        self.data['stats']['total_conversions'] += 1
+        
+        if debug:
+            weight = self.data['conversions'][canonical]['weight']
+            print(f"📚 Conversion: '{word}' ({from_lang}→{to_lang}) вес → {weight}")
+        
+        # Очистка при weight=0
+        if self.data['conversions'][canonical]['weight'] == 0:
+            del self.data['conversions'][canonical]
+            if debug:
+                print(f"📚 Удалено: '{canonical}' (вес = 0)")
+        
+        self._save()
+    
+    def add_correction(self, word, lang, debug=False):
+        """
+        Коррекция автоконвертации (пользователь вернул обратно)
+        
+        Args:
+            word: ИСХОДНОЕ слово (до автоконвертации)
+            lang: Язык исходного слова
+            debug: Отладка
+        """
+        canonical = self._canonicalize(word, lang)
+        penalty = self.data['settings']['correction_penalty']
+        
+        if canonical not in self.data['conversions']:
+            # Создаем запись с отрицательным весом
+            self.data['conversions'][canonical] = {
+                'weight': -penalty if lang == 'ru' else penalty,
+                'last_seen': datetime.now().isoformat()
+            }
+        else:
+            old_weight = self.data['conversions'][canonical]['weight']
+            
+            # Коррекция: двигаем вес в ПРОТИВОПОЛОЖНУЮ сторону
+            if lang == 'ru':
+                # Было автоконвертировано еуые→test, исправили обратно
+                # Уменьшаем вес (сдвиг к RU)
+                self.data['conversions'][canonical]['weight'] -= penalty
+            else:
+                # Было автоконвертировано test→еуые, исправили обратно
+                # Увеличиваем вес (сдвиг к EN)
+                self.data['conversions'][canonical]['weight'] += penalty
+            
+            new_weight = self.data['conversions'][canonical]['weight']
             
             if debug:
-                print(f"📚 Conversion: Добавлена '{word}' ({from_lang}→{to_lang})")
+                print(f"📚 Correction: '{word}' ({lang}) вес {old_weight} → {new_weight}")
+            
+            # Удаляем если вес стал 0
+            if new_weight == 0:
+                del self.data['conversions'][canonical]
+                if debug:
+                    print(f"📚 Удалено: '{canonical}' (вес = 0)")
         
-        # Сохраняем
+        self.data['stats']['total_corrections'] += 1
         self._save()
     
     def get_conversion_weight(self, word, from_lang, to_lang):
         """
-        Получает вес конвертации
+        Получает вес конвертации (для совместимости)
         
         Returns:
-            int: Вес конвертации (0 если нет в словаре)
+            int: абсолютное значение веса
         """
-        if 'conversions' not in self.data:
+        canonical = self._canonicalize(word, from_lang)
+        
+        if canonical not in self.data['conversions']:
             return 0
         
-        word_lower = word.lower()
-        conv_key = f"{word_lower}:{from_lang}->{to_lang}"
+        weight = self.data['conversions'][canonical]['weight']
         
-        if conv_key in self.data['conversions']:
-            return self.data['conversions'][conv_key]['weight']
-        
-        return 0
+        # Возвращаем абсолютное значение для проверки порога
+        if from_lang == 'ru':
+            return weight if weight > 0 else 0
+        else:
+            return abs(weight) if weight < 0 else 0
     
-    def should_auto_convert(self, word, from_lang, to_lang, threshold=5):
+    def is_protected(self, word, lang):
         """
-        Проверяет нужна ли автоконвертация для слова
+        Заглушка для обратной совместимости
+        Теперь защита определяется автоматически через вес
         
-        Args:
-            word: Слово для проверки
-            from_lang: Текущий язык
-            to_lang: Целевой язык
-            threshold: Минимальный вес для автоконвертации (по умолчанию 5)
-            
         Returns:
-            bool: True если нужна автоконвертация
+            (False, 0): всегда, защиты больше нет
         """
-        weight = self.get_conversion_weight(word, from_lang, to_lang)
-        return weight >= threshold
+        return (False, 0)
     
     def get_stats(self):
         """Возвращает статистику"""
         return {
-            'total_words': len(self.data['words']),
+            'total_words': len(self.data['conversions']),
+            'total_conversions': self.data['stats']['total_conversions'],
             'total_corrections': self.data['stats']['total_corrections'],
-            'protected_words': sum(1 for w in self.data['words'].values() 
-                                  if w['weight'] >= self.data['settings']['min_weight']),
-            'min_weight': self.data['settings']['min_weight'],
-            'max_words': self.data['settings']['max_words']
+            'avg_weight': sum(abs(v['weight']) for v in self.data['conversions'].values()) / len(self.data['conversions']) if self.data['conversions'] else 0
         }
-    
-    def get_top_words(self, n=10):
-        """Возвращает топ N слов по весу"""
-        sorted_words = sorted(
-            self.data['words'].items(),
-            key=lambda x: x[1]['weight'],
-            reverse=True
-        )
-        return sorted_words[:n]
-
-
-if __name__ == '__main__':
-    # Тестирование
-    ud = UserDictionary()
-    
-    print("📚 Тестирование UserDictionary")
-    print("=" * 60)
-    
-    # Добавляем тестовые слова
-    test_words = [
-        ('вышел', 'ru'),
-        ('логику', 'ru'),
-        ('вышел', 'ru'),  # Повторно
-        ('сделать', 'ru'),
-        ('вышел', 'ru'),  # Ещё раз
-    ]
-    
-    for word, lang in test_words:
-        ud.add_correction(word, lang, debug=True)
-    
-    print()
-    print("=" * 60)
-    print("📊 Статистика:")
-    stats = ud.get_stats()
-    for key, value in stats.items():
-        print(f"  {key}: {value}")
-    
-    print()
-    print("🏆 Топ слов:")
-    for word, data in ud.get_top_words(5):
-        print(f"  {word:15} вес={data['weight']} lang={data['lang']}")
-    
-    print()
-    print("=" * 60)
-    print("🔒 Проверка защиты:")
-    for word in ['вышел', 'логику', 'неизвестное']:
-        protected, weight = ud.is_protected(word, 'ru')
-        status = '✅ Защищено' if protected else '❌ Не защищено'
-        print(f"  {status} '{word}' (вес: {weight})")

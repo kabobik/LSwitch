@@ -182,7 +182,7 @@ class LSwitch:
                 self.user_dict.data['settings']['min_weight'] = min_weight
                 if self.config.get('debug'):
                     stats = self.user_dict.get_stats()
-                    print(f"📚 UserDict загружен: {stats['total_words']} слов, {stats['protected_words']} защищённых")
+                    print(f"📚 UserDict загружен: {stats['total_words']} слов, {stats['total_conversions']} конвертаций, {stats['total_corrections']} корректировок")
             except Exception as e:
                 print(f"⚠️  Ошибка загрузки UserDict: {e}")
                 self.user_dict = None
@@ -1118,6 +1118,10 @@ class LSwitch:
                     "to_lang": to_lang,
                     "time": time.time()
                 }
+                if self.config.get('debug'):
+                    print(f"🔍 last_manual_convert (convert_and_retype): {self.last_manual_convert}")
+                if self.config.get('debug'):
+                    print(f"🔍 last_manual_convert (selection): {self.last_manual_convert}")
             
             # Очищаем буфер (чтобы не накапливались события)
             self.clear_buffer()
@@ -1149,6 +1153,12 @@ class LSwitch:
     
     def handle_event(self, event):
         """Обработка событий клавиатуры"""
+        # DEBUG: отслеживаем пробел на самом входе (ВСЕГДА, ДО ВСЕХ ПРОВЕРОК)
+        if event.type == ecodes.EV_KEY and event.code == ecodes.KEY_SPACE:
+            print(f"🔍 ПРОБЕЛ СОБЫТИЕ! value={event.value}, is_converting={self.is_converting}, debug={self.config.get('debug')}")
+            if self.is_converting:
+                print(f"🔍 ПРОБЕЛ ЗАБЛОКИРОВАН is_converting=True!")
+        
         if self.is_converting:
             return
         
@@ -1233,6 +1243,10 @@ class LSwitch:
         
         # Активные клавиши - добавляем в буфер
         if event.code in self.active_keycodes:
+            # DEBUG: отслеживаем ВСЕ события пробела
+            if event.code == ecodes.KEY_SPACE and self.config.get('debug'):
+                print(f"🔍 ПРОБЕЛ ВХОД! value={event.value}, last_manual={self.last_manual_convert is not None}")
+            
             # Если последний был пробел и это НЕ пробел - сбрасываем старое слово
             if self.last_was_space and event.code != ecodes.KEY_SPACE:
                 # Просто очищаем буфер, начинаем новое слово БЕЗ пробела
@@ -1296,6 +1310,9 @@ class LSwitch:
                 # Обрабатываем обычные клавиши
                 self.chars_in_buffer += 1
                 
+                if self.config.get('debug'):
+                    print(f"🔍 DEBUG обычная клавиша: last_manual_convert={self.last_manual_convert is not None}")
+                
                 # Сбрасываем отслеживание автоконвертации при любом новом символе
                 # (пользователь продолжает печатать = автоконвертация была правильной)
                 if self.last_auto_convert:
@@ -1312,6 +1329,8 @@ class LSwitch:
                         to_lang = self.last_manual_convert['to_lang']
                         
                         # Добавляем как успешную конвертацию с направлением
+                        if self.config.get('debug'):
+                            print(f"🔧 Вызов add_conversion (буква): original='{original}', from={from_lang}, to={to_lang}")
                         self.user_dict.add_conversion(original, from_lang, to_lang, debug=self.config.get('debug'))
                         
                         if self.config.get('debug'):
@@ -1320,7 +1339,9 @@ class LSwitch:
                             auto_status = " → автоконвертация!" if weight >= 5 else ""
                             print(f"📚 Успешная конвертация сохранена: '{original}' ({from_lang}→{to_lang}), вес: {weight}{auto_status}")
                     
-                    self.last_manual_convert = None
+                    # Не обнуляем для пробела - он обработает сам
+                    if event.code != ecodes.KEY_SPACE:
+                        self.last_manual_convert = None
                 
                 # Добавляем символ в text_buffer (всегда lowercase - для словаря)
                 # RAW события с Shift остаются в event_buffer для правильного replay
@@ -1331,6 +1352,33 @@ class LSwitch:
                     
                 # Запоминаем если это был пробел
                 if event.code == ecodes.KEY_SPACE:
+                    if self.config.get('debug'):
+                        print(f"🔍 ПРОБЕЛ! value={event.value}, last_manual={self.last_manual_convert is not None}")
+                    
+                    # При отпускании пробела - сохраняем успешную конвертацию
+                    if event.value == 0:
+                        if self.config.get('debug'):
+                            print(f"🔍 DEBUG пробел: last_manual_convert={self.last_manual_convert is not None}")
+                            if self.last_manual_convert:
+                                time_since = time.time() - self.last_manual_convert['time']
+                                print(f"🔍 DEBUG: time_since_convert={time_since:.2f}s, original='{self.last_manual_convert['original']}'")
+                        
+                        if self.user_dict and self.last_manual_convert:
+                            time_since_convert = time.time() - self.last_manual_convert['time']
+                            if time_since_convert < 5.0:
+                                original = self.last_manual_convert['original']
+                                from_lang = self.last_manual_convert['from_lang']
+                                to_lang = self.last_manual_convert['to_lang']
+                                
+                                if self.config.get('debug'):
+                                    print(f"🔧 Вызов add_conversion (пробел): original='{original}', from={from_lang}, to={to_lang}")
+                                self.user_dict.add_conversion(original, from_lang, to_lang, debug=self.config.get('debug'))
+                                
+                                if self.config.get('debug'):
+                                    weight = self.user_dict.get_conversion_weight(original, from_lang, to_lang)
+                                    auto_status = " → автоконвертация!" if abs(weight) >= 5 else ""
+                                    print(f"📚 Успешная конвертация сохранена (пробел): '{original}' ({from_lang}→{to_lang}), вес: {weight}{auto_status}")
+                    
                     self.last_was_space = True
                     # При пробеле показываем буфер и проверяем автопереключение (при отпускании)
                     if event.value == 0:  # При отпускании клавиши
@@ -1428,6 +1476,10 @@ class LSwitch:
                 for key, mask in device_selector.select(timeout=0.1):
                     device = key.fileobj
                     for event in device.read():
+                        # DEBUG: логируем ПРОБЕЛ перед handle_event (БЕЗ ФИЛЬТРОВ!)
+                        if event.code == ecodes.KEY_SPACE:
+                            print(f"🔍 ПРОБЕЛ В ЦИКЛЕ! type={event.type}, value={event.value}, device={device.name}")
+                        
                         # Клик мыши очищает буфер (новый контекст)
                         if event.type == ecodes.EV_KEY and event.code in (
                             ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE
