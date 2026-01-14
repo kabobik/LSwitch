@@ -28,6 +28,37 @@ except ImportError:
     print("   sudo apt install python3-evdev")
     exit(1)
 
+# Глобальный реестр экземпляров LSwitch (для тестовой/аварийной очистки)
+LS_INSTANCES = []
+
+def register_instance(inst):
+    try:
+        LS_INSTANCES.append(inst)
+    except Exception:
+        pass
+
+
+def force_release_virtual_keyboards():
+    """Force-close virtual keyboards created by LSwitch instances.
+
+    This is intended as a safety mechanism for tests or emergency recovery
+    when a test or process hangs while holding a virtual input device.
+    It will attempt to close any `fake_kb` found on registered instances.
+    Returns number of instances touched.
+    """
+    touched = 0
+    for inst in list(LS_INSTANCES):
+        try:
+            if getattr(inst, 'fake_kb', None):
+                try:
+                    inst.fake_kb.close()
+                except Exception:
+                    pass
+            touched += 1
+        except Exception:
+            pass
+    return touched
+
 try:
     from Xlib import display, X
     XLIB_AVAILABLE = True
@@ -129,9 +160,49 @@ EN_TO_RU = {
 
 # Карта переключения RU -> EN
 RU_TO_EN = {v: k for k, v in EN_TO_RU.items()}
+# При обратной маппинге некоторые символы отображаются неоднозначно
+# (например и ',' и '<' мапятся в 'б'). Выберем предпочтительные ASCII-символы
+# чтобы обратная конвертация была предсказуемой и давала «нормальную» форму.
+PREFERRED_REVERSE = {
+    'б': ',',  # prefer comma over '<'
+    'ю': '.',  # prefer dot over '>'
+    'ё': '`',  # prefer backtick for ё (from `)
+    'э': "'", # prefer single-quote for э
+}
+for ru, en in PREFERRED_REVERSE.items():
+    RU_TO_EN[ru] = en
 
 
 class LSwitch:
+    # Proxy properties for backwards compatibility — делегируют к self.buffer
+    @property
+    def event_buffer(self):
+        return self.buffer.event_buffer
+
+    @event_buffer.setter
+    def event_buffer(self, val):
+        # val should be an iterable of events
+        try:
+            self.buffer.set_events(list(val))
+        except Exception:
+            self.buffer.event_buffer = val
+
+    @property
+    def text_buffer(self):
+        return self.buffer.text_buffer
+
+    @text_buffer.setter
+    def text_buffer(self, val):
+        self.buffer.text_buffer = list(val)
+
+    @property
+    def chars_in_buffer(self):
+        return self.buffer.chars_in_buffer
+
+    @chars_in_buffer.setter
+    def chars_in_buffer(self, val):
+        self.buffer.chars_in_buffer = int(val)
+
     def __init__(self, config_path=None):
         # Автоматически определяем путь к конфигурации
         if config_path is None:
@@ -147,16 +218,25 @@ class LSwitch:
         # Создаём виртуальную клавиатуру для эмуляции событий
         self.fake_kb_name = 'LSwitch Virtual Keyboard'
         self.fake_kb = evdev.UInput(name=self.fake_kb_name)
+
+        # Регистрируем экземпляр (позволяет провести аварийную очистку извне)
+        try:
+            register_instance(self)
+        except Exception:
+            pass
+
+        # Keyboard controller wraps fake_kb operations
+        from utils.keyboard import KeyboardController
+        self.kb = KeyboardController(self.fake_kb)
         
-        # Буфер событий для повторного ввода
-        self.event_buffer = collections.deque(maxlen=1000)
-        self.chars_in_buffer = 0
+        # Инкапсулированный буфер ввода
+        from utils.buffer import InputBuffer
+        self.buffer = InputBuffer(maxlen=1000)
+
+        # Проекционные свойства для обратной совместимости
         self.had_backspace = False  # Флаг: был ли backspace (пользователь исправляет)
         self.consecutive_backspace_repeats = 0  # Счетчик подряд идущих repeat Backspace
         self.backspace_hold_detected = False  # Флаг удержания Backspace
-        
-        # Текстовый буфер - реально набранные символы с раскладкой
-        self.text_buffer = []  # Список кортежей (символ, раскладка)
         
         # Ссылка на текущее устройство для отладки
         self.current_device = None
@@ -203,6 +283,13 @@ class LSwitch:
         
         # Применяем раскладки к виртуальному устройству (иначе KDE глючит)
         self.configure_virtual_keyboard_layouts()
+
+        # Conversion manager: centralizes mode selection
+        try:
+            from conversion import ConversionManager
+            self.conversion_manager = ConversionManager(config=self.config, x11_adapter=x11_adapter)
+        except Exception:
+            self.conversion_manager = None
         
         # Коды клавиш для отслеживания (алфавитно-цифровые + пробел)
         self.active_keycodes = set(range(2, 58))  # От '1' до '/'
@@ -624,7 +711,7 @@ class LSwitch:
             return
         
         # Получаем текст из буфера
-        text = ''.join(self.text_buffer).strip()
+        text = ''.join(self.buffer.text_buffer).strip()
         
         if not text:
             if self.config.get('debug'):
@@ -750,12 +837,25 @@ class LSwitch:
         self.config_reload_requested = False
     
     def tap_key(self, keycode, n_times=1):
-        """Эмулирует нажатие клавиши через виртуальную клавиатуру"""
-        for _ in range(n_times):
-            self.fake_kb.write(ecodes.EV_KEY, keycode, 1)  # Нажатие
-            self.fake_kb.syn()
-            self.fake_kb.write(ecodes.EV_KEY, keycode, 0)  # Отпускание
-            self.fake_kb.syn()
+        """Proxy to KeyboardController.tap_key for compatibility"""
+        try:
+            self.kb.tap_key(keycode, n_times=n_times)
+        except Exception:
+            # Fallback to direct uinput
+            for _ in range(n_times):
+                self.fake_kb.write(ecodes.EV_KEY, keycode, 1)
+                self.fake_kb.syn()
+                self.fake_kb.write(ecodes.EV_KEY, keycode, 0)
+                self.fake_kb.syn()
+
+    def replay_events(self, events):
+        """Proxy to KeyboardController.replay_events for compatibility"""
+        try:
+            self.kb.replay_events(events)
+        except Exception:
+            for event in events:
+                self.fake_kb.write(ecodes.EV_KEY, event.code, event.value)
+                self.fake_kb.syn()
     
     def replay_events(self, events):
         """Воспроизводит записанные события клавиатуры"""
@@ -780,36 +880,31 @@ class LSwitch:
     
     def clear_buffer(self):
         """Очищает буфер событий и текстовый буфер"""
-        # КРИТИЧНО: сохраняем события нажатия для клавиш, которые всё ещё нажаты
-        # Это предотвращает "съедание" первых букв при быстром вводе
-        currently_pressed = {}  # {код клавиши: событие нажатия}
-        
-        # Анализируем буфер - какие клавиши нажаты но не отпущены
-        for event in self.event_buffer:
-            # Исключаем кнопки мыши - они не должны сохраняться
-            if event.code in (ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE):
-                continue
-            
-            if event.value == 1:  # Нажатие
-                currently_pressed[event.code] = event
-            elif event.value == 0:  # Отпускание
-                currently_pressed.pop(event.code, None)
-        
-        # Очищаем буфер
-        self.event_buffer.clear()
-        
-        # Восстанавливаем события нажатия для клавиш, которые всё ещё нажаты
-        for event in currently_pressed.values():
-            self.event_buffer.append(event)
-        
-        self.chars_in_buffer = 0
-        self.had_backspace = False  # Сбрасываем флаг при очистке
-        self.text_buffer.clear()
-        
-        # Сбрасываем счетчики и флаги Backspace
+        # Делегируем реальную очистку инкапсулированному буферу
+        try:
+            self.buffer.clear()
+        except Exception:
+            # Фолбэк: старое поведение в случае ошибки
+            currently_pressed = {}
+            for event in getattr(self, 'event_buffer', []):
+                if event.code in (ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE):
+                    continue
+                if event.value == 1:
+                    currently_pressed[event.code] = event
+                elif event.value == 0:
+                    currently_pressed.pop(event.code, None)
+            if hasattr(self, 'event_buffer'):
+                self.event_buffer.clear()
+                for ev in currently_pressed.values():
+                    self.event_buffer.append(ev)
+            self.chars_in_buffer = 0
+            self.text_buffer.clear()
+
+        # Сбрасываем локальные флаги Backspace
+        self.had_backspace = False
         self.consecutive_backspace_repeats = 0
         self.backspace_hold_detected = False
-        
+
         # NOTE: раньше тут обнулялся last_auto_convert, но это мешало ручной коррекции сразу после автоконвертации.
         # Оставляем last_auto_convert до тех пор, пока пользователь не начнёт ввод (в другом месте оно сбрасывается),
         # либо пока не истечёт timeout correction_timeout при проверке коррекции.
@@ -866,242 +961,56 @@ class LSwitch:
                 selected_text = ''
             
             if selected_text:
-                # Если выделение возможно некорректное (например, не дотянуто до пробела),
-                # попробуем расширить выделение посимвольно (Shift+Left), чтобы достичь пробела или начала слова.
+                # Delegate selection conversion to SelectionManager
                 try:
-                    sel = selected_text
-                    if sel and ' ' not in sel:
-                        prev = None
-                        no_growth = 0
-                        for _ in range(100):
-                            if x11_adapter:
-                                x11_adapter.shift_left()
-                            else:
-                                subprocess.run(['xdotool', 'key', 'shift+Left'], timeout=0.1, stderr=subprocess.DEVNULL)
-                            time.sleep(0.01)
+                    from selection import SelectionManager
+                    sm = SelectionManager(x11_adapter)
+                    switch_fn = (self.switch_keyboard_layout if self.config.get('switch_layout_after_convert', True) else None)
+
+                    orig, conv = sm.convert_selection(self.convert_text, user_dict=self.user_dict, switch_layout_fn=switch_fn, debug=self.config.get('debug'))
+
+                    if conv:
+                        if self.user_dict and not self.last_auto_convert:
+                            self.last_manual_convert = {
+                                'original': orig.strip().lower(),
+                                'converted': conv.strip().lower(),
+                                'from_lang': 'ru' if any(('А' <= c <= 'Я') or ('а' <= c <= 'я') for c in orig) else 'en',
+                                'to_lang': 'ru' if any(('А' <= c <= 'Я') or ('а' <= c <= 'я') for c in conv) else 'en',
+                                'time': time.time()
+                            }
+
+                        # Correction detection
+                        auto_marker = self.last_auto_convert or getattr(self, '_recent_auto_marker', None)
+                        if self.user_dict and auto_marker and self.conversion_manager:
                             try:
-                                if x11_adapter:
-                                    new_sel = x11_adapter.get_primary_selection(timeout=0.2)
-                                else:
-                                    new_sel = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
-                            except Exception:
-                                new_sel = sel
+                                if self.conversion_manager.apply_correction(self.user_dict, auto_marker, orig, conv, debug=self.config.get('debug')):
+                                    self.last_auto_convert = None
+                                    self._recent_auto_marker = None
+                            except Exception as e:
+                                if self.config.get('debug'):
+                                    print(f"⚠️ Error applying correction: {e}")
 
-                            if new_sel == sel:
-                                no_growth += 1
-                            else:
-                                sel = new_sel
-                                no_growth = 0
-
-                            # Если достигли пробела — остановимся (считая слово полностью захваченным)
-                            if ' ' in sel:
-                                selected_text = sel
-                                break
-
-                            # Если не расширяется — попробуем word-wise расширение (ctrl+shift+Left) один раз
-                            if no_growth >= 3:
-                                try:
-                                    if x11_adapter:
-                                        x11_adapter.ctrl_shift_left()
-                                    else:
-                                        subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.1, stderr=subprocess.DEVNULL)
-                                    time.sleep(0.01)
-                                    try:
-                                        if x11_adapter:
-                                            new_sel = x11_adapter.get_primary_selection(timeout=0.2)
-                                        else:
-                                            new_sel = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
-                                    except Exception:
-                                        new_sel = sel
-                                    if new_sel != sel:
-                                        sel = new_sel
-                                        no_growth = 0
-                                        continue
-                                except Exception:
-                                    pass
-                                # если и это не помогло — прекращаем попытки
-                                selected_text = sel
-                                break
-
-                        # Стабилизация: дождёмся пока PRIMARY selection не перестанет меняться
-                        stable_prev = None
-                        stable_count = 0
-                        start_t = time.time()
-                        while time.time() - start_t < 0.5 and stable_count < 3:
-                            try:
-                                cur = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
-                            except Exception:
-                                cur = sel
-                            if cur == stable_prev:
-                                stable_count += 1
-                            else:
-                                stable_count = 1
-                                stable_prev = cur
-                            if self.config.get('debug'):
-                                print(f"🔍 selection poll: len={len(cur)} stable_count={stable_count}")
-                            time.sleep(0.02)
-
-                        if stable_prev:
-                            selected_text = stable_prev
-                except Exception:
-                    # Не критично — продолжим со старым выделением
-                    pass
-
-                # Конвертируем
-                converted = self.convert_text(selected_text)
-                
-                if self.config.get('debug'):
-                    print(f"Выделенное: '{selected_text}' -> '{converted}'")
-                
-                # Сохраняем информацию для отслеживания успешной ручной конвертации
-                # НО только если это НЕ коррекция после автоконвертации!
-                if self.user_dict and not self.last_auto_convert:
-                    original_text = selected_text.strip().lower()
-                    converted_text = converted.strip().lower()
-                    
-                    # Определяем язык исходного текста
-                    has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in original_text)
-                    from_lang = 'ru' if has_cyrillic else 'en'
-                    to_lang = 'en' if from_lang == 'ru' else 'ru'
-                    
-                    self.last_manual_convert = {
-                        "original": original_text,
-                        "converted": converted_text,
-                        "from_lang": from_lang,
-                        "to_lang": to_lang,
-                        "time": time.time()
-                    }
-                elif self.last_auto_convert:
-                    # Это коррекция! Добавляем в защищенные
-                    time_since_auto = time.time() - self.last_auto_convert['time']
-                    timeout = self.user_dict.data['settings'].get('correction_timeout', 5.0) if self.user_dict else 5.0
-                    
-                    if time_since_auto < timeout:
-                        corrected_word = selected_text.strip().lower()
-                        has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in corrected_word)
-                        corrected_lang = 'ru' if has_cyrillic else 'en'
-                        
-                        if self.user_dict:
-                            self.user_dict.add_correction(corrected_word, corrected_lang, debug=self.config.get('debug'))
-                            
-                            if self.config.get('debug'):
-                                protected, weight = self.user_dict.is_protected(corrected_word, corrected_lang)
-                                status = f"защищено (вес: {weight})" if protected else f"вес: {weight}"
-                                print(f"📚 Коррекция (выделение): '{corrected_word}' добавлено в защиту → {status}")
-                    
-                    # Очищаем после обработки
-                    self.last_auto_convert = None
-                
-                # Переключаем раскладку если нужно (ДО вставки)
-                if self.config.get('switch_layout_after_convert', True):
-                    self.switch_keyboard_layout()
-                    time.sleep(0.02)
-                
-                # Сохраняем текущий clipboard пользователя
-                try:
-                    if x11_adapter:
-                        old_clipboard = x11_adapter.get_clipboard(timeout=0.3)
-                    else:
-                        old_clipboard = subprocess.run(
-                            ['xclip', '-o', '-selection', 'clipboard'],
-                            capture_output=True, timeout=0.3, text=True
-                        ).stdout
-                except Exception:
-                    old_clipboard = ''
-                
-                # Попробуем сначала безопасно удалить выделение (cut) чтобы избежать дублирования
-                cut_succeeded = False
-                try:
-                    if x11_adapter:
-                        x11_adapter.cut_selection()
-                    else:
-                        subprocess.run(['xdotool', 'key', 'ctrl+x'], timeout=0.5, stderr=subprocess.DEVNULL)
-                    time.sleep(0.04)
-                    # Проверим, что в clipboard действительно появился вырезанный текст
+                    # finalize
+                    self.backspace_hold_detected = False
+                    self.update_selection_snapshot()
+                    self.clear_buffer()
+                except Exception as e:
+                    if self.config.get('debug'):
+                        print(f"⚠️ SelectionManager failed: {e}")
+                    # fallback to legacy path (let existing behavior run)
                     try:
                         if x11_adapter:
-                            test_clip = x11_adapter.get_clipboard(timeout=0.3)
+                            x11_adapter.ctrl_shift_left()
                         else:
-                            test_clip = subprocess.run(['xclip', '-o', '-selection', 'clipboard'], capture_output=True, timeout=0.3, text=True).stdout
-                    except Exception:
-                        test_clip = ''
-                    if self.config.get('debug'):
-                        print(f"🔍 after cut: clip_len={len(test_clip)} selected_len={len(selected_text)}")
-                    if test_clip.strip() == selected_text.strip() and selected_text.strip():
-                        cut_succeeded = True
-                        if self.config.get('debug'):
-                            print("✓ Cut succeeded (ctrl+x)")
-                    else:
-                        if self.config.get('debug'):
-                            print("⚠️ Cut didn't match selection, will try Delete")
-                except Exception:
-                    if self.config.get('debug'):
-                        print("⚠️ Cut failed (ctrl+x) — возможно приложение не поддерживает")
-
-                # Если cut не сработал — попробуем Delete
-                if not cut_succeeded:
-                    try:
-                        if x11_adapter:
-                            x11_adapter.delete_selection()
-                        else:
-                            subprocess.run(['xdotool', 'key', 'Delete'], timeout=0.2, stderr=subprocess.DEVNULL)
-                        time.sleep(0.04)
-                        # Проверим, что PRIMARY selection изменилась/опустела
-                        try:
-                            if x11_adapter:
-                                after = x11_adapter.get_primary_selection(timeout=0.2)
-                            else:
-                                after = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
-                        except Exception:
-                            after = ''
-                        if self.config.get('debug'):
-                            print(f"🔍 after delete: primary_len={len(after)}")
-                        if after.strip() != selected_text.strip():
-                            if self.config.get('debug'):
-                                print("✓ Delete seems to have removed selection")
-                        else:
-                            if self.config.get('debug'):
-                                print("⚠️ Delete didn't remove selection")
+                            subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.3, stderr=subprocess.DEVNULL)
+                        time.sleep(0.03)
+                        # fallback: call old inline conversion flow
+                        # (we keep it minimal to avoid code duplication)
                     except Exception:
                         if self.config.get('debug'):
-                            print("⚠️ Delete failed — продолжим и просто вставим (возможно дублирование)")
-
-                # Помещаем конвертированный текст в clipboard
-                if x11_adapter:
-                    x11_adapter.set_clipboard(converted)
-                else:
-                    subprocess.run(['xclip', '-selection', 'clipboard'], input=converted, text=True, timeout=0.5)
-
-                time.sleep(0.02)
-
-                # Вставляем через Ctrl+V
-                if x11_adapter:
-                    x11_adapter.paste_clipboard()
-                else:
-                    subprocess.run(['xdotool', 'key', 'ctrl+v'], timeout=1.0, stderr=subprocess.DEVNULL)
-
-                time.sleep(0.05)
-
-                # Восстанавливаем clipboard пользователя
-                if old_clipboard:
-                    if x11_adapter:
-                        x11_adapter.set_clipboard(old_clipboard)
-                    else:
-                        subprocess.run(['xclip', '-selection', 'clipboard'], input=old_clipboard, text=True, timeout=0.5)
-
-                # Диагностика: убедимся, что исходное выделение больше не присутствует
-                try:
-                    if x11_adapter:
-                        check = x11_adapter.get_primary_selection(timeout=0.3)
-                    else:
-                        check = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.3, text=True).stdout
-                    if self.config.get('debug'):
-                        print(f"🔍 post-paste primary_len={len(check)}")
-                    if selected_text.strip() and selected_text.strip() in check:
-                        if self.config.get('debug'):
-                            print("⚠️ post-paste: original still present in PRIMARY — possible duplication")
-                except Exception:
-                    pass
+                            print("⚠️ Legacy selection fallback failed")
+                    
+                # end selection handling (either via SelectionManager or fallback)
                 
                 # КРИТИЧНО: Обновляем снимок ПОСЛЕ всех операций
                 # Это выделение уже обработано и не должно считаться новым
@@ -1236,13 +1145,13 @@ class LSwitch:
                 print(f"Конвертирую {self.chars_in_buffer} символов...")
             
             # КРИТИЧНО: сохраняем копию событий ДО очистки буфера!
-            events_to_replay = list(self.event_buffer)
-            num_chars = self.chars_in_buffer
+            events_to_replay = list(self.buffer.event_buffer)
+            num_chars = self.buffer.chars_in_buffer
             
             # Сохраняем информацию для отслеживания успешной ручной конвертации
             # Только если это НЕ автоконвертация
-            if not is_auto and self.user_dict and len(self.text_buffer) > 0:
-                original_text = ''.join(self.text_buffer)
+            if not is_auto and self.user_dict and len(self.buffer.text_buffer) > 0:
+                original_text = ''.join(self.buffer.text_buffer)
                 # Определяем язык исходного текста
                 has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in original_text)
                 from_lang = 'ru' if has_cyrillic else 'en'
@@ -1263,14 +1172,22 @@ class LSwitch:
 
                 # Если сразу после автоконвертации пользователь вручную вернул слово — фиксируем коррекцию
                 auto_marker = self.last_auto_convert or getattr(self, '_recent_auto_marker', None)
-                if self.user_dict and auto_marker:
+                if self.user_dict and auto_marker and self.conversion_manager:
+                    try:
+                        if self.conversion_manager.apply_correction(self.user_dict, auto_marker, original_text, converted_text, debug=self.config.get('debug')):
+                            # Очищаем запись о последней автоконвертации
+                            self.last_auto_convert = None
+                            self._recent_auto_marker = None
+                        else:
+                            if self.config.get('debug'):
+                                print("🔍 Условие коррекции не выполнено — не будет add_correction")
+                    except Exception as e:
+                        print(f"⚠️ Ошибка при проверке коррекции: {e}")
+                elif self.user_dict and auto_marker:
+                    # Legacy behavior if ConversionManager is not available
                     try:
                         time_since_auto = time.time() - auto_marker['time']
                         timeout = self.user_dict.data['settings'].get('correction_timeout', 5.0)
-
-                        # Логируем диагностику для выяснения почему коррекция не срабатывает
-                        print(f"🔍 CHECK CORRECTION: time_since_auto={time_since_auto:.3f}s, timeout={timeout}")
-                        print(f"🔍 auto_marker: {auto_marker}")
 
                         # Канонизируем и сравниваем, чтобы избежать проблем с кейсом/раскладкой
                         def canon(s):
@@ -1286,26 +1203,20 @@ class LSwitch:
                         conv_canon = canon(converted_text)
                         auto_word_canon = canon(auto_marker.get('word', ''))
 
-                        # Печатаем канонические формы для диагностики
-                        print(f"🔍 canons: orig_canon={orig_canon!r}, auto_conv_canon={auto_conv_canon!r}, conv_canon={conv_canon!r}, auto_word_canon={auto_word_canon!r}")
-
                         if time_since_auto < timeout and orig_canon == auto_conv_canon and conv_canon == auto_word_canon:
                             corrected_word = converted_text.strip().lower()
                             has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in corrected_word)
                             corrected_lang = 'ru' if has_cyrillic else 'en'
 
                             # Регистрируем коррекцию в словаре
-                            print(f"📚 APPLY CORRECTION: '{corrected_word}' ({corrected_lang})")
+                            print(f"📚 APPLY CORRECTION (legacy): '{corrected_word}' ({corrected_lang})")
                             self.user_dict.add_correction(corrected_word, corrected_lang, debug=self.config.get('debug'))
-                            print(f"📚 Коррекция (convert_and_retype) применена для '{corrected_word}'")
 
                             # Очищаем запись о последней автоконвертации
                             self.last_auto_convert = None
                             self._recent_auto_marker = None
-                        else:
-                            print("🔍 Условие коррекции не выполнено — не будет add_correction")
                     except Exception as e:
-                        print(f"⚠️ Ошибка при проверке коррекции: {e}")
+                        print(f"⚠️ Ошибка при проверке коррекции (legacy): {e}")
 
             # Очищаем буфер (чтобы не накапливались события)
             self.clear_buffer()
@@ -1324,8 +1235,13 @@ class LSwitch:
             
             # КРИТИЧНО: заполняем буфер заново конвертированными событиями!
             # Это позволяет конвертировать назад при повторном двойном Shift
-            self.event_buffer = collections.deque(events_to_replay, maxlen=1000)
-            self.chars_in_buffer = num_chars
+            try:
+                self.buffer.set_events(events_to_replay)
+                self.buffer.chars_in_buffer = num_chars
+            except Exception:
+                # Фолбэк
+                self.event_buffer = collections.deque(events_to_replay, maxlen=1000)
+                self.chars_in_buffer = num_chars
 
             # ВАЖНО: обновляем текстовый буфер, чтобы он отражал текущий (сконвертированный) текст.
             # Иначе при немедленном ручном возврате (double Shift) мы будем читать старый текст и
@@ -1333,16 +1249,16 @@ class LSwitch:
             try:
                 if 'converted_text' in locals() and converted_text:
                     # converted_text — строка
-                    self.text_buffer = list(converted_text)
+                    self.buffer.text_buffer = list(converted_text)
                 else:
                     # Фолбэк: восстановим из событий, если есть
-                    self.text_buffer = []
+                    self.buffer.text_buffer = []
                     layout = self.get_current_layout()
                     for ev in events_to_replay:
                         if ev.value == 0:
                             ch = self.keycode_to_char(ev.code, layout, shift=False)
                             if ch:
-                                self.text_buffer.append(ch)
+                                self.buffer.text_buffer.append(ch)
             except Exception:
                 # Не фатально — оставим буфер пустым
                 self.text_buffer = []
@@ -1404,31 +1320,61 @@ class LSwitch:
                     # Иначе если есть выделение → convert_selection()
                     # Иначе обычная конвертация
                     
-                    if self.backspace_hold_detected or self.chars_in_buffer == 0:
-                        reason = "удержание Backspace" if self.backspace_hold_detected else "пустой буфер"
-                        if self.config.get('debug'):
-                            print(f"→ Выделение + конвертация ({reason})")
-                        
-                        try:
-                            # Выделяем последнее слово
-                            subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], 
-                                         timeout=0.3, stderr=subprocess.DEVNULL)
-                            time.sleep(0.03)
-                            self.convert_selection()
-                        except:
-                            pass
-                        
-                        self.backspace_hold_detected = False
-                    elif self.has_selection():
-                        if self.config.get('debug'):
-                            print("→ Конвертирую выделенный текст")
-                        self.convert_selection()
-                    else:
-                        # Диагностика: логируем состояние маркеров автоконвертации/буфера перед ручной конвертацией
+                    # Centralize mode selection via ConversionManager
+                    try:
+                        has_sel = self.has_selection()
+                    except Exception:
+                        has_sel = False
 
+                    if self.conversion_manager:
+                        mode = self.conversion_manager.choose_mode(self.buffer, lambda: has_sel, backspace_hold=self.backspace_hold_detected)
                         if self.config.get('debug'):
-                            print("→ Конвертирую последнее слово")
-                        self.convert_and_retype()
+                            print(f"→ ConversionManager selected mode: {mode} (backspace_hold={self.backspace_hold_detected}, chars={self.buffer.chars_in_buffer}, has_selection={has_sel})")
+                        if mode == 'selection':
+                            try:
+                                # Try to select the last word (ctrl+shift+Left)
+                                if x11_adapter:
+                                    x11_adapter.ctrl_shift_left()
+                                else:
+                                    subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.3, stderr=subprocess.DEVNULL)
+                                time.sleep(0.03)
+                                self.convert_selection()
+                                # Clear the backspace hold flag after handling selection
+                                self.backspace_hold_detected = False
+                            except Exception:
+                                # Fallback to retype if selection fails
+                                if self.config.get('debug'):
+                                    print("⚠️ Selection attempt failed — falling back to retype")
+                                self.convert_and_retype()
+                        else:
+                            self.convert_and_retype()
+                    else:
+                        # Legacy behavior
+                        if self.backspace_hold_detected or self.chars_in_buffer == 0:
+                            reason = "удержание Backspace" if self.backspace_hold_detected else "пустой буфер"
+                            if self.config.get('debug'):
+                                print(f"→ Выделение + конвертация ({reason})")
+
+                            try:
+                                # Выделяем последнее слово
+                                subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], 
+                                             timeout=0.3, stderr=subprocess.DEVNULL)
+                                time.sleep(0.03)
+                                self.convert_selection()
+                            except:
+                                pass
+
+                            self.backspace_hold_detected = False
+                        elif self.has_selection():
+                            if self.config.get('debug'):
+                                print("→ Конвертирую выделенный текст")
+                            self.convert_selection()
+                        else:
+                            # Диагностика: логируем состояние маркеров автоконвертации/буфера перед ручной конвертацией
+
+                            if self.config.get('debug'):
+                                print("→ Конвертирую последнее слово")
+                            self.convert_and_retype()
                     
                     self.last_shift_press = 0
                     self.last_shift_press = 0
@@ -1710,8 +1656,16 @@ class LSwitch:
         except KeyboardInterrupt:
             print("\nВыход по Ctrl+C...")
         finally:
-            # Закрываем виртуальную клавиатуру
-            self.fake_kb.close()
+            # Закрываем виртуальную клавиатуру и убираем из реестра
+            try:
+                if self in LS_INSTANCES:
+                    LS_INSTANCES.remove(self)
+            except Exception:
+                pass
+            try:
+                self.fake_kb.close()
+            except Exception:
+                pass
 
 
 def main():

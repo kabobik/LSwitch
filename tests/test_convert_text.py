@@ -1,17 +1,26 @@
+import pytest
 import lswitch
 
 
-def test_convert_text_roundtrip():
+@pytest.mark.parametrize("s", [
+    "j,sxysq", "ghbdtn", "ytdthysq", "hello,world", "test.case", "Ghbdtn", "a", ","
+])
+def test_convert_text_roundtrip_various(s):
+    ls = lswitch.LSwitch(config_path='config.json')
+    conv = ls.convert_text(s)
+    back = ls.convert_text(conv)
+    assert back == s
+
+
+def test_convert_text_specific():
     s = 'j,sxysq'
     conv = lswitch.LSwitch().convert_text(s)
-    back = lswitch.LSwitch().convert_text(conv)
     assert conv == 'обычный'
-    assert back == s
 
 
 def test_convert_preserves_case():
     s = 'Ghbdtn'
-    # G->? but ensure case handling does not crash and length preserved
+    # ensure case handling does not crash and length preserved
     conv = lswitch.LSwitch().convert_text(s)
     assert isinstance(conv, str)
     assert len(conv) == len(s)

@@ -8,12 +8,38 @@ Ctrl+C для выхода
 import evdev
 from evdev import ecodes
 import sys
+import os
+import time
+
+# Detect if running under pytest and whether live tests were requested (via CLI or env)
+RUN_LIVE = ('--run-live' in sys.argv) or os.environ.get('RUN_LIVE_TESTS') == '1'
+# parse live timeout from CLI or env
+LIVE_TIMEOUT = 20
+for arg in sys.argv:
+    if arg.startswith('--live-timeout='):
+        try:
+            LIVE_TIMEOUT = int(arg.split('=', 1)[1])
+        except Exception:
+            pass
+if os.environ.get('LIVE_TIMEOUT'):
+    try:
+        LIVE_TIMEOUT = int(os.environ.get('LIVE_TIMEOUT'))
+    except Exception:
+        pass
+
+# When imported by pytest, skip the module unless --run-live is present
+if 'pytest' in sys.modules and not RUN_LIVE:
+    import pytest
+    pytest.skip("Live interactive test skipped by default. Run with --run-live or set RUN_LIVE_TESTS=1", allow_module_level=True)
 
 class LiveBufferTest:
-    def __init__(self):
+    def __init__(self, timeout=20):
         self.text_buffer = []
         self.event_buffer = []
         self.chars_in_buffer = 0
+        self.last_activity = time.time()
+        self.stop_requested = False
+        self.timeout = timeout
         
         # Маппинг клавиш
         self.key_map = {
@@ -41,15 +67,24 @@ class LiveBufferTest:
         """Обрабатывает событие клавиатуры"""
         if event.type != ecodes.EV_KEY:
             return
-        
+
+        # Update activity timer on any key event
+        self.last_activity = time.time()
+
+        # ESC -> request stop
+        if event.code == ecodes.KEY_ESC and event.value == 0:
+            self.stop_requested = True
+            print("\n⏹️ ESC pressed — stopping live test...", flush=True)
+            return
+
         # F12 - показать симуляцию конвертации
         if event.code == ecodes.KEY_F12 and event.value == 0:
             self.show_conversion_simulation()
             return
-        
+
         # Добавляем в event_buffer
         self.event_buffer.append({'code': event.code, 'value': event.value})
-        
+
         # Обрабатываем только отпускания и repeats
         if event.value in (0, 2):
             if event.code == ecodes.KEY_BACKSPACE:
@@ -149,21 +184,56 @@ print(f"\n🎯 Начинаем мониторинг...\n")
 tester = LiveBufferTest()
 
 try:
-    for device in keyboards:
-        device.grab()  # Перехватываем события (осторожно!)
-    
-    print("⚠️  ВНИМАНИЕ: Клавиатура перехвачена! Для выхода нажмите Ctrl+C\n")
-    
+    # Try to grab devices — handle devices that disappear gracefully
+    for device in list(keyboards):
+        try:
+            device.grab()  # Перехватываем события (осторожно!)
+        except OSError as e:
+            print(f"⚠️ Не удалось захватить устройство {device.name}: {e}")
+            keyboards.remove(device)
+
+    if not keyboards:
+        print("❌ Нет доступных клавиатур для захвата — выходим")
+        sys.exit(1)
+
+    print(f"⚠️  ВНИМАНИЕ: Клавиатура перехвачена! Для выхода нажмите ESC (или подождите {LIVE_TIMEOUT}s бездействия)\n")
+
     while True:
-        for device in keyboards:
+        now = time.time()
+        # Inactivity auto-exit
+        if now - tester.last_activity > tester.timeout:
+            print(f"\n⏲️ {tester.timeout}s бездействия — авто-завершение live test\n")
+            break
+
+        if tester.stop_requested:
+            break
+
+        for device in list(keyboards):
             try:
                 for event in device.read():
                     tester.handle_event(event)
             except BlockingIOError:
                 pass
+            except OSError as e:
+                # Device disappeared; ungrab will fail — remove it and continue
+                print(f"⚠️ Устройство {device.name} исчезло: {e}")
+                try:
+                    device.ungrab()
+                except Exception:
+                    pass
+                try:
+                    keyboards.remove(device)
+                except ValueError:
+                    pass
+        # small sleep to avoid busy loop
+        time.sleep(0.01)
 
 except KeyboardInterrupt:
     print("\n\n👋 Выход...")
 finally:
-    for device in keyboards:
-        device.ungrab()
+    for device in list(keyboards):
+        try:
+            device.ungrab()
+        except Exception:
+            pass
+    print("✅ Live test finished — cleanup done")

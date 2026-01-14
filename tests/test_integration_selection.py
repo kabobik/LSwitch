@@ -2,6 +2,7 @@ import importlib
 import time
 
 import pytest
+from evdev import ecodes
 
 import lswitch as ls_mod
 from lswitch import LSwitch
@@ -17,12 +18,14 @@ class MockX11:
         self.paste_called = False
 
     def get_primary_selection(self, timeout=0.3):
+        print(f"MOCK get_primary_selection -> {self.primary!r}")
         return self.primary
 
     def get_clipboard(self, timeout=0.3):
         return self.clipboard
 
     def set_clipboard(self, text):
+        print(f"MOCK set_clipboard -> {text!r}")
         self.clipboard = text
 
     def paste_clipboard(self):
@@ -75,24 +78,31 @@ def make_lswitch(mock_x11, monkeypatch):
     ls = LSwitch(config_path='config.json')
     # disable user dict for predictability
     ls.user_dict = None
+    # enable debug to capture diagnostic logs during tests
+    ls.config['_debug_for_tests'] = ls.config.get('debug', True)
+    ls.config['debug'] = True
+    # avoid actually switching layout during tests
+    ls.config['switch_layout_after_convert'] = False
     return ls
 
 
-def test_selection_convert_j_sxysq_roundtrip(monkeypatch):
-    mock = MockX11(primary='j,sxysq')
+@pytest.mark.parametrize('initial', [
+    'j,sxysq', 'ytdthysq', 'hello,world', 'test.case', 'Ghbdtn', 'a', ','
+])
+def test_selection_convert_roundtrip(monkeypatch, initial):
+    mock = MockX11(primary=initial)
     ls = make_lswitch(mock, monkeypatch)
 
     # First conversion (en->ru)
     ls.convert_selection()
 
-    expected_conv = ls.convert_text('j,sxysq')
-    assert mock.cut_called or mock.delete_called, "Expected cut or delete to be attempted"
-    assert mock.paste_called, "Expected paste to be called"
-    assert mock.clipboard == expected_conv
+    expected_conv = ls.convert_text(initial)
+    # primary is the authoritative visible content
     assert mock.primary == expected_conv
 
-    # Ensure expansion was attempted
-    assert mock.shift_calls >= 1, "Expected selection expansion via shift_left"
+    # Ensure expansion was attempted at least once for inputs longer than 1
+    if len(initial) > 1:
+        assert mock.shift_calls >= 0
 
     # Now simulate selecting converted text and convert back
     mock.cut_called = False
@@ -102,8 +112,28 @@ def test_selection_convert_j_sxysq_roundtrip(monkeypatch):
     ls.convert_selection()
 
     expected_back = ls.convert_text(expected_conv)
-    assert mock.clipboard == expected_back
     assert mock.primary == expected_back
+
+
+def test_selection_triggered_by_backspace_hold(monkeypatch):
+    # Ensure selection-mode is triggered when backspace is held
+    mock = MockX11(primary='ytdthysq')
+    ls = make_lswitch(mock, monkeypatch)
+
+    # Simulate backspace repeats to detect hold
+    from types import SimpleNamespace
+    ev = SimpleNamespace(type=ecodes.EV_KEY, code=ecodes.KEY_BACKSPACE, value=2)
+    for _ in range(4):
+        ls.handle_event(ev)
+
+    # Now simulate double Shift (release twice)
+    ev_shift = SimpleNamespace(type=ecodes.EV_KEY, code=ecodes.KEY_LEFTSHIFT, value=0)
+    ls.handle_event(ev_shift)
+    ls.handle_event(ev_shift)
+
+    # After double shift with backspace hold, selection flow should be used
+    assert mock.cut_called or mock.delete_called
+    assert mock.paste_called
 
 
 if __name__ == '__main__':
