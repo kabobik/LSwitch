@@ -857,6 +857,57 @@ class LSwitch:
                 selected_text = ''
             
             if selected_text:
+                # Если выделение возможно некорректное (например, не дотянуто до пробела),
+                # попробуем расширить выделение посимвольно (Shift+Left), чтобы достичь пробела или начала слова.
+                try:
+                    sel = selected_text
+                    if sel and ' ' not in sel:
+                        prev = None
+                        no_growth = 0
+                        for _ in range(100):
+                            subprocess.run(['xdotool', 'key', 'shift+Left'], timeout=0.1, stderr=subprocess.DEVNULL)
+                            time.sleep(0.01)
+                            try:
+                                new_sel = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
+                            except Exception:
+                                new_sel = sel
+
+                            if new_sel == sel:
+                                no_growth += 1
+                            else:
+                                sel = new_sel
+                                no_growth = 0
+
+                            # Если достигли пробела — остановимся (считая слово полностью захваченным)
+                            if ' ' in sel:
+                                selected_text = sel
+                                break
+
+                            # Если не расширяется — попробуем word-wise расширение (ctrl+shift+Left) один раз
+                            if no_growth >= 3:
+                                try:
+                                    subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.1, stderr=subprocess.DEVNULL)
+                                    time.sleep(0.01)
+                                    try:
+                                        new_sel = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
+                                    except Exception:
+                                        new_sel = sel
+                                    if new_sel != sel:
+                                        sel = new_sel
+                                        no_growth = 0
+                                        continue
+                                except Exception:
+                                    pass
+                                # если и это не помогло — прекращаем попытки
+                                selected_text = sel
+                                break
+
+                        # Небольшая стабилизация после манипуляций с выделением
+                        time.sleep(0.02)
+                except Exception:
+                    # Не критично — продолжим со старым выделением
+                    pass
+
                 # Конвертируем
                 converted = self.convert_text(selected_text)
                 
@@ -916,23 +967,54 @@ class LSwitch:
                 except Exception:
                     old_clipboard = ''
                 
+                # Попробуем сначала безопасно удалить выделение (cut) чтобы избежать дублирования
+                cut_succeeded = False
+                try:
+                    subprocess.run(['xdotool', 'key', 'ctrl+x'], timeout=0.5, stderr=subprocess.DEVNULL)
+                    time.sleep(0.02)
+                    # Проверим, что в clipboard действительно появился вырезанный текст
+                    try:
+                        test_clip = subprocess.run(['xclip', '-o', '-selection', 'clipboard'], capture_output=True, timeout=0.3, text=True).stdout
+                    except Exception:
+                        test_clip = ''
+                    if test_clip.strip() == selected_text.strip():
+                        cut_succeeded = True
+                        if self.config.get('debug'):
+                            print("✓ Cut succeeded (ctrl+x)")
+                    else:
+                        if self.config.get('debug'):
+                            print("⚠️ Cut didn't match selection, will try Delete")
+                except Exception:
+                    if self.config.get('debug'):
+                        print("⚠️ Cut failed (ctrl+x) — возможно приложение не поддерживает")
+
+                # Если cut не сработал — попробуем Delete
+                if not cut_succeeded:
+                    try:
+                        subprocess.run(['xdotool', 'key', 'Delete'], timeout=0.2, stderr=subprocess.DEVNULL)
+                        time.sleep(0.01)
+                        if self.config.get('debug'):
+                            print("✓ Delete sent to remove selection")
+                    except Exception:
+                        if self.config.get('debug'):
+                            print("⚠️ Delete failed — продолжим и просто вставим (возможно дублирование)")
+
                 # Помещаем конвертированный текст в clipboard
                 subprocess.run(
                     ['xclip', '-selection', 'clipboard'],
                     input=converted, text=True, timeout=0.5
                 )
-                
+
                 time.sleep(0.02)
-                
-                # Вставляем через Ctrl+V - выделенное заменится!
-                # Не зависит от модификаторов, атомарная операция
+
+                # Вставляем через Ctrl+V
                 subprocess.run(
                     ['xdotool', 'key', 'ctrl+v'],
                     timeout=1.0, stderr=subprocess.DEVNULL
                 )
-                
+
                 time.sleep(0.05)
-                
+
                 # Восстанавливаем clipboard пользователя
                 if old_clipboard:
                     subprocess.run(
@@ -1186,6 +1268,13 @@ class LSwitch:
             
             if self.config.get('debug'):
                 print("✓ Конвертация завершена")
+
+            # Обновляем снимок PRIMARY selection — это предотвращает ошибочное
+            # определение "свежего выделения" сразу после ручной конвертации.
+            try:
+                self.update_selection_snapshot()
+            except Exception:
+                pass
             
         except Exception as e:
             print(f"⚠️  Ошибка: {e}")
