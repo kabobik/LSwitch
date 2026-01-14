@@ -168,6 +168,38 @@ class MyNewDEAdapter(BaseGUIAdapter):
 
 ### Шаг 4: Обновить фабрику в adapters/__init__.py
 
+
+### ConversionManager (новый модуль)
+
+`ConversionManager` централизует логику выбора режима ручной конвертации: быстрый "retype" (удалить и перепечатать) или медленный "selection" (использовать PRIMARY selection и вставить). Это позволяет явно задавать политики и тестировать их.
+
+**API и поведение:**
+- Конструктор: `ConversionManager(config=None, x11_adapter=None)` — конфиг может содержать `app_policies`.
+- `choose_mode(buffer, has_selection_fn, backspace_hold=False)` — возвращает `'retype'` или `'selection'`.
+  - Правила по умолчанию:
+    - Если `backspace_hold==True` или `buffer.chars_in_buffer==0` → `selection`.
+    - Если `has_selection_fn()` возвращает True → `selection`.
+    - Сначала проверяются `app_policies` (из конфига) и зарегистрированные policy-функции.
+    - Флаг `prefer_retype_when_possible` в конфиге заставляет выбирать `retype` когда возможно.
+- `execute(mode, retype_cb, selection_cb)` — вызывает соответствующий callback.
+- Политики: `app_policies` в конфиге — маппинг `window_class -> mode` (например, `"Code": "retype"`).
+- Регистрация сложных политик: `register_policy(callable)` — callable получает `context` и может вернуть `'retype'` | `'selection'` | `None`.
+
+**Default app policies:**
+LSwitch поставляется с набором безопасных значений по умолчанию, которые можно переопределить в конфиге (`config.json`):
+- IDE/editors → `retype` (например, `Code`, `IntelliJ`, `Gedit`)
+- Browsers → `selection` (например, `Firefox`, `Chromium`)
+
+**Пример использования:**
+```python
+from conversion import ConversionManager
+cm = ConversionManager(config={'prefer_retype_when_possible': True}, x11_adapter=x11_adapter)
+mode = cm.choose_mode(buffer, lambda: has_selection(), backspace_hold=False)
+cm.execute(mode, retype_cb=lambda: print('retype'), selection_cb=lambda: print('selection'))
+```
+
+---
+
 ```python
 from adapters.mynewde import MyNewDEAdapter
 

@@ -1,0 +1,147 @@
+"""ConversionManager: central logic for choosing conversion mode.
+
+Responsibility:
+- Decide between 'retype' (fast) and 'selection' (slow) conversion modes,
+  based on buffer state, backspace hold, presence of selection, and config.
+- Provide an API `choose_mode` and `execute` to call the appropriate callback.
+"""
+from typing import Callable
+import time
+
+# Default application policies: prefer retype (fast) in IDEs, selection (slow) in browsers
+DEFAULT_APP_POLICIES = {
+    'Code': 'retype',        # VSCode
+    'IntelliJ': 'retype',    # JetBrains IDEs
+    'Gedit': 'retype',       # simple editors
+    'Firefox': 'selection',  # browsers tend to have complex widgets
+    'Chromium': 'selection',
+    'Google-chrome': 'selection'
+}
+
+
+class ConversionManager:
+    def __init__(self, config=None, x11_adapter=None):
+        self.config = config or {}
+        self.x11_adapter = x11_adapter
+        # Merge defaults with config-provided overrides
+        base = DEFAULT_APP_POLICIES.copy()
+        base.update(self.config.get('app_policies', {}))
+        self.app_policies = base
+        self.policies = []  # list of callables(context) -> 'retype'|'selection'|None
+
+    def register_policy(self, policy_callable):
+        """Register a policy callable that receives a context dict and may return a mode or None."""
+        self.policies.append(policy_callable)
+
+    def _detect_lang(self, s: str) -> str:
+        s_clean = (s or '').strip()
+        return 'ru' if any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in s_clean) else 'en'
+
+    def _canonicalize(self, s: str, user_dict=None) -> str:
+        s_clean = (s or '').strip()
+        if not s_clean:
+            return ''
+        lang = self._detect_lang(s_clean)
+        if user_dict:
+            try:
+                return user_dict._canonicalize(s_clean, lang)
+            except Exception:
+                return s_clean.lower()
+        return s_clean.lower()
+
+    def is_correction(self, auto_marker: dict, original_text: str, converted_text: str, user_dict=None, timeout=5.0) -> bool:
+        """Return True if the manual conversion should be considered a correction after an auto conversion."""
+        try:
+            if not auto_marker:
+                return False
+            time_since_auto = time.time() - auto_marker.get('time', 0)
+            if time_since_auto >= timeout:
+                return False
+
+            orig_canon = self._canonicalize(original_text, user_dict)
+            auto_conv_canon = self._canonicalize(auto_marker.get('converted_to', ''), user_dict)
+            conv_canon = self._canonicalize(converted_text, user_dict)
+            auto_word_canon = self._canonicalize(auto_marker.get('word', ''), user_dict)
+
+            if orig_canon == auto_conv_canon and conv_canon == auto_word_canon:
+                return True
+            return False
+        except Exception:
+            return False
+
+    def apply_correction(self, user_dict, auto_marker: dict, original_text: str, converted_text: str, timeout=None, debug=False) -> bool:
+        """If correction is detected, call user_dict.add_correction and return True."""
+        try:
+            t = timeout if timeout is not None else user_dict.data['settings'].get('correction_timeout', 5.0) if user_dict else 5.0
+            if self.is_correction(auto_marker, original_text, converted_text, user_dict=user_dict, timeout=t):
+                corrected_word = converted_text.strip().lower()
+                lang = self._detect_lang(corrected_word)
+                if user_dict:
+                    user_dict.add_correction(corrected_word, lang, debug=debug)
+                if debug:
+                    print(f"📚 APPLY CORRECTION (via ConversionManager): '{corrected_word}' ({lang})")
+                return True
+            return False
+        except Exception as e:
+            if debug:
+                print(f"⚠️ ConversionManager.apply_correction error: {e}")
+            return False
+    def choose_mode(self, buffer, has_selection_fn: Callable[[], bool], backspace_hold=False):
+        """Return 'retype' or 'selection'.
+
+        Rules (simple, testable):
+        - If backspace_hold is True or buffer.chars_in_buffer == 0 -> prefer selection
+        - Else if has_selection_fn() is True -> selection
+        - Else if config has prefer_retype_when_possible True -> retype
+        - Else -> retype
+        """
+        # If explicit backspace hold or empty buffer -> selection
+        if backspace_hold or getattr(buffer, 'chars_in_buffer', 0) == 0:
+            return 'selection'
+
+        # If there's a fresh selection -> selection
+        try:
+            if has_selection_fn():
+                return 'selection'
+        except Exception:
+            # If has_selection fails, prefer retype if possible
+            pass
+
+        # Check app-specific policies (config mapping)
+        try:
+            if self.app_policies and self.x11_adapter:
+                try:
+                    win = None
+                    if hasattr(self.x11_adapter, 'get_active_window_class'):
+                        win = self.x11_adapter.get_active_window_class()
+                    elif hasattr(self.x11_adapter, 'get_active_window_name'):
+                        win = self.x11_adapter.get_active_window_name()
+                    if win and win in self.app_policies:
+                        return self.app_policies[win]
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Call registered policy callables (higher priority)
+        for p in self.policies:
+            try:
+                res = p({'buffer': buffer, 'has_selection': has_selection_fn, 'x11': self.x11_adapter, 'config': self.config})
+                if res in ('retype', 'selection'):
+                    return res
+            except Exception:
+                continue
+
+        # Config override
+        if self.config.get('prefer_retype_when_possible'):
+            return 'retype'
+
+        # Default to retype when buffer has chars
+        return 'retype'
+
+    def execute(self, mode: str, retype_cb: Callable[[], None], selection_cb: Callable[[], None]):
+        """Execute provided callback based on mode."""
+        if mode == 'retype':
+            return retype_cb()
+        else:
+            return selection_cb()

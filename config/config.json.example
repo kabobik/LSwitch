@@ -5,5 +5,14 @@
   "layout_switch_key": "Alt_L+Shift_L",
   "auto_switch": true,
   "user_dict_enabled": true,
-  "user_dict_min_weight": 2
+  "user_dict_min_weight": 2,
+
+  # App-specific policies: map active window class/name to preferred mode: "retype" or "selection"
+  # Example: prefer fast retype in editors/IDEs, selection in browsers
+  "app_policies": {
+    "Code": "retype",
+    "IntelliJ": "retype",
+    "Firefox": "selection",
+    "Chromium": "selection"
+  }
 }
