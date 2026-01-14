@@ -111,6 +111,12 @@ except ImportError:
         print("⚠️  user_dictionary.py найден но не импортируется")
 
 
+# Adapter для X11 (xclip/xdotool) — можно мокировать в тестах
+try:
+    from adapters import x11 as x11_adapter
+except Exception:
+    x11_adapter = None
+
 # Карта переключения EN -> RU
 EN_TO_RU = {
     'q': 'й', 'w': 'ц', 'e': 'у', 'r': 'к', 't': 'е', 'y': 'н', 'u': 'г', 'i': 'ш', 'o': 'щ', 'p': 'з',
@@ -849,10 +855,13 @@ class LSwitch:
         try:
             # Получаем выделенный текст из PRIMARY selection (не трогаем clipboard!)
             try:
-                selected_text = subprocess.run(
-                    ['xclip', '-o', '-selection', 'primary'],
-                    capture_output=True, timeout=0.5, text=True
-                ).stdout
+                if x11_adapter:
+                    selected_text = x11_adapter.get_primary_selection(timeout=0.5)
+                else:
+                    selected_text = subprocess.run(
+                        ['xclip', '-o', '-selection', 'primary'],
+                        capture_output=True, timeout=0.5, text=True
+                    ).stdout
             except Exception:
                 selected_text = ''
             
@@ -865,10 +874,16 @@ class LSwitch:
                         prev = None
                         no_growth = 0
                         for _ in range(100):
-                            subprocess.run(['xdotool', 'key', 'shift+Left'], timeout=0.1, stderr=subprocess.DEVNULL)
+                            if x11_adapter:
+                                x11_adapter.shift_left()
+                            else:
+                                subprocess.run(['xdotool', 'key', 'shift+Left'], timeout=0.1, stderr=subprocess.DEVNULL)
                             time.sleep(0.01)
                             try:
-                                new_sel = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
+                                if x11_adapter:
+                                    new_sel = x11_adapter.get_primary_selection(timeout=0.2)
+                                else:
+                                    new_sel = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
                             except Exception:
                                 new_sel = sel
 
@@ -886,10 +901,16 @@ class LSwitch:
                             # Если не расширяется — попробуем word-wise расширение (ctrl+shift+Left) один раз
                             if no_growth >= 3:
                                 try:
-                                    subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.1, stderr=subprocess.DEVNULL)
+                                    if x11_adapter:
+                                        x11_adapter.ctrl_shift_left()
+                                    else:
+                                        subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.1, stderr=subprocess.DEVNULL)
                                     time.sleep(0.01)
                                     try:
-                                        new_sel = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
+                                        if x11_adapter:
+                                            new_sel = x11_adapter.get_primary_selection(timeout=0.2)
+                                        else:
+                                            new_sel = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
                                     except Exception:
                                         new_sel = sel
                                     if new_sel != sel:
@@ -978,21 +999,30 @@ class LSwitch:
                 
                 # Сохраняем текущий clipboard пользователя
                 try:
-                    old_clipboard = subprocess.run(
-                        ['xclip', '-o', '-selection', 'clipboard'],
-                        capture_output=True, timeout=0.3, text=True
-                    ).stdout
+                    if x11_adapter:
+                        old_clipboard = x11_adapter.get_clipboard(timeout=0.3)
+                    else:
+                        old_clipboard = subprocess.run(
+                            ['xclip', '-o', '-selection', 'clipboard'],
+                            capture_output=True, timeout=0.3, text=True
+                        ).stdout
                 except Exception:
                     old_clipboard = ''
                 
                 # Попробуем сначала безопасно удалить выделение (cut) чтобы избежать дублирования
                 cut_succeeded = False
                 try:
-                    subprocess.run(['xdotool', 'key', 'ctrl+x'], timeout=0.5, stderr=subprocess.DEVNULL)
+                    if x11_adapter:
+                        x11_adapter.cut_selection()
+                    else:
+                        subprocess.run(['xdotool', 'key', 'ctrl+x'], timeout=0.5, stderr=subprocess.DEVNULL)
                     time.sleep(0.04)
                     # Проверим, что в clipboard действительно появился вырезанный текст
                     try:
-                        test_clip = subprocess.run(['xclip', '-o', '-selection', 'clipboard'], capture_output=True, timeout=0.3, text=True).stdout
+                        if x11_adapter:
+                            test_clip = x11_adapter.get_clipboard(timeout=0.3)
+                        else:
+                            test_clip = subprocess.run(['xclip', '-o', '-selection', 'clipboard'], capture_output=True, timeout=0.3, text=True).stdout
                     except Exception:
                         test_clip = ''
                     if self.config.get('debug'):
@@ -1011,11 +1041,17 @@ class LSwitch:
                 # Если cut не сработал — попробуем Delete
                 if not cut_succeeded:
                     try:
-                        subprocess.run(['xdotool', 'key', 'Delete'], timeout=0.2, stderr=subprocess.DEVNULL)
+                        if x11_adapter:
+                            x11_adapter.delete_selection()
+                        else:
+                            subprocess.run(['xdotool', 'key', 'Delete'], timeout=0.2, stderr=subprocess.DEVNULL)
                         time.sleep(0.04)
                         # Проверим, что PRIMARY selection изменилась/опустела
                         try:
-                            after = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
+                            if x11_adapter:
+                                after = x11_adapter.get_primary_selection(timeout=0.2)
+                            else:
+                                after = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
                         except Exception:
                             after = ''
                         if self.config.get('debug'):
@@ -1031,31 +1067,34 @@ class LSwitch:
                             print("⚠️ Delete failed — продолжим и просто вставим (возможно дублирование)")
 
                 # Помещаем конвертированный текст в clipboard
-                subprocess.run(
-                    ['xclip', '-selection', 'clipboard'],
-                    input=converted, text=True, timeout=0.5
-                )
+                if x11_adapter:
+                    x11_adapter.set_clipboard(converted)
+                else:
+                    subprocess.run(['xclip', '-selection', 'clipboard'], input=converted, text=True, timeout=0.5)
 
                 time.sleep(0.02)
 
                 # Вставляем через Ctrl+V
-                subprocess.run(
-                    ['xdotool', 'key', 'ctrl+v'],
-                    timeout=1.0, stderr=subprocess.DEVNULL
-                )
+                if x11_adapter:
+                    x11_adapter.paste_clipboard()
+                else:
+                    subprocess.run(['xdotool', 'key', 'ctrl+v'], timeout=1.0, stderr=subprocess.DEVNULL)
 
                 time.sleep(0.05)
 
                 # Восстанавливаем clipboard пользователя
                 if old_clipboard:
-                    subprocess.run(
-                        ['xclip', '-selection', 'clipboard'],
-                        input=old_clipboard, text=True, timeout=0.5
-                    )
+                    if x11_adapter:
+                        x11_adapter.set_clipboard(old_clipboard)
+                    else:
+                        subprocess.run(['xclip', '-selection', 'clipboard'], input=old_clipboard, text=True, timeout=0.5)
 
                 # Диагностика: убедимся, что исходное выделение больше не присутствует
                 try:
-                    check = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.3, text=True).stdout
+                    if x11_adapter:
+                        check = x11_adapter.get_primary_selection(timeout=0.3)
+                    else:
+                        check = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.3, text=True).stdout
                     if self.config.get('debug'):
                         print(f"🔍 post-paste primary_len={len(check)}")
                     if selected_text.strip() and selected_text.strip() in check:
