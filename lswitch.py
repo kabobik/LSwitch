@@ -902,8 +902,26 @@ class LSwitch:
                                 selected_text = sel
                                 break
 
-                        # Небольшая стабилизация после манипуляций с выделением
-                        time.sleep(0.02)
+                        # Стабилизация: дождёмся пока PRIMARY selection не перестанет меняться
+                        stable_prev = None
+                        stable_count = 0
+                        start_t = time.time()
+                        while time.time() - start_t < 0.5 and stable_count < 3:
+                            try:
+                                cur = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
+                            except Exception:
+                                cur = sel
+                            if cur == stable_prev:
+                                stable_count += 1
+                            else:
+                                stable_count = 1
+                                stable_prev = cur
+                            if self.config.get('debug'):
+                                print(f"🔍 selection poll: len={len(cur)} stable_count={stable_count}")
+                            time.sleep(0.02)
+
+                        if stable_prev:
+                            selected_text = stable_prev
                 except Exception:
                     # Не критично — продолжим со старым выделением
                     pass
@@ -971,13 +989,15 @@ class LSwitch:
                 cut_succeeded = False
                 try:
                     subprocess.run(['xdotool', 'key', 'ctrl+x'], timeout=0.5, stderr=subprocess.DEVNULL)
-                    time.sleep(0.02)
+                    time.sleep(0.04)
                     # Проверим, что в clipboard действительно появился вырезанный текст
                     try:
                         test_clip = subprocess.run(['xclip', '-o', '-selection', 'clipboard'], capture_output=True, timeout=0.3, text=True).stdout
                     except Exception:
                         test_clip = ''
-                    if test_clip.strip() == selected_text.strip():
+                    if self.config.get('debug'):
+                        print(f"🔍 after cut: clip_len={len(test_clip)} selected_len={len(selected_text)}")
+                    if test_clip.strip() == selected_text.strip() and selected_text.strip():
                         cut_succeeded = True
                         if self.config.get('debug'):
                             print("✓ Cut succeeded (ctrl+x)")
@@ -992,9 +1012,20 @@ class LSwitch:
                 if not cut_succeeded:
                     try:
                         subprocess.run(['xdotool', 'key', 'Delete'], timeout=0.2, stderr=subprocess.DEVNULL)
-                        time.sleep(0.01)
+                        time.sleep(0.04)
+                        # Проверим, что PRIMARY selection изменилась/опустела
+                        try:
+                            after = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.2, text=True).stdout
+                        except Exception:
+                            after = ''
                         if self.config.get('debug'):
-                            print("✓ Delete sent to remove selection")
+                            print(f"🔍 after delete: primary_len={len(after)}")
+                        if after.strip() != selected_text.strip():
+                            if self.config.get('debug'):
+                                print("✓ Delete seems to have removed selection")
+                        else:
+                            if self.config.get('debug'):
+                                print("⚠️ Delete didn't remove selection")
                     except Exception:
                         if self.config.get('debug'):
                             print("⚠️ Delete failed — продолжим и просто вставим (возможно дублирование)")
@@ -1021,6 +1052,17 @@ class LSwitch:
                         ['xclip', '-selection', 'clipboard'],
                         input=old_clipboard, text=True, timeout=0.5
                     )
+
+                # Диагностика: убедимся, что исходное выделение больше не присутствует
+                try:
+                    check = subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=0.3, text=True).stdout
+                    if self.config.get('debug'):
+                        print(f"🔍 post-paste primary_len={len(check)}")
+                    if selected_text.strip() and selected_text.strip() in check:
+                        if self.config.get('debug'):
+                            print("⚠️ post-paste: original still present in PRIMARY — possible duplication")
+                except Exception:
+                    pass
                 
                 # КРИТИЧНО: Обновляем снимок ПОСЛЕ всех операций
                 # Это выделение уже обработано и не должно считаться новым
