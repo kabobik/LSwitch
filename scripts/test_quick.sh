@@ -39,11 +39,32 @@ for word, layout, should_convert in tests:
 "
 echo
 
-# Режим тестирования: консоль (GUI tray удалён)
-if [ "$EUID" -ne 0 ]; then
-    echo "Требуются права root для доступа к /dev/input/"
-    echo "Запуск через sudo..."
-    sudo python3 -u lswitch.py
-else
-    python3 -u lswitch.py
-fi
+# Выбор режима
+echo "Выберите режим тестирования:"
+echo "1) GUI с треем (требуется X11)"
+echo "2) Консольный режим (требуется root)"
+read -p "Ваш выбор (1-2): " choice
+
+case $choice in
+    1)
+        if [ "$GUI_AVAILABLE" = true ]; then
+            echo "Запуск GUI..."
+            python3 lswitch_tray.py
+        else
+            echo "❌ PyQt5 не установлен"
+        fi
+        ;;
+    2)
+        if [ "$EUID" -ne 0 ]; then
+            echo "Требуются права root для доступа к /dev/input/"
+            echo "Запуск через sudo..."
+            sudo python3 -u lswitch.py
+        else
+            python3 -u lswitch.py
+        fi
+        ;;
+    *)
+        echo "Неверный выбор"
+        exit 1
+        ;;
+esac

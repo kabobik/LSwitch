@@ -181,7 +181,8 @@ cp -r adapters "$LIB_DIR/"
 cp -r utils "$LIB_DIR/"
 chmod -R 755 "$LIB_DIR"
 
-# GUI tray/control panel has been removed (see archive/removed_tray)
+# Копируем GUI панель управления (lswitch-control)
+pref_install lswitch_control.py /usr/local/bin/lswitch-control
 
 # Копируем иконку (программная генерация в runtime)
 if [ -n "$PREFIX" ]; then
@@ -191,8 +192,14 @@ else
     install -Dm644 assets/lswitch.svg /usr/share/pixmaps/lswitch.svg
 fi
 
-# Desktop menu files for GUI were removed with the legacy tray. If you still need the desktop entry, find it in archive/removed_tray.
-# Skipping installation of lswitch-control.desktop (legacy GUI removed)
+# Копируем .desktop файл для системного меню
+if [ -n "$PREFIX" ]; then
+    mkdir -p "$PREFIX/usr/share/applications"
+    cp config/lswitch-control.desktop "$PREFIX/usr/share/applications/lswitch-control.desktop"
+else
+    install -Dm644 config/lswitch-control.desktop /usr/share/applications/lswitch-control.desktop
+fi
+# Note: GUI control panel is installed by default
 
 # Legacy GUI removed: no autostart prompt
 if [ "$TEST_MODE" -eq 1 ]; then

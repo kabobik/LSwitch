@@ -1,12 +1,8 @@
 import os
 import sys
-import pytest
 sys.path.insert(0, os.getcwd())
-try:
-    from lswitch_control import LSwitchControlPanel
-    from PyQt5.QtWidgets import QApplication
-except Exception:
-    pytest.skip("GUI tray removed; skipping GUI tests", allow_module_level=True)
+from lswitch_control import LSwitchControlPanel
+from PyQt5.QtWidgets import QApplication
 
 
 def test_user_options_present_and_enabled(monkeypatch, tmp_path):

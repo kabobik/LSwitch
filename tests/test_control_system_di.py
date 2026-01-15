@@ -1,8 +1,4 @@
-import pytest
-try:
-    import lswitch_control as ctrl
-except Exception:
-    pytest.skip("GUI tray removed; skipping GUI tests", allow_module_level=True)
+import lswitch_control as ctrl
 
 
 class MockSystem:

@@ -1,12 +1,8 @@
 import os
 import sys
-import pytest
-try:
-    from PyQt5.QtWidgets import QApplication
-    sys.path.insert(0, os.getcwd())
-    from lswitch_control import LSwitchControlPanel
-except Exception:
-    pytest.skip("GUI tray removed; skipping GUI tests", allow_module_level=True)
+from PyQt5.QtWidgets import QApplication
+sys.path.insert(0, os.getcwd())
+from lswitch_control import LSwitchControlPanel
 
 
 def test_gui_autostart_system_managed(monkeypatch, tmp_path):

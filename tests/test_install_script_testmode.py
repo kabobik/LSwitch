@@ -23,10 +23,10 @@ def test_install_script_test_mode(tmp_path):
 
     # Check some installed files exist under prefix
     assert os.path.exists(os.path.join(prefix, 'usr', 'local', 'bin', 'lswitch'))
-    # GUI tray removed — control binary and desktop file should NOT be installed
-    assert not os.path.exists(os.path.join(prefix, 'usr', 'local', 'bin', 'lswitch-control'))
+    # GUI tray is installed by default
+    assert os.path.exists(os.path.join(prefix, 'usr', 'local', 'bin', 'lswitch-control'))
     assert os.path.exists(os.path.join(prefix, 'usr', 'local', 'lib', 'lswitch', 'adapters'))
-    assert not os.path.exists(os.path.join(prefix, 'usr', 'share', 'applications', 'lswitch-control.desktop'))
+    assert os.path.exists(os.path.join(prefix, 'usr', 'share', 'applications', 'lswitch-control.desktop'))
 
     # Cleanup
     del os.environ['LSWITCH_TEST_PREFIX']
