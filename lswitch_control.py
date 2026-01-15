@@ -333,7 +333,14 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.autostart_action.setChecked(self.autostart_checked)
         self.autostart_action.triggered.connect(self.toggle_autostart)
         self.service_menu.addAction(self.autostart_action)
-        
+
+        # Опция: разрешить управление службой из GUI (по умолчанию включено)
+        self.allow_manage_action = QAction("Разрешить управление службой (GUI)", self.service_menu)
+        self.allow_manage_action.setCheckable(True)
+        self.allow_manage_action.setChecked(self.config.get('gui_manage_service', True))
+        self.allow_manage_action.triggered.connect(self.toggle_service_management)
+        self.service_menu.addAction(self.allow_manage_action)
+
         # Добавляем подменю в главное меню
         self.menu.addMenu(self.service_menu)
         
@@ -408,7 +415,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
     def get_service_status(self):
         """Получает статус службы"""
         try:
-            result = system.run(['systemctl', '--user', 'is-active', 'lswitch'], capture_output=True, text=True, timeout=2)
+            result = get_system().run(['systemctl', '--user', 'is-active', 'lswitch'], capture_output=True, text=True, timeout=2)
             return result.stdout.strip()
         except Exception:
             return 'unknown'
@@ -457,11 +464,24 @@ class LSwitchControlPanel(QSystemTrayIcon):
     
     def run_systemctl(self, action):
         """Выполняет команду systemctl"""
+        # Respect config toggle: allow GUI to manage service
+        if not self.config.get('gui_manage_service', True):
+            # Inform the user that GUI control is disabled
+            try:
+                self.showMessage("LSwitch", "Управление службой отключено в настройках GUI", QSystemTrayIcon.Information, 3000)
+            except Exception:
+                pass
+            return False
+
         try:
-            system.run(['systemctl', '--user', action, 'lswitch'], check=True, timeout=10)
+            get_system().run(['systemctl', '--user', action, 'lswitch'], check=True, timeout=10)
             return True
         except Exception as e:
             print(f"Ошибка systemctl {action}: {e}", file=sys.stderr, flush=True)
+            try:
+                self.showMessage(t('error'), t('failed_to_'+action), QSystemTrayIcon.Critical, 3000)
+            except Exception:
+                pass
             return False
     
     def publish_layouts(self):
@@ -643,7 +663,8 @@ class LSwitchControlPanel(QSystemTrayIcon):
         if self.run_systemctl('start'):
             self.showMessage("LSwitch", t('service_started'), QSystemTrayIcon.Information, 2000)
         else:
-            self.showMessage(t('error'), t('failed_to_start'), QSystemTrayIcon.Critical, 3000)
+            # run_systemctl already shows a message if control is disabled or failed
+            pass
         self.update_service_status()
     
     def stop_service(self):
@@ -651,7 +672,8 @@ class LSwitchControlPanel(QSystemTrayIcon):
         if self.run_systemctl('stop'):
             self.showMessage("LSwitch", t('service_stopped'), QSystemTrayIcon.Information, 2000)
         else:
-            self.showMessage(t('error'), t('failed_to_stop'), QSystemTrayIcon.Critical, 3000)
+            # run_systemctl already shows a message if control is disabled or failed
+            pass
         self.update_service_status()
     
     def restart_service(self):
@@ -659,7 +681,8 @@ class LSwitchControlPanel(QSystemTrayIcon):
         if self.run_systemctl('restart'):
             self.showMessage("LSwitch", t('service_restarted'), QSystemTrayIcon.Information, 2000)
         else:
-            self.showMessage(t('error'), t('failed_to_restart'), QSystemTrayIcon.Critical, 3000)
+            # run_systemctl already shows a message if control is disabled or failed
+            pass
         self.update_service_status()
     
     def toggle_auto_switch(self):
@@ -679,6 +702,18 @@ class LSwitchControlPanel(QSystemTrayIcon):
                 2000
             )
             # Если системный конфиг есть, но мы не записали туда изменения — предупредим пользователя
+
+    def toggle_service_management(self):
+        """Toggle whether GUI is allowed to manage the user service"""
+        enabled = not self.config.get('gui_manage_service', True)
+        self.config['gui_manage_service'] = enabled
+        self.allow_manage_action.setChecked(enabled)
+        if self.save_config():
+            msg = "Управление службой разрешено из GUI" if enabled else "Управление службой отключено из GUI"
+            try:
+                self.showMessage("LSwitch", msg, QSystemTrayIcon.Information, 2000)
+            except Exception:
+                pass
 
     
     def toggle_user_dict(self):
