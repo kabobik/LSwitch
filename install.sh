@@ -14,6 +14,50 @@ echo -e "${GREEN}║   LSwitch - Установка в систему        ║
 echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
 echo
 
+# Test-mode: if LSWITCH_TEST_PREFIX is set, install into that prefix and
+# avoid making system changes (no apt-get, systemctl, udevadm, usermod, etc.).
+TEST_MODE=0
+PREFIX=""
+LOGFILE=""
+if [ -n "$LSWITCH_TEST_PREFIX" ]; then
+    TEST_MODE=1
+    PREFIX="$LSWITCH_TEST_PREFIX"
+    mkdir -p "$PREFIX"
+    LOGFILE="$PREFIX/.lswitch_install_log"
+    echo "TEST_MODE=1" > "$LOGFILE"
+    echo "Test mode active: installing into prefix=$PREFIX" | tee -a "$LOGFILE"
+fi
+
+# Helper to run or log commands depending on TEST_MODE
+run_or_log() {
+    if [ "$TEST_MODE" -eq 1 ]; then
+        echo "[TEST_MODE] Would run: $*" | tee -a "$LOGFILE"
+    else
+        echo "Running: $*"
+        eval "$@"
+    fi
+}
+
+# Helper to copy/install files into prefixed dirs
+pref_install() {
+    src="$1"; shift
+    dest="$1"; shift
+    if [ -n "$PREFIX" ]; then
+        # map /usr/local -> $PREFIX, /usr/share -> $PREFIX, /etc -> $PREFIX etc
+        dest="$PREFIX${dest}"
+        mkdir -p "$(dirname "$dest")"
+    fi
+    if [ "$TEST_MODE" -eq 1 ]; then
+        echo "[TEST_MODE] Installing $src -> $dest" | tee -a "$LOGFILE"
+        if [ -d "$src" ]; then
+            cp -r "$src" "$dest"
+        else
+            install -m 755 "$src" "$dest" 2>/dev/null || cp "$src" "$dest"
+        fi
+    else
+        install -m 755 "$src" "$dest" 2>/dev/null || cp "$src" "$dest"
+    fi
+}
 # Проверка прав root
 if [ "$EUID" -ne 0 ]; then
     echo -e "${YELLOW}⚠️  Внимание: скрипт работает без root-прав${NC}"
@@ -111,64 +155,69 @@ fi
 pkill -f "lswitch_control.py|lswitch-control" 2>/dev/null && echo "   ✓ GUI приложения остановлены" || true
 
 echo -e "${YELLOW}📦 Установка зависимостей...${NC}"
-apt-get update -qq
-apt-get install -y python3-evdev python3-pyqt5 xclip xdotool
+run_or_log apt-get update -qq
+run_or_log apt-get install -y python3-evdev xclip xdotool
 
 echo -e "${YELLOW}📁 Копирование файлов...${NC}"
 # Копируем основной скрипт
-install -m 755 lswitch.py /usr/local/bin/lswitch
+pref_install lswitch.py /usr/local/bin/lswitch
 
 # Копируем модули
-install -m 644 dictionary.py /usr/local/bin/dictionary.py
-install -m 644 ngrams.py /usr/local/bin/ngrams.py
-install -m 644 user_dictionary.py /usr/local/bin/user_dictionary.py
-install -m 644 __version__.py /usr/local/bin/__version__.py
+pref_install dictionary.py /usr/local/bin/dictionary.py
+pref_install ngrams.py /usr/local/bin/ngrams.py
+pref_install user_dictionary.py /usr/local/bin/user_dictionary.py
+pref_install __version__.py /usr/local/bin/__version__.py
 
 # Копируем адаптеры и утилиты
-mkdir -p /usr/local/lib/lswitch
-cp i18n.py /usr/local/lib/lswitch/i18n.py
-cp __version__.py /usr/local/lib/lswitch/__version__.py
-cp -r adapters /usr/local/lib/lswitch/
-cp -r utils /usr/local/lib/lswitch/
-chmod -R 755 /usr/local/lib/lswitch
+if [ -n "$PREFIX" ]; then
+    LIB_DIR="$PREFIX/usr/local/lib/lswitch"
+else
+    LIB_DIR="/usr/local/lib/lswitch"
+fi
+mkdir -p "$LIB_DIR"
+cp i18n.py "$LIB_DIR/i18n.py"
+cp __version__.py "$LIB_DIR/__version__.py"
+cp -r adapters "$LIB_DIR/"
+cp -r utils "$LIB_DIR/"
+chmod -R 755 "$LIB_DIR"
 
-# Копируем GUI панель управления (lswitch-control)
-install -m 755 lswitch_control.py /usr/local/bin/lswitch-control
+# GUI tray/control panel has been removed (see archive/removed_tray)
 
 # Копируем иконку (программная генерация в runtime)
-install -Dm644 assets/lswitch.svg /usr/share/pixmaps/lswitch.svg
-
-# Копируем .desktop файл для системного меню
-install -Dm644 config/lswitch-control.desktop /usr/share/applications/lswitch-control.desktop
-# Админская панель удалена из GUI — всё упрощено до пользовательского режима.
-# Весь конфиг хранится и управляется на уровне пользователя (~/.config/lswitch/config.json).
-
-# Предложим включить автозапуск GUI панели для пользователя X-сессии
-# Если скрипт не интерактивен, просто выведем инструкцию
-if [ -t 0 ]; then
-    read -p "Включить автозапуск GUI панели для пользователя $X_USER? (y/n): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        sudo -u $X_USER mkdir -p /home/$X_USER/.config/autostart
-        sudo -u $X_USER cp /usr/share/applications/lswitch-control.desktop /home/$X_USER/.config/autostart/lswitch-control.desktop
-        chown $X_USER:$X_USER /home/$X_USER/.config/autostart/lswitch-control.desktop 2>/dev/null || true
-        echo "   ✓ Автозапуск GUI включён для $X_USER"
-    else
-        echo "   Автозапуск GUI не включён"
-    fi
+if [ -n "$PREFIX" ]; then
+    mkdir -p "$PREFIX/usr/share/pixmaps"
+    cp assets/lswitch.svg "$PREFIX/usr/share/pixmaps/lswitch.svg"
 else
-    echo "Для включения автозапуска GUI выполните (под пользователем):"
-    echo "  mkdir -p ~/.config/autostart && cp /usr/share/applications/lswitch-control.desktop ~/.config/autostart/"
+    install -Dm644 assets/lswitch.svg /usr/share/pixmaps/lswitch.svg
+fi
+
+# Desktop menu files for GUI were removed with the legacy tray. If you still need the desktop entry, find it in archive/removed_tray.
+# Skipping installation of lswitch-control.desktop (legacy GUI removed)
+
+# Legacy GUI removed: no autostart prompt
+if [ "$TEST_MODE" -eq 1 ]; then
+    echo "[TEST_MODE] Skipping GUI autostart (GUI removed)" | tee -a "$LOGFILE"
+else
+    echo "GUI tray is no longer installed by default. See archive/removed_tray for the legacy GUI implementation." 
 fi
 
 # Обновляем базу данных приложений
 echo -e "${YELLOW}📋 Обновление базы данных приложений...${NC}"
-update-desktop-database /usr/share/applications/ 2>/dev/null && echo "   ✓ База данных приложений обновлена" || echo "   ⚠️  Не удалось обновить БД (опционально)"
+if [ "$TEST_MODE" -eq 1 ]; then
+    echo "[TEST_MODE] Skipping update-desktop-database" | tee -a "$LOGFILE"
+else
+    update-desktop-database /usr/share/applications/ 2>/dev/null && echo "   ✓ База данных приложений обновлена" || echo "   ⚠️  Не удалось обновить БД (опционально)"
+fi
 
 # Создаём директорию конфигурации
 # Create user config directory
 USER_CONFIG_DIR="/home/$X_USER/.config/lswitch"
-mkdir -p "$USER_CONFIG_DIR"
+if [ "$TEST_MODE" -eq 1 ]; then
+    echo "[TEST_MODE] Creating user config dir $USER_CONFIG_DIR (no ownership changes)" | tee -a "$LOGFILE"
+    mkdir -p "$USER_CONFIG_DIR"
+else
+    mkdir -p "$USER_CONFIG_DIR"
+fi
 
 # If system config exists from older installs, migrate it into user's config (only if user config is missing)
 if [ -f /etc/lswitch/config.json ] && [ ! -f "$USER_CONFIG_DIR/config.json" ]; then
@@ -188,16 +237,24 @@ else
 fi
 
 # Ensure /etc/lswitch exists for legacy compatibility but do not overwrite system configs by default
-mkdir -p /etc/lswitch
-chgrp input /etc/lswitch 2>/dev/null || true
+if [ "$TEST_MODE" -eq 1 ]; then
+    echo "[TEST_MODE] Creating etc dir under prefix (no system /etc/lswitch changes)" | tee -a "$LOGFILE"
+    mkdir -p "$PREFIX/etc/lswitch"
+else
+    mkdir -p /etc/lswitch
+    chgrp input /etc/lswitch 2>/dev/null || true
+fi
 
 echo -e "${YELLOW}🔐 Настройка прав доступа (input devices)...${NC}"
 # Устанавливаем udev правило для доступа к input устройствам
-install -Dm644 config/99-lswitch.rules /etc/udev/rules.d/99-lswitch.rules
-
-# Перезагружаем udev правила
-udevadm control --reload-rules
-udevadm trigger
+if [ "$TEST_MODE" -eq 1 ]; then
+    echo "[TEST_MODE] Skipping udev rule copy and reload" | tee -a "$LOGFILE"
+else
+    install -Dm644 config/99-lswitch.rules /etc/udev/rules.d/99-lswitch.rules
+    # Перезагружаем udev правила
+    udevadm control --reload-rules
+    udevadm trigger
+fi
 
 # Создаём группу input если её нет
 if ! getent group input > /dev/null 2>&1; then
@@ -219,19 +276,26 @@ fi
 echo -e "   Пользователь X-сессии: ${GREEN}$X_USER${NC}"
 
 # Добавляем пользователя в группу input (для работы без root)
-usermod -a -G input $X_USER
-echo -e "   ✓ Пользователь $X_USER добавлен в группу 'input'"
-echo -e "   ${YELLOW}⚠️  ВАЖНО: Перелогиньтесь для применения прав!${NC}"
-echo
+if [ "$TEST_MODE" -eq 1 ]; then
+    echo "[TEST_MODE] Skipping usermod -a -G input $X_USER" | tee -a "$LOGFILE"
+else
+    usermod -a -G input $X_USER
+    echo -e "   ✓ Пользователь $X_USER добавлен в группу 'input'"
+    echo -e "   ${YELLOW}⚠️  ВАЖНО: Перелогиньтесь для применения прав!${NC}"
+    echo
+fi
 
 X_AUTH="/home/$X_USER/.Xauthority"
 
 # Копируем unit файл и подставляем переменные (заменяем любую строку Environment="XAUTHORITY=..." на значение для текущего пользователя)
-sed -e "s|^Environment=\"XAUTHORITY=.*\"|Environment=\"XAUTHORITY=$X_AUTH\"|" \
-    config/lswitch.service > /etc/systemd/system/lswitch.service
-
-# Перезагружаем systemd
-systemctl daemon-reload
+if [ "$TEST_MODE" -eq 1 ]; then
+    echo "[TEST_MODE] Skipping systemd unit install and daemon-reload" | tee -a "$LOGFILE"
+else
+    sed -e "s|^Environment=\"XAUTHORITY=.*\"|Environment=\"XAUTHORITY=$X_AUTH\"|" \
+        config/lswitch.service > /etc/systemd/system/lswitch.service
+    # Перезагружаем systemd
+    systemctl daemon-reload
+fi
 
 echo
 echo -e "${GREEN}✅ Установка завершена!${NC}"
@@ -257,22 +321,28 @@ echo
 echo -e "${GREEN}Иконки меню:${NC} Используются системные темы Qt"
 echo -e "${GREEN}Чекбоксы:${NC} Отображаются как иконки для выравнивания текста"
 echo
-read -p "Включить автозапуск при загрузке системы? (y/n): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # Копируем systemd unit в пользовательскую папку и включаем
-    sudo -u $X_USER mkdir -p /home/$X_USER/.config/systemd/user
-    cp /etc/systemd/system/lswitch.service /home/$X_USER/.config/systemd/user/
-    chown $X_USER:$X_USER /home/$X_USER/.config/systemd/user/lswitch.service
-    
-    sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user daemon-reload
-    sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user enable lswitch
-    sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user start lswitch
-    
-    echo -e "${GREEN}✅ Автозапуск включён и сервис запущен!${NC}"
-    echo -e "${YELLOW}Проверьте статус: systemctl --user status lswitch${NC}"
+# Autostart prompt and user-level systemd setup
+if [ "$TEST_MODE" -eq 1 ]; then
+    echo "[TEST_MODE] Skipping interactive autostart setup" | tee -a "$LOGFILE"
 else
-    echo -e "${YELLOW}Сервис установлен, но не запущен.${NC}"
-    echo -e "Запустите вручную: ${GREEN}systemctl --user start lswitch${NC}"
+    read -p "Включить автозапуск при загрузке системы? (y/n): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        # Копируем systemd unit в пользовательскую папку и включаем
+        sudo -u $X_USER mkdir -p /home/$X_USER/.config/systemd/user
+        cp /etc/systemd/system/lswitch.service /home/$X_USER/.config/systemd/user/
+        chown $X_USER:$X_USER /home/$X_USER/.config/systemd/user/lswitch.service
+        
+        sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user daemon-reload
+        sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user enable lswitch
+        sudo -u $X_USER XDG_RUNTIME_DIR=/run/user/$(id -u $X_USER) systemctl --user start lswitch
+        
+        echo -e "${GREEN}✅ Автозапуск включён и сервис запущен!${NC}"
+        echo -e "${YELLOW}Проверьте статус: systemctl --user status lswitch${NC}"
+    else
+        echo -e "${YELLOW}Сервис установлен, но не запущен.${NC}"
+        echo -e "Запустите вручную: ${GREEN}systemctl --user start lswitch${NC}"
+    fi
 fi
+
 echo

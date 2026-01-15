@@ -34,8 +34,13 @@ class LayoutMonitor:
         if self.running:
             return
         self.running = True
-        self.thread_layout = threading.Thread(target=self._monitor_layout_changes, daemon=True)
-        self.thread_file = threading.Thread(target=self._monitor_layouts_file, daemon=True)
+        # Prefer explicit hooks on the LSwitch instance when available so
+        # tests can monkeypatch `LSwitch.monitor_layout_changes` /
+        # `LSwitch.monitor_layouts_file` and have them run in the monitor threads.
+        layout_target = getattr(self.lswitch, 'monitor_layout_changes', self._monitor_layout_changes)
+        file_target = getattr(self.lswitch, 'monitor_layouts_file', self._monitor_layouts_file)
+        self.thread_layout = threading.Thread(target=layout_target, daemon=True)
+        self.thread_file = threading.Thread(target=file_target, daemon=True)
         self.thread_layout.start()
         self.thread_file.start()
 

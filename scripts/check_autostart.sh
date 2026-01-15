@@ -4,20 +4,9 @@
 echo "=== LSwitch - Проверка автозапуска ==="
 echo
 
-# Проверка GUI автозапуска
-echo "1. GUI режим (автозапуск при входе в систему):"
-if [ -f "$HOME/.config/autostart/lswitch-tray.desktop" ] || [ -f "/etc/xdg/autostart/lswitch-tray.desktop" ]; then
-    echo "   ✅ Автозапуск настроен"
-    if [ -f "$HOME/.config/autostart/lswitch-tray.desktop" ]; then
-        echo "      Файл: ~/.config/autostart/lswitch-tray.desktop"
-    fi
-    if [ -f "/etc/xdg/autostart/lswitch-tray.desktop" ]; then
-        echo "      Файл: /etc/xdg/autostart/lswitch-tray.desktop"
-    fi
-else
-    echo "   ❌ Автозапуск НЕ настроен"
-    echo "      Настроить: cp lswitch-tray.desktop ~/.config/autostart/"
-fi
+# GUI tray removed - no autostart to check
+echo "1. GUI tray: legacy tray removed (moved to archive/removed_tray)"
+echo "   ⚠️  GUI tray is no longer installed by default" 
 echo
 
 # Проверка systemd демона

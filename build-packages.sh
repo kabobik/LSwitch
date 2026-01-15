@@ -85,7 +85,7 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.8), python3-evdev, python3-pyqt5, xclip, xdotool
+Depends: python3 (>= 3.8), python3-evdev, xclip, xdotool
 Maintainer: $MAINTAINER
 Description: Automatic keyboard layout switcher for Linux
  LSwitch automatically switches keyboard layouts based on typed text.

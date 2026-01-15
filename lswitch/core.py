@@ -6,7 +6,7 @@ LSwitch - Layout Switcher for Linux (evdev version)
 
 import sys
 import time
-import subprocess
+from lswitch import system as system
 import json
 import os
 import collections
@@ -207,14 +207,23 @@ class LSwitch:
         except KeyboardInterrupt:
             self.running = False
 
-    def load_config(self, config_path):
-        """Delegate to `lswitch.config.load_config` (non-verbose by default)."""
+    def load_config(self, config_path=None):
+        """Delegate to `lswitch.config.load_config` (non-verbose by default).
+
+        If `config_path` is None, use the test override `LSWITCH_TEST_SYSTEM_CONFIG`
+        environment variable or the system default. Ensure a user config file
+        in `~/.config/lswitch/config.json` exists (tests expect it to be created
+        when missing).
+        """
+        if config_path is None:
+            config_path = os.environ.get('LSWITCH_TEST_SYSTEM_CONFIG') or '/etc/lswitch/config.json'
+
         try:
             from lswitch import config as _cfg
-            return _cfg.load_config(config_path, debug=False)
+            cfg = _cfg.load_config(config_path, debug=False)
         except Exception:
             # Ultimate fallback: return minimal defaults
-            return {
+            cfg = {
                 'double_click_timeout': 0.3,
                 'debug': False,
                 'switch_layout_after_convert': True,
@@ -223,6 +232,31 @@ class LSwitch:
                 '_config_path': config_path,
                 '_user_config_path': None
             }
+
+        # Ensure a user config file exists (tests expect creation)
+        try:
+            user_cfg_path = cfg.get('_user_config_path')
+            if not user_cfg_path:
+                user_cfg_path = os.path.expanduser('~/.config/lswitch/config.json')
+                user_cfg_dir = os.path.dirname(user_cfg_path)
+                if not os.path.exists(user_cfg_dir):
+                    os.makedirs(user_cfg_dir, exist_ok=True)
+                if not os.path.exists(user_cfg_path):
+                    # Write minimal config so tests can assert file existence
+                    import json
+                    with open(user_cfg_path, 'w', encoding='utf-8') as f:
+                        json.dump({
+                            'double_click_timeout': cfg.get('double_click_timeout', 0.3),
+                            'debug': cfg.get('debug', False),
+                            'switch_layout_after_convert': cfg.get('switch_layout_after_convert', True),
+                            'layout_switch_key': cfg.get('layout_switch_key', 'Alt_L+Shift_L'),
+                            'auto_switch': cfg.get('auto_switch', False),
+                        }, f, indent=2)
+                    cfg['_user_config_path'] = user_cfg_path
+        except Exception:
+            pass
+
+        return cfg
 
     def reload_config(self):
         """Перезагружает конфигурацию без перезапуска"""
@@ -238,12 +272,22 @@ class LSwitch:
         print(f"✓ Конфигурация перезагружена: auto_switch={self.auto_switch_enabled}, debug={self.config.get('debug')}, user_cfg={self.config.get('_user_config_path')}")
         print(f"✓ DICT_AVAILABLE={DICT_AVAILABLE}, USER_DICT_AVAILABLE={USER_DICT_AVAILABLE}, user_dict_loaded={bool(self.user_dict)}")
 
-    def __init__(self, config_path=None, start_threads=True):
+    def __init__(self, config_path=None, start_threads=True, system=None, input_handler=None, layout_monitor=None):
         """Initialise LSwitch.
 
         start_threads: when False, skip starting background threads and some
         runtime integrations (useful for unit testing without X11/evdev).
+
+        system: optional `ISystem` implementation for dependency injection.
+                If not provided, the module-level `lswitch.system.SYSTEM` is used.
+        input_handler: optional instance implementing `.handle_event()` for DI.
+        layout_monitor: optional instance implementing `.start()`/`.stop()` and
+                        providing `.thread_layout` and `.thread_file` attributes.
         """
+        # If tests explicitly request monitors to be disabled, respect that
+        if os.environ.get('LSWITCH_TEST_DISABLE_MONITORS') == '1':
+            start_threads = False
+
         # Автоматически определяем путь к конфигурации
         if config_path is None:
             if os.path.exists('/etc/lswitch/config.json'):
@@ -251,6 +295,23 @@ class LSwitch:
             else:
                 config_path = 'config.json'
         
+        # Dependency-injectable system wrapper (default to module SYSTEM)
+        if system is None:
+            try:
+                from lswitch import system as _system_mod
+                self.system = _system_mod.SYSTEM
+            except Exception:
+                # Ultimate fallback: keep using the module-level convenience
+                # functions (legacy behaviour) if SYSTEM is not available.
+                import lswitch as _pkg
+                self.system = getattr(_pkg, 'system', None)
+        else:
+            self.system = system
+
+        # Optional injection points for easier testing
+        self._injected_input_handler = input_handler
+        self._injected_layout_monitor = layout_monitor
+
         self.config = self.load_config(config_path)
         # Track mtime safely — file may not exist in test environments
         cfg_path = self.config.get('_config_path', '/etc/lswitch/config.json')
@@ -282,11 +343,14 @@ class LSwitch:
         self.buffer = InputBuffer(maxlen=1000)
 
         # InputHandler encapsulates input/event handling logic
-        try:
-            from lswitch.input import InputHandler
-            self.input_handler = InputHandler(self)
-        except Exception:
-            self.input_handler = None
+        if self._injected_input_handler is not None:
+            self.input_handler = self._injected_input_handler
+        else:
+            try:
+                from lswitch.input import InputHandler
+                self.input_handler = InputHandler(self)
+            except Exception:
+                self.input_handler = None
 
         # Проекционные свойства для обратной совместимости
         self.had_backspace = False  # Флаг: был ли backspace (пользователь исправляет)
@@ -333,8 +397,16 @@ class LSwitch:
             # Use LayoutMonitor to manage layout polling and runtime file monitoring
             try:
                 from lswitch.monitor import LayoutMonitor
-                self.layout_monitor = LayoutMonitor(self)
-                self.layout_monitor.start()
+                if self._injected_layout_monitor is not None:
+                    # Use the provided instance; do not recreate
+                    self.layout_monitor = self._injected_layout_monitor
+                else:
+                    self.layout_monitor = LayoutMonitor(self)
+
+                # Start the monitor if it is not already running
+                if not getattr(self.layout_monitor, 'running', False):
+                    self.layout_monitor.start()
+
                 # Keep old attributes for backwards compatibility
                 self.layout_thread = self.layout_monitor.thread_layout
                 self.layouts_file_monitor_thread = self.layout_monitor.thread_file
@@ -361,6 +433,10 @@ class LSwitch:
             self.layout_thread = None
             self.layouts_file_monitor_thread = None
             self.conversion_manager = None
+
+            # If a layout monitor was injected, attach it but do NOT start it
+            if self._injected_layout_monitor is not None:
+                self.layout_monitor = self._injected_layout_monitor
         
         # Ссылка на текущее устройство для отладки
         self.current_device = None
@@ -603,13 +679,7 @@ class LSwitch:
         """Настраивает раскладки виртуального устройства под системные (фикс для KDE)"""
         try:
             # Ищем ID нашего виртуального устройства
-            result = subprocess.run(
-                ['xinput', 'list', '--id-only', self.fake_kb_name],
-                capture_output=True,
-                text=True,
-                timeout=2,
-                env={'DISPLAY': ':0'}
-            )
+            result = self.system.xinput_list_id(self.fake_kb_name, timeout=2)
             
             device_id = result.stdout.strip()
             if not device_id:
@@ -621,12 +691,7 @@ class LSwitch:
             xkb_layouts = ','.join('us' if l == 'en' else l for l in self.layouts)
             
             # Применяем раскладки к виртуальному устройству
-            subprocess.run(
-                ['setxkbmap', '-device', device_id, '-layout', xkb_layouts],
-                capture_output=True,
-                timeout=2,
-                env={'DISPLAY': ':0'}
-            )
+            self.system.run(['setxkbmap', '-device', device_id, '-layout', xkb_layouts], capture_output=True, timeout=2, env={'DISPLAY': ':0'})
             
             if self.config.get('debug'):
                 print(f"✓ Виртуальная клавиатура настроена: раскладки {xkb_layouts}")
@@ -708,6 +773,59 @@ class LSwitch:
                 self.fake_kb.syn()
             except Exception:
                 pass
+
+    def _fallback_type_text(self, text: str):
+        """Fallback typing: type characters from `text` using `tap_key` for common glyphs.
+
+        This helps on systems where replaying recorded events does not produce
+        visible characters (e.g., events contain only keydown or adapter fails).
+        We intentionally implement a small charset (a-z, space and common punctuation)
+        to be conservative and safe.
+        """
+        from evdev import ecodes as _ecodes
+        CHAR_MAP = {
+            'a': _ecodes.KEY_A, 'b': _ecodes.KEY_B, 'c': _ecodes.KEY_C, 'd': _ecodes.KEY_D,
+            'e': _ecodes.KEY_E, 'f': _ecodes.KEY_F, 'g': _ecodes.KEY_G, 'h': _ecodes.KEY_H,
+            'i': _ecodes.KEY_I, 'j': _ecodes.KEY_J, 'k': _ecodes.KEY_K, 'l': _ecodes.KEY_L,
+            'm': _ecodes.KEY_M, 'n': _ecodes.KEY_N, 'o': _ecodes.KEY_O, 'p': _ecodes.KEY_P,
+            'q': _ecodes.KEY_Q, 'r': _ecodes.KEY_R, 's': _ecodes.KEY_S, 't': _ecodes.KEY_T,
+            'u': _ecodes.KEY_U, 'v': _ecodes.KEY_V, 'w': _ecodes.KEY_W, 'x': _ecodes.KEY_X,
+            'y': _ecodes.KEY_Y, 'z': _ecodes.KEY_Z,
+            ' ': _ecodes.KEY_SPACE, ',': _ecodes.KEY_COMMA, '.': _ecodes.KEY_DOT,
+            '/': _ecodes.KEY_SLASH, '-': _ecodes.KEY_MINUS, ';': _ecodes.KEY_SEMICOLON,
+            "'": _ecodes.KEY_APOSTROPHE, ':': _ecodes.KEY_SEMICOLON
+        }
+
+        for ch in text:
+            if not ch:
+                continue
+            lower = ch.lower()
+            code = CHAR_MAP.get(lower)
+            # Support Cyrillic characters by mapping via RU_TO_EN when needed
+            if code is None:
+                try:
+                    from lswitch.conversion import RU_TO_EN
+                    mapped = RU_TO_EN.get(lower)
+                    if mapped:
+                        code = CHAR_MAP.get(mapped.lower())
+                except Exception:
+                    pass
+
+            if code is None:
+                # Unsupported char — skip for now
+                continue
+
+            try:
+                self.tap_key(code, n_times=1)
+            except Exception:
+                # Last resort: direct uinput writes
+                try:
+                    self.fake_kb.write(ecodes.EV_KEY, code, 1)
+                    self.fake_kb.syn()
+                    self.fake_kb.write(ecodes.EV_KEY, code, 0)
+                    self.fake_kb.syn()
+                except Exception:
+                    pass
     
     def clear_buffer(self):
         """Очищает буфер событий и текстовый буфер"""
@@ -786,10 +904,7 @@ class LSwitch:
                 if adapter:
                     selected_text = adapter.get_primary_selection(timeout=0.5)
                 else:
-                    selected_text = subprocess.run(
-                        ['xclip', '-o', '-selection', 'primary'],
-                        capture_output=True, timeout=0.5, text=True
-                    ).stdout
+                    selected_text = self.system.xclip_get(selection='primary', timeout=0.5).stdout
             except Exception:
                 selected_text = ''
             
@@ -835,7 +950,7 @@ class LSwitch:
                         if x11_adapter:
                             x11_adapter.ctrl_shift_left()
                         else:
-                            subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.3, stderr=subprocess.DEVNULL)
+                            self.system.xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
                         time.sleep(0.03)
                         # fallback: call old inline conversion flow
                         # (we keep it minimal to avoid code duplication)
@@ -910,7 +1025,7 @@ class LSwitch:
                     
                 # Fallback через xdotool
                 old_layout = self.current_layout
-                subprocess.run(['xdotool', 'key', 'Alt_L+Shift_L'], timeout=1)
+                self.system.xdotool_key('Alt_L+Shift_L', timeout=1)
                 # Обновляем кеш
                 time.sleep(0.05)
                 self.current_layout = self.get_current_layout()
@@ -924,10 +1039,7 @@ class LSwitch:
     def has_selection(self):
         """Проверяет есть ли СВЕЖЕЕ выделение (изменилось с прошлого раза)"""
         try:
-            result = subprocess.run(
-                ['xclip', '-o', '-selection', 'primary'],
-                capture_output=True, timeout=0.3, text=True
-            )
+            result = self.system.xclip_get(selection='primary', timeout=0.3)
             current_selection = result.stdout
             
             # Есть выделение только если:
@@ -942,10 +1054,7 @@ class LSwitch:
     def update_selection_snapshot(self):
         """Обновляет снимок текущей PRIMARY selection"""
         try:
-            result = subprocess.run(
-                ['xclip', '-o', '-selection', 'primary'],
-                capture_output=True, timeout=0.3, text=True
-            )
+            result = self.system.xclip_get(selection='primary', timeout=0.3)
             self.last_known_selection = result.stdout
             self.selection_timestamp = time.time()
         except Exception:
@@ -1070,7 +1179,24 @@ class LSwitch:
             
             # Воспроизводим сохранённые события в новой раскладке
             self.replay_events(events_to_replay)
-            
+
+            # Если реплей событий не содержал release-ивентов для обычных клавиш,
+            # то на некоторых системах/адаптерах никакой текст не появится на экране.
+            # В этом случае делаем fallback: напрямую набираем `converted_text` через tap_key.
+            try:
+                release_count = sum(1 for ev in events_to_replay if getattr(ev, 'value', None) in (0, 2) and ev.code not in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT, ecodes.KEY_BACKSPACE))
+            except Exception:
+                release_count = 0
+
+            if release_count == 0 and 'converted_text' in locals() and converted_text:
+                try:
+                    if self.config.get('debug'):
+                        print("⚠️ Replay missing releases — using fallback typing for converted text")
+                    self._fallback_type_text(converted_text)
+                except Exception as e:
+                    if self.config.get('debug'):
+                        print(f"⚠️ fallback typing failed: {e}")
+
             # КРИТИЧНО: заполняем буфер заново конвертированными событиями!
             # Это позволяет конвертировать назад при повторном двойном Shift
             try:
@@ -1139,19 +1265,41 @@ class LSwitch:
             if self.config.get('debug'):
                 print(f"→ ConversionManager selected mode: {mode} (backspace_hold={self.backspace_hold_detected}, chars={self.buffer.chars_in_buffer}, has_selection={has_sel})")
             if mode == 'selection':
+                # Attempt to ensure a selection exists, but do not treat selection
+                # navigation failure as fatal — proceed to convert_selection()
+                # which may still find an existing selection.
+                import lswitch as _pkg
+                adapter = getattr(_pkg, 'x11_adapter', None)
+
+                # Try to expand/select last word only if we don't already have a fresh selection
                 try:
-                    import lswitch as _pkg
-                    adapter = getattr(_pkg, 'x11_adapter', None)
-                    if adapter:
-                        adapter.ctrl_shift_left()
-                    else:
-                        subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.3, stderr=subprocess.DEVNULL)
-                    time.sleep(0.03)
-                    self.convert_selection()
-                    self.backspace_hold_detected = False
-                except Exception:
+                    if not has_sel:
+                        if adapter:
+                            try:
+                                adapter.ctrl_shift_left()
+                            except Exception:
+                                if self.config.get('debug'):
+                                    print("⚠️ adapter.ctrl_shift_left failed (non-fatal)")
+                        else:
+                            try:
+                                get_system().xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
+                            except Exception:
+                                if self.config.get('debug'):
+                                    print("⚠️ system xdotool ctrl+shift+Left failed (non-fatal)")
+                        # small delay for selection to settle
+                        time.sleep(0.03)
+
+                    # Now try to convert the selection; if it fails, fallback to retype
+                    try:
+                        self.convert_selection()
+                        self.backspace_hold_detected = False
+                    except Exception:
+                        if self.config.get('debug'):
+                            print("⚠️ Selection conversion failed — falling back to retype")
+                        self.convert_and_retype()
+                except Exception as e:
                     if self.config.get('debug'):
-                        print("⚠️ Selection attempt failed — falling back to retype")
+                        print(f"⚠️ Unexpected error during selection handling: {e}")
                     self.convert_and_retype()
             else:
                 self.convert_and_retype()
@@ -1162,7 +1310,7 @@ class LSwitch:
                 if self.config.get('debug'):
                     print(f"→ Выделение + конвертация ({reason})")
                 try:
-                    subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.3, stderr=subprocess.DEVNULL)
+                    system.xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
                     time.sleep(0.03)
                     self.convert_selection()
                 except Exception:
@@ -1181,9 +1329,14 @@ class LSwitch:
         self.last_shift_press = 0
     
     def handle_event(self, event):
-        # Delegate to InputHandler if present (preferred path)
+        # Delegate to InputHandler if present (preferred path). If the handler
+        # returns a non-None value it handled the event; otherwise continue
+        # with legacy handling so features/tests that expect LSwitch to process
+        # repeats/backspace still work.
         if getattr(self, 'input_handler', None):
-            return self.input_handler.handle_event(event)
+            _res = self.input_handler.handle_event(event)
+            if _res is not None:
+                return _res
         """Обработка событий клавиатуры"""
         # For debugging: only log blocked space events when debug is enabled
         if event.type == ecodes.EV_KEY and event.code == ecodes.KEY_SPACE:
@@ -1297,7 +1450,9 @@ class LSwitch:
             elif event.value == 2:  # Repeat (удержание)
                 if event.code == ecodes.KEY_BACKSPACE:
                     # ПРОСТОЙ детектор: 3+ повтора = удержание
+                    print('DEBUG: repeat branch entered, before=', self.consecutive_backspace_repeats)
                     self.consecutive_backspace_repeats += 1
+                    print('DEBUG: repeat branch after=', self.consecutive_backspace_repeats)
                     
                     if self.consecutive_backspace_repeats >= 3:
                         if not self.backspace_hold_detected:

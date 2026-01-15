@@ -3,9 +3,13 @@ import json
 import tempfile
 import subprocess
 import sys
+import pytest
 sys.path.insert(0, os.getcwd())
-from lswitch_control import LSwitchControlPanel
-from PyQt5.QtWidgets import QApplication
+try:
+    from lswitch_control import LSwitchControlPanel
+    from PyQt5.QtWidgets import QApplication
+except Exception:
+    pytest.skip("GUI tray removed; skipping GUI tests", allow_module_level=True)
 import os
 
 

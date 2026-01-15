@@ -16,7 +16,34 @@ from __version__ import __version__
 import json
 import time
 import signal
-import subprocess
+import importlib
+import importlib.util
+import os
+import sys
+
+# Import lswitch.system robustly (work even if top-level lswitch.py exists)
+try:
+    _system_mod = importlib.import_module('lswitch.system')
+except Exception:
+    spec = importlib.util.spec_from_file_location('lswitch.system', os.path.join(os.path.dirname(__file__), 'lswitch', 'system.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules['lswitch.system'] = module
+    _system_mod = module
+
+# Adapter-level override for DI in tests
+_control_system = None
+
+def set_system(sys_impl):
+    global _control_system
+    _control_system = sys_impl
+
+
+def get_system():
+    if _control_system is not None:
+        return _control_system
+    return getattr(_system_mod, 'SYSTEM', _system_mod)
+
 import time
 from PyQt5.QtWidgets import (QApplication, QSystemTrayIcon, QAction,
                              QMessageBox, QLabel)
@@ -75,16 +102,16 @@ def get_system_scale_factor():
         
         # 3. Проверяем GNOME масштабирование шрифтов
         try:
-            result = subprocess.run(
-                ['gsettings', 'get', 'org.gnome.desktop.interface', 'text-scaling-factor'],
-                capture_output=True, text=True, timeout=2
-            )
-            if result.returncode == 0:
-                gnome_scale = float(result.stdout.strip())
-                if gnome_scale != 1.0:
-                    scale = gnome_scale
-                    print(f"Найден GNOME text-scaling-factor: {scale}", flush=True)
-                    return scale
+            result = get_system().run(['gsettings', 'get', 'org.gnome.desktop.interface', 'text-scaling-factor'], capture_output=True, text=True, timeout=2)
+            if getattr(result, 'returncode', 0) == 0:
+                try:
+                    gnome_scale = float(result.stdout.strip())
+                    if gnome_scale != 1.0:
+                        scale = gnome_scale
+                        print(f"Найден GNOME text-scaling-factor: {scale}", flush=True)
+                        return scale
+                except Exception:
+                    pass
         except Exception:
             pass
         
@@ -381,12 +408,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
     def get_service_status(self):
         """Получает статус службы"""
         try:
-            result = subprocess.run(
-                ['systemctl', '--user', 'is-active', 'lswitch'],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
+            result = system.run(['systemctl', '--user', 'is-active', 'lswitch'], capture_output=True, text=True, timeout=2)
             return result.stdout.strip()
         except Exception:
             return 'unknown'
@@ -436,11 +458,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
     def run_systemctl(self, action):
         """Выполняет команду systemctl"""
         try:
-            subprocess.run(
-                ['systemctl', '--user', action, 'lswitch'],
-                check=True,
-                timeout=10
-            )
+            system.run(['systemctl', '--user', action, 'lswitch'], check=True, timeout=10)
             return True
         except Exception as e:
             print(f"Ошибка systemctl {action}: {e}", file=sys.stderr, flush=True)
@@ -540,13 +558,13 @@ class LSwitchControlPanel(QSystemTrayIcon):
         # Build sudo-based command to run command in user's session with env
         cmd = ['sudo', '-u', username, 'env'] + env_parts + ['/usr/local/bin/lswitch-control']
         try:
-            subprocess.Popen(cmd)
+            system.Popen(cmd)
             return True
         except Exception:
             # fallback to su -c
             try:
                 cmd2 = ['su', '-', username, '-c', '/usr/local/bin/lswitch-control &']
-                subprocess.Popen(cmd2)
+                system.Popen(cmd2)
                 return True
             except Exception:
                 return False
@@ -563,12 +581,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
             ]
             
             # Читаем текущие раскладки
-            result = subprocess.run(
-                ['setxkbmap', '-query'],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
+            result = system.setxkbmap_query(timeout=2)
             
             current_layouts = []
             for line in result.stdout.split('\n'):
@@ -589,12 +602,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
                 time.sleep(0.5)
                 
                 # Повторная проверка
-                result2 = subprocess.run(
-                    ['setxkbmap', '-query'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
+                result2 = system.setxkbmap_query(timeout=2)
                 
                 current_layouts2 = []
                 for line in result2.stdout.split('\n'):
@@ -805,12 +813,12 @@ Comment=Control panel for LSwitch
         """Перезагружает конфигурацию службы без перезапуска"""
         try:
             # Сначала пробуем через systemctl (корректно целит unit для user/system служб)
-            subprocess.run(['systemctl', '--user', 'kill', '--signal=HUP', 'lswitch'], check=True, timeout=5)
+            system.run(['systemctl', '--user', 'kill', '--signal=HUP', 'lswitch'], check=True, timeout=5)
             return
         except Exception:
             # Фолбэк: pkill по имени (подходит для /usr/local/bin/lswitch и других инсталляций)
             try:
-                subprocess.run(['pkill', '-HUP', '-f', 'lswitch'], timeout=2)
+                system.run(['pkill', '-HUP', '-f', 'lswitch'], timeout=2)
             except Exception as e:
                 print(f"Не удалось отправить сигнал: {e}", file=sys.stderr, flush=True)
     
@@ -842,13 +850,13 @@ Comment=Control panel for LSwitch
     def show_logs(self):
         """Показывает логи в терминале"""
         try:
-            subprocess.Popen([
+            system.Popen([
                 'x-terminal-emulator', '-e',
                 'journalctl', '-u', 'lswitch', '-f'
             ])
         except Exception:
             try:
-                subprocess.Popen(['xterm', '-e', 'journalctl', '-u', 'lswitch', '-f'])
+                system.Popen(['xterm', '-e', 'journalctl', '-u', 'lswitch', '-f'])
             except Exception as e:
                 self.showMessage(
                     "Ошибка",

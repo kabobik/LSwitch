@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import json
-import subprocess
+from lswitch import system as system
 import ctypes
 import ctypes.util
 
@@ -102,7 +102,7 @@ def get_layouts_from_xkb(runtime_dir: str | None = None, debug: bool = False) ->
 
     # Fallback to setxkbmap
     try:
-        result = subprocess.run(['setxkbmap', '-query'], capture_output=True, text=True, timeout=2)
+        result = system.setxkbmap_query(timeout=2)
         for line in result.stdout.split('\n'):
             if line.startswith('layout:'):
                 layouts_str = line.split(':', 1)[1].strip()

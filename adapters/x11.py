@@ -2,55 +2,87 @@
 
 Provides small, test-friendly wrappers so we can mock X11 interactions in tests.
 """
-import subprocess
+import importlib
+import importlib.util
+import os
+import sys
+
+# Import lswitch.system robustly (work even if top-level lswitch.py exists)
+try:
+    system_mod = importlib.import_module('lswitch.system')
+except Exception:
+    spec = importlib.util.spec_from_file_location('lswitch.system', os.path.join(os.path.dirname(__file__), '..', 'lswitch', 'system.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules['lswitch.system'] = module
+    system_mod = module
+
+# Adapter-level override for DI in tests. By default we prefer
+# to call functions on `lswitch.system.SYSTEM` (the module-level instance)
+# which allows consistent mocking via `lswitch.system.SYSTEM = MockSystem()`.
+# For explicit adapter-level injection tests we provide `set_system()`.
+_adapter_system = None
+
+def set_system(sys_impl):
+    global _adapter_system
+    _adapter_system = sys_impl
+
+
+def get_system():
+    if _adapter_system is not None:
+        return _adapter_system
+    # if system_mod exposes a SYSTEM instance use it, otherwise fall back to module
+    return getattr(system_mod, 'SYSTEM', system_mod)
+
 import time
+import subprocess
 
 
 def get_primary_selection(timeout=0.3) -> str:
     try:
-        return subprocess.run(['xclip', '-o', '-selection', 'primary'], capture_output=True, timeout=timeout, text=True).stdout
+        return get_system().xclip_get(selection='primary', timeout=timeout).stdout
     except Exception:
         return ''
 
 
 def get_clipboard(timeout=0.3) -> str:
     try:
-        return subprocess.run(['xclip', '-o', '-selection', 'clipboard'], capture_output=True, timeout=timeout, text=True).stdout
+        return get_system().xclip_get(selection='clipboard', timeout=timeout).stdout
     except Exception:
         return ''
 
 
 def set_clipboard(text: str, timeout=0.5):
     try:
-        subprocess.run(['xclip', '-selection', 'clipboard'], input=text, text=True, timeout=timeout)
+        get_system().xclip_set(text, selection='clipboard', timeout=timeout)
     except Exception:
         pass
 
 
 def paste_clipboard():
     try:
-        subprocess.run(['xdotool', 'key', 'ctrl+v'], timeout=1.0, stderr=subprocess.DEVNULL)
+        get_system().xdotool_key('ctrl+v', timeout=1.0, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
 
 def cut_selection():
     try:
-        subprocess.run(['xdotool', 'key', 'ctrl+x'], timeout=0.5, stderr=subprocess.DEVNULL)
+        get_system().xdotool_key('ctrl+x', timeout=0.5, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
 
 def delete_selection():
     try:
-        subprocess.run(['xdotool', 'key', 'Delete'], timeout=0.2, stderr=subprocess.DEVNULL)
+        get_system().xdotool_key('Delete', timeout=0.2, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
 
 def shift_left():
     try:
-        subprocess.run(['xdotool', 'key', 'shift+Left'], timeout=0.1, stderr=subprocess.DEVNULL)
+        get_system().xdotool_key('shift+Left', timeout=0.1, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
@@ -58,7 +90,7 @@ def shift_left():
 def get_active_window_name():
     """Return active window name using xdotool, or empty string on failure."""
     try:
-        res = subprocess.run(['xdotool', 'getwindowfocus', 'getwindowname'], capture_output=True, timeout=0.5, text=True)
+        res = get_system().run(['xdotool', 'getwindowfocus', 'getwindowname'], capture_output=True, timeout=0.5, text=True)
         return res.stdout.strip()
     except Exception:
         return ''
@@ -68,11 +100,11 @@ def get_active_window_class():
     """Return active window WM_CLASS via xprop, or empty string on failure."""
     try:
         # get window id
-        wid = subprocess.run(['xdotool', 'getwindowfocus'], capture_output=True, timeout=0.3, text=True).stdout.strip()
+        wid = get_system().run(['xdotool', 'getwindowfocus'], capture_output=True, timeout=0.3, text=True).stdout.strip()
         if not wid:
             return ''
         # query WM_CLASS
-        res = subprocess.run(['xprop', '-id', wid, 'WM_CLASS'], capture_output=True, timeout=0.5, text=True).stdout
+        res = get_system().run(['xprop', '-id', wid, 'WM_CLASS'], capture_output=True, timeout=0.5, text=True).stdout
         # WM_CLASS(STRING) = "code", "Code"
         if 'WM_CLASS' in res and '"' in res:
             parts = [p.strip().strip('"') for p in res.split('=')[-1].split(',')]
@@ -86,14 +118,14 @@ def get_active_window_class():
 
 def ctrl_shift_left():
     try:
-        subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.1, stderr=subprocess.DEVNULL)
+        get_system().xdotool_key('ctrl+shift+Left', timeout=0.1, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
 
 def send_key(key: str):
     try:
-        subprocess.run(['xdotool', 'key', key], timeout=0.5, stderr=subprocess.DEVNULL)
+        get_system().xdotool_key(key, timeout=0.5, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 

@@ -4,6 +4,31 @@
 import os
 import re
 from pathlib import Path
+import importlib
+import importlib.util
+import sys
+
+# Resolve lswitch.system robustly and allow adapter-level injection for tests
+try:
+    _system_mod = importlib.import_module('lswitch.system')
+except Exception:
+    spec = importlib.util.spec_from_file_location('lswitch.system', os.path.join(os.path.dirname(__file__), '..', 'lswitch', 'system.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules['lswitch.system'] = module
+    _system_mod = module
+
+_theme_system = None
+
+def set_system(sys_impl):
+    global _theme_system
+    _theme_system = sys_impl
+
+
+def get_system():
+    if _theme_system is not None:
+        return _theme_system
+    return getattr(_system_mod, 'SYSTEM', _system_mod)
 
 
 def get_cinnamon_theme_colors():
@@ -15,11 +40,7 @@ def get_cinnamon_theme_colors():
     """
     try:
         # Получаем имя темы из dconf
-        import subprocess
-        result = subprocess.run(
-            ['gsettings', 'get', 'org.cinnamon.desktop.interface', 'gtk-theme'],
-            capture_output=True, text=True, timeout=2
-        )
+        result = get_system().run(['gsettings', 'get', 'org.cinnamon.desktop.interface', 'gtk-theme'], capture_output=True, text=True, timeout=2)
         
         if result.returncode != 0:
             return None

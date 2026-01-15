@@ -8,7 +8,7 @@ services (conversion, selection, user_dict, etc.).
 from __future__ import annotations
 
 import time
-import subprocess
+from lswitch import system as system
 import collections
 import threading
 
@@ -62,19 +62,34 @@ class InputHandler:
                 if self.ls.config.get('debug'):
                     print(f"→ ConversionManager selected mode: {mode} (backspace_hold={self.ls.backspace_hold_detected}, chars={self.ls.buffer.chars_in_buffer}, has_selection={has_sel})")
                 if mode == 'selection':
+                    import lswitch as _pkg
+                    adapter = getattr(_pkg, 'x11_adapter', None)
                     try:
-                        import lswitch as _pkg
-                        adapter = getattr(_pkg, 'x11_adapter', None)
-                        if adapter:
-                            adapter.ctrl_shift_left()
-                        else:
-                            subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.3, stderr=subprocess.DEVNULL)
-                        time.sleep(0.03)
-                        self.ls.convert_selection()
-                        self.ls.backspace_hold_detected = False
+                        if not has_sel:
+                            if adapter:
+                                try:
+                                    adapter.ctrl_shift_left()
+                                except Exception:
+                                    if self.ls.config.get('debug'):
+                                        print("⚠️ adapter.ctrl_shift_left failed (non-fatal)")
+                            else:
+                                try:
+                                    system.xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
+                                except Exception:
+                                    if self.ls.config.get('debug'):
+                                        print("⚠️ system xdotool ctrl+shift+Left failed (non-fatal)")
+                            time.sleep(0.03)
+
+                        try:
+                            self.ls.convert_selection()
+                            self.ls.backspace_hold_detected = False
+                        except Exception:
+                            if self.ls.config.get('debug'):
+                                print("⚠️ Selection conversion failed — falling back to retype")
+                            self.ls.convert_and_retype()
                     except Exception:
                         if self.ls.config.get('debug'):
-                            print("⚠️ Selection attempt failed — falling back to retype")
+                            print("⚠️ Unexpected error during selection handling — falling back to retype")
                         self.ls.convert_and_retype()
                 else:
                     self.ls.convert_and_retype()
@@ -85,7 +100,7 @@ class InputHandler:
                     if self.ls.config.get('debug'):
                         print(f"→ Selection + convert ({reason})")
                     try:
-                        subprocess.run(['xdotool', 'key', 'ctrl+shift+Left'], timeout=0.3, stderr=subprocess.DEVNULL)
+                        system.xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
                         time.sleep(0.03)
                         self.ls.convert_selection()
                     except Exception:
