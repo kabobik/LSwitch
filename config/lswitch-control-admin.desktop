@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=LSwitcher (Admin)
+Name[ru]=LSwitcher (Admin)
+Comment=Control panel for LSwitch (admin mode)
+Comment[ru]=Панель управления LSwitch (режим администратора)
+Icon=lswitch
+Exec=pkexec /usr/local/bin/lswitch-control
+Terminal=false
+Categories=Utility;Settings;
+Keywords=keyboard;layout;switch;language;control;admin;
+StartupNotify=false

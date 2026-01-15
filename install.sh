@@ -23,10 +23,76 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Определяем пользователя X-сессии для остановки пользовательской службы
-X_USER=$(who | grep -E "\(:0\)" | awk '{print $1}' | head -n1)
-if [ -z "$X_USER" ]; then
-    X_USER=$(logname 2>/dev/null || echo "$SUDO_USER")
-fi
+# Функция пытается найти пользователя несколькими способами и запрашивает ввод в интерактивном режиме
+detect_x_user() {
+    # 0) allow explicit override via environment
+    if [ -n "$X_USER" ]; then
+        echo "$X_USER"
+        return 0
+    fi
+    if [ -n "$LS_USER" ]; then
+        echo "$LS_USER"
+        return 0
+    fi
+
+    # 1) who (:0 session)
+    local u
+    u=$(who | awk '/\(:0\)/ {print $1; exit}')
+    if [ -n "$u" ]; then
+        echo "$u"
+        return 0
+    fi
+
+    # 2) sudo user that invoked the script
+    if [ -n "$SUDO_USER" ]; then
+        echo "$SUDO_USER"
+        return 0
+    fi
+
+    # 3) logname (works for interactive shells)
+    u=$(logname 2>/dev/null || true)
+    if [ -n "$u" ] && [ "$u" != "root" ]; then
+        echo "$u"
+        return 0
+    fi
+
+    # 4) loginctl (find session on :0)
+    if command -v loginctl >/dev/null 2>&1; then
+        u=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3==":0" {print $2; exit}')
+        if [ -n "$u" ]; then
+            echo "$u"
+            return 0
+        fi
+    fi
+
+    # 5) single home directory fallback
+    if [ -d /home ]; then
+        count=$(ls -1 /home | wc -l)
+        if [ "$count" -eq 1 ]; then
+            echo "$(ls /home | head -n1)"
+            return 0
+        fi
+    fi
+
+    # 6) prompt the user if we're interactive
+    if [ -t 0 ]; then
+        read -p "Не удалось определить пользователя X-сессии. Введите имя пользователя (или Enter для отмены): " input_user
+        if [ -n "$input_user" ]; then
+            echo "$input_user"
+            return 0
+        else
+            echo "Отменено пользователем." >&2
+            exit 1
+        fi
+    fi
+
+    # 7) non-interactive failure
+    echo "Не удалось определить пользователя X-сессии и скрипт не интерактивен." >&2
+    echo "Установите переменную X_USER вручную и запустите скрипт снова." >&2
+    exit 1
+}
+
+X_USER=$(detect_x_user)
 
 echo -e "${YELLOW}🛑 Остановка старых версий службы...${NC}"
 # Останавливаем системную службу (если запущена)
@@ -74,16 +140,56 @@ install -Dm644 assets/lswitch.svg /usr/share/pixmaps/lswitch.svg
 
 # Копируем .desktop файл для системного меню
 install -Dm644 config/lswitch-control.desktop /usr/share/applications/lswitch-control.desktop
+# Копируем админский лаунчер (запускает GUI с pkexec для редактирования системных конфигов)
+install -Dm644 config/lswitch-control-admin.desktop /usr/share/applications/lswitch-control-admin.desktop
+
+# Предложим включить автозапуск GUI панели для пользователя X-сессии
+# Если скрипт не интерактивен, просто выведем инструкцию
+if [ -t 0 ]; then
+    read -p "Включить автозапуск GUI панели для пользователя $X_USER? (y/n): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        sudo -u $X_USER mkdir -p /home/$X_USER/.config/autostart
+        sudo -u $X_USER cp /usr/share/applications/lswitch-control.desktop /home/$X_USER/.config/autostart/lswitch-control.desktop
+        chown $X_USER:$X_USER /home/$X_USER/.config/autostart/lswitch-control.desktop 2>/dev/null || true
+        echo "   ✓ Автозапуск GUI включён для $X_USER"
+    else
+        echo "   Автозапуск GUI не включён"
+    fi
+else
+    echo "Для включения автозапуска GUI выполните (под пользователем):"
+    echo "  mkdir -p ~/.config/autostart && cp /usr/share/applications/lswitch-control.desktop ~/.config/autostart/"
+fi
 
 # Обновляем базу данных приложений
 echo -e "${YELLOW}📋 Обновление базы данных приложений...${NC}"
 update-desktop-database /usr/share/applications/ 2>/dev/null && echo "   ✓ База данных приложений обновлена" || echo "   ⚠️  Не удалось обновить БД (опционально)"
 
 # Создаём директорию конфигурации
+# Create user config directory
+USER_CONFIG_DIR="/home/$X_USER/.config/lswitch"
+mkdir -p "$USER_CONFIG_DIR"
+
+# If system config exists from older installs, migrate it into user's config (only if user config is missing)
+if [ -f /etc/lswitch/config.json ] && [ ! -f "$USER_CONFIG_DIR/config.json" ]; then
+    echo "⚠️  Найден системный конфиг /etc/lswitch/config.json. Мигрируем в $USER_CONFIG_DIR/config.json"
+    cp /etc/lswitch/config.json "$USER_CONFIG_DIR/config.json"
+    chown $X_USER:$X_USER "$USER_CONFIG_DIR/config.json" 2>/dev/null || true
+    echo "   ✓ Миграция завершена и системный конфиг помечен как устаревший."
+    echo "   ⚠️  Внимание: /etc/lswitch/config.json устарел и будет игнорироваться в новых установках."
+else
+    if [ ! -f "$USER_CONFIG_DIR/config.json" ]; then
+        cp config/config.json.example "$USER_CONFIG_DIR/config.json"
+        chown $X_USER:$X_USER "$USER_CONFIG_DIR/config.json" 2>/dev/null || true
+        echo "   ✓ Локальный конфиг создан: $USER_CONFIG_DIR/config.json"
+    else
+        echo "   ✓ Локальный конфиг уже существует: $USER_CONFIG_DIR/config.json"
+    fi
+fi
+
+# Ensure /etc/lswitch exists for legacy compatibility but do not overwrite system configs by default
 mkdir -p /etc/lswitch
-install -m 664 config/config.json.example /etc/lswitch/config.json
-# Делаем доступным для группы input (для GUI без sudo)
-chgrp input /etc/lswitch/config.json 2>/dev/null || true
+chgrp input /etc/lswitch 2>/dev/null || true
 
 echo -e "${YELLOW}🔐 Настройка прав доступа (input devices)...${NC}"
 # Устанавливаем udev правило для доступа к input устройствам
@@ -102,10 +208,7 @@ fi
 echo -e "${YELLOW}⚙️  Установка systemd сервиса...${NC}"
 
 # Определяем пользователя X-сессии
-X_USER=$(who | grep -E "\(:0\)" | awk '{print $1}' | head -n1)
-if [ -z "$X_USER" ]; then
-    X_USER=$(logname 2>/dev/null || echo "$SUDO_USER")
-fi
+X_USER=$(detect_x_user)
 
 if [ -z "$X_USER" ]; then
     echo -e "${RED}⚠️  Не удалось определить пользователя X-сессии${NC}"
@@ -123,8 +226,8 @@ echo
 
 X_AUTH="/home/$X_USER/.Xauthority"
 
-# Копируем unit файл и подставляем переменные
-sed -e "s|XAUTHORITY=/home/anton/.Xauthority|XAUTHORITY=$X_AUTH|" \
+# Копируем unit файл и подставляем переменные (заменяем любую строку Environment="XAUTHORITY=..." на значение для текущего пользователя)
+sed -e "s|^Environment=\"XAUTHORITY=.*\"|Environment=\"XAUTHORITY=$X_AUTH\"|" \
     config/lswitch.service > /etc/systemd/system/lswitch.service
 
 # Перезагружаем systemd

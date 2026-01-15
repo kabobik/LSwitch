@@ -17,8 +17,9 @@ import threading
 import ctypes
 import ctypes.util
 
-# Добавляем /usr/local/bin в путь для импорта dictionary.py
+# Добавляем /usr/local/bin и /usr/local/lib/lswitch в путь для импорта installed modules
 sys.path.insert(0, '/usr/local/bin')
+sys.path.insert(0, '/usr/local/lib/lswitch')
 
 try:
     import evdev
@@ -273,13 +274,19 @@ class LSwitch:
                 print(f"⚠️  Ошибка загрузки UserDict: {e}")
                 self.user_dict = None
         
-        # Запускаем поток мониторинга раскладки
-        self.layout_thread = threading.Thread(target=self.monitor_layout_changes, daemon=True)
-        self.layout_thread.start()
-        
-        # Запускаем поток мониторинга файла с раскладками
-        self.layouts_file_monitor_thread = threading.Thread(target=self.monitor_layouts_file, daemon=True)
-        self.layouts_file_monitor_thread.start()
+        # Запускаем поток мониторинга раскладки (в тестах можно отключить через LSWITCH_TEST_DISABLE_MONITORS)
+        if os.environ.get('LSWITCH_TEST_DISABLE_MONITORS') == '1':
+            if self.config.get('debug'):
+                print("⚠️  Тестовый режим: мониторинг раскладки отключён (LSWITCH_TEST_DISABLE_MONITORS=1)", flush=True)
+            self.layout_thread = None
+            self.layouts_file_monitor_thread = None
+        else:
+            self.layout_thread = threading.Thread(target=self.monitor_layout_changes, daemon=True)
+            self.layout_thread.start()
+            
+            # Запускаем поток мониторинга файла с раскладками
+            self.layouts_file_monitor_thread = threading.Thread(target=self.monitor_layouts_file, daemon=True)
+            self.layouts_file_monitor_thread.start()
         
         # Применяем раскладки к виртуальному устройству (иначе KDE глючит)
         self.configure_virtual_keyboard_layouts()
@@ -797,42 +804,88 @@ class LSwitch:
             if self.config.get('debug'):
                 print(f"⚠️  Ошибка словаря: {e}")
     
-    def load_config(self, config_path):
-        """Загружает конфигурацию из файла"""
+    def load_config(self, config_path=None):
+        """Load configuration with overlay behavior.
+
+        Priority:
+          1. /etc/lswitch/config.json (system) — base
+          2. ~/.config/lswitch/config.json (user) — overlays values if system allows overrides
+        """
         default_config = {
             'double_click_timeout': 0.3,
             'debug': False,
             'switch_layout_after_convert': True,
             'layout_switch_key': 'Alt_L+Shift_L',
-            'auto_switch': False
+            'auto_switch': False,
+            # New flag: admin can prevent user overrides
+            'allow_user_overrides': True
         }
-        
-        if os.path.exists(config_path):
+
+        # Allow overriding paths for tests via environment variables
+        system_path = os.environ.get('LSWITCH_TEST_SYSTEM_CONFIG', '/etc/lswitch/config.json')
+        user_path = os.environ.get('LSWITCH_TEST_USER_CONFIG', os.path.expanduser('~/.config/lswitch/config.json'))
+
+        config = default_config.copy()
+
+        # Helper to load JSON with comment-stripping fallback
+        def _load_json_file(path):
             try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                    default_config.update(config)
-                    print(f"✓ Конфиг загружен: {config_path}")
-            except Exception as e:
-                print(f"⚠️  Ошибка чтения конфига: {e}")
-        
-        return default_config
+                with open(path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        lines = [ln for ln in f if not ln.lstrip().startswith(("#","//"))]
+                        cleaned = ''.join(lines)
+                        return json.loads(cleaned)
+                except Exception:
+                    return None
+
+        # 1) Load system config if present
+        system_cfg = _load_json_file(system_path) if os.path.exists(system_path) else None
+        if system_cfg:
+            config.update(system_cfg)
+            print(f"✓ Системный конфиг загружен: {system_path}", flush=True)
+        else:
+            if os.path.exists(system_path) and self.config.get('debug') if hasattr(self, 'config') else False:
+                print(f"⚠️  Не удалось прочитать системный конфиг: {system_path}", flush=True)
+
+        # 2) Load user config and overlay if allowed
+        user_cfg = _load_json_file(user_path) if os.path.exists(user_path) else None
+        if user_cfg:
+            if config.get('allow_user_overrides', True):
+                config.update(user_cfg)
+                print(f"✓ Персональный конфиг применён: {user_path}", flush=True)
+            else:
+                print(f"⚠️  Игнорируем персональный конфиг {user_path} — переопределения отключены администратором", flush=True)
+
+        # Track paths for reload and UI
+        config['_system_config_path'] = system_path if system_cfg else None
+        config['_user_config_path'] = user_path if user_cfg else None
+        config['_config_path'] = config['_system_config_path'] or config['_user_config_path'] or system_path
+
+        print(f"✓ Конфиг загружен (итоговый): {config['_config_path']}", flush=True)
+        return config
     
     def reload_config(self):
         """Перезагружает конфигурацию без перезапуска"""
         print("🔄 Перезагрузка конфигурации...", flush=True)
         old_config = self.config.copy()
-        self.config = self.load_config(self.config.get('_config_path', '/etc/lswitch/config.json'))
-        
+        self.config = self.load_config()  # re-evaluate both system and user configs
+
         # Обновляем параметры
         self.double_click_timeout = self.config.get('double_click_timeout', 0.3)
         self.auto_switch_enabled = self.config.get('auto_switch', False)
-        
+
         # Показываем что изменилось
         if old_config.get('auto_switch') != self.auto_switch_enabled:
             status = "включено" if self.auto_switch_enabled else "выключено"
             print(f"✓ Автопереключение {status}", flush=True)
-        
+
+        # Inform if user overrides are disabled
+        if self.config.get('_system_config_path') and not self.config.get('allow_user_overrides', True):
+            print("⚠️  Персональные конфиги игнорируются (allow_user_overrides=false в системном конфиге)", flush=True)
+
         print("✓ Конфигурация перезагружена", flush=True)
         self.config_reload_requested = False
     

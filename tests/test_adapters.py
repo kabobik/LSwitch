@@ -40,22 +40,23 @@ print(f"Цвета адаптера: {adapter.get_theme_colors()}")
 print()
 
 # Тестируем создание меню
-print("=== Тест создания меню ===")
-from PyQt5.QtWidgets import QApplication
-app = QApplication(sys.argv)
+if __name__ == '__main__':
+    # Тестируем создание меню
+    from PyQt5.QtWidgets import QApplication
+    app = QApplication(sys.argv)
 
-menu = adapter.create_menu()
-print(f"Создано меню: {type(menu)}")
-print(f"Тип меню: {menu.__class__.__name__}")
+    menu = adapter.create_menu()
+    print(f"Создано меню: {type(menu)}")
+    print(f"Тип меню: {menu.__class__.__name__}")
 
-# Проверяем API
-try:
-    from PyQt5.QtWidgets import QAction
-    action = QAction("Тестовый пункт", None)
-    menu.addAction(action)
-    menu.addSeparator()
-    print("✅ API addAction и addSeparator работает")
-except Exception as e:
-    print(f"❌ Ошибка API: {e}")
+    # Проверяем API
+    try:
+        from PyQt5.QtWidgets import QAction
+        action = QAction("Тестовый пункт", None)
+        menu.addAction(action)
+        menu.addSeparator()
+        print("✅ API addAction и addSeparator работает")
+    except Exception as e:
+        print(f"❌ Ошибка API: {e}")
 
-print("\n=== Тест завершён ===")
+    print("\n=== Тест завершён ===")

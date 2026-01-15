@@ -6,6 +6,7 @@
   "auto_switch": true,
   "user_dict_enabled": true,
   "user_dict_min_weight": 2,
+  "allow_user_overrides": true,
 
   # App-specific policies: map active window class/name to preferred mode: "retype" or "selection"
   # Example: prefer fast retype in editors/IDEs, selection in browsers

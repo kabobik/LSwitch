@@ -26,6 +26,15 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture(autouse=True)
+def qt_offscreen(monkeypatch):
+    """Ensure Qt uses an offscreen platform in tests to avoid loading XCB/DBus in headless CI environments."""
+    monkeypatch.setenv('QT_QPA_PLATFORM', 'offscreen')
+    # Also ensure DBUS_SESSION_BUS_ADDRESS is not set to avoid DBus threads where possible
+    monkeypatch.delenv('DBUS_SESSION_BUS_ADDRESS', raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def mock_uinput(monkeypatch):
     """Replace real evdev.UInput with a test Dummy to avoid grabbing /dev/uinput in tests.
 

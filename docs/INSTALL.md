@@ -19,6 +19,12 @@ sudo ./install.sh
 ### 2. Включение автозапуска
 
 ```bash
+# By default LSwitch uses per-user config: `~/.config/lswitch/config.json`.
+# Installer will create a user config for the detected X user during installation.
+# System-wide config `/etc/lswitch/config.json` is supported for administrative control.
+# If present, the `allow_user_overrides` flag in `/etc/lswitch/config.json` controls whether
+# users can override system settings with their local config (default: true).
+
 sudo systemctl enable lswitch
 sudo systemctl start lswitch
 ```

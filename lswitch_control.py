@@ -29,6 +29,7 @@ from i18n import t, get_lang
 # Импортируем адаптеры
 from adapters import get_adapter
 from utils.desktop import detect_desktop_environment, detect_display_server
+import shutil
 
 
 def get_system_scale_factor():
@@ -136,6 +137,10 @@ class LSwitchControlPanel(QSystemTrayIcon):
     """Панель управления в системном трее"""
     
     def __init__(self, icon, parent=None):
+        # Some tests pass None as icon; create empty QIcon in that case
+        from PyQt5.QtGui import QIcon
+        if icon is None:
+            icon = QIcon()
         super().__init__(icon, parent)
         
         # Определяем среду
@@ -168,6 +173,12 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.last_published_layouts = []
         self.layout_change_history = []  # История изменений для защиты от глюков KDE
         self.publish_layouts()
+
+        # Применяем административную политику к UI (например, отключение чекбоксов если admin запретил overrides)
+        try:
+            self.apply_admin_policy_to_ui()
+        except Exception:
+            pass
         
         # Таймер для обновления статуса службы и редких проверок раскладок
         self.status_timer = QTimer()
@@ -247,6 +258,28 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.user_dict_action.triggered.connect(self.toggle_user_dict)
         self.menu.addAction(self.user_dict_action)
         
+        # Настройка применения изменений глобально по умолчанию (user preference)
+        self.apply_global_default_action = QAction("Применять изменения глобально по умолчанию", self)
+        self.apply_global_default_action.setCheckable(True)
+        self.apply_global_default_action.setChecked(self.config.get('apply_system_by_default', False))
+        self.apply_global_default_action.triggered.connect(self.toggle_apply_global_default)
+        self.menu.addAction(self.apply_global_default_action)
+
+        # Кнопка: применить глобально прямо сейчас (для пользователей с правами)
+        self.apply_global_now_action = QAction("Применить глобально сейчас", self)
+        self.apply_global_now_action.triggered.connect(self.apply_global_config)
+        self.menu.addAction(self.apply_global_now_action)
+        
+        # Автозапуск панели (локальный автозапуск GUI)
+        self.gui_autostart_action = QAction("Автозапуск панели", self)
+        self.gui_autostart_action.setCheckable(True)
+        try:
+            self.gui_autostart_action.setChecked(self.is_gui_autostart_enabled())
+        except Exception:
+            self.gui_autostart_action.setChecked(False)
+        self.gui_autostart_action.triggered.connect(self.toggle_gui_autostart)
+        self.menu.addAction(self.gui_autostart_action)
+        
         self.menu.addSeparator()
         
         # Подменю "Управление службой"
@@ -320,29 +353,57 @@ class LSwitchControlPanel(QSystemTrayIcon):
         # Для CustomMenu обрабатываем правый клик вручную
     
     def load_config(self):
-        """Загружает конфигурацию из файла"""
+        """Загружает конфигурацию из файла с терпимым парсером (удаляет строки-комментарии)"""
         config_path = os.path.expanduser('~/.config/lswitch/config.json')
         try:
             with open(config_path, 'r') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"Не удалось загрузить конфиг: {e}", file=sys.stderr, flush=True)
-            return {
-                'auto_switch': True,
-                'user_dict_enabled': False,
-                'dictionaries': []
-            }
+            try:
+                # Фолбэк: очищаем строки-комментарии и пробуем снова
+                with open(config_path, 'r') as f:
+                    lines = [ln for ln in f if not ln.lstrip().startswith(("#","//"))]
+                    cleaned = ''.join(lines)
+                    return json.loads(cleaned)
+            except Exception as e2:
+                print(f"Не удалось загрузить конфиг: {e2}", file=sys.stderr, flush=True)
+                return {
+                    'auto_switch': True,
+                    'user_dict_enabled': False,
+                    'dictionaries': []
+                }
     
     def save_config(self):
-        """Сохраняет конфигурацию в файл"""
+        """Сохраняет конфигурацию в файл.
+
+        По умолчанию — сохраняет локально без запроса. Если пользователь включил
+        опцию `apply_system_by_default`, выполняется автоматическая попытка применения
+        в `/etc/lswitch/config.json` (через pkexec/sudo), учитывая политику админа.
+        """
         config_path = os.path.expanduser('~/.config/lswitch/config.json')
         try:
             os.makedirs(os.path.dirname(config_path), exist_ok=True)
             with open(config_path, 'w') as f:
                 json.dump(self.config, f, indent=4)
+
+            # If user requested automatic global apply, attempt it (non-interactive)
+            if self.config.get('apply_system_by_default'):
+                applied = self._attempt_apply_system_config(interactive=False)
+                if not applied:
+                    # Inform the user if admin policy prevented automatic apply
+                    try:
+                        if os.path.exists('/etc/lswitch/config.json'):
+                            with open('/etc/lswitch/config.json','r') as sf:
+                                sys_json = json.loads(sf.read())
+                                if sys_json.get('allow_user_overrides', True) is False:
+                                    from PyQt5.QtWidgets import QMessageBox
+                                    QMessageBox.information(None, "Внимание", "Изменения сохранены локально, но системная политика запрещает переопределения (allow_user_overrides=false).")
+                    except Exception:
+                        pass
             return True
         except Exception as e:
             print(f"Не удалось сохранить конфиг: {e}", file=sys.stderr, flush=True)
+            self.system_config_applied = False
             return False
     
     def get_service_status(self):
@@ -417,7 +478,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
         """Публикует текущие раскладки в файл для демона"""
         try:
             layouts = []
-            
+
             # Приоритет 1: Читаем из конфига KDE (стабильно, не подвержено багам)
             kde_config = os.path.expanduser('~/.config/kxkbrc')
             if os.path.exists(kde_config):
@@ -433,7 +494,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
                         print(t('detected_layouts', layouts=layouts), flush=True)
                 except Exception as e:
                     print(f"⚠️  Ошибка чтения kxkbrc: {e}", flush=True)
-            
+
             # Fallback: setxkbmap (может глючить в KDE, но работает в других DE)
             if not layouts:
                 result = subprocess.run(
@@ -442,7 +503,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
                     text=True,
                     timeout=2
                 )
-                
+
                 for line in result.stdout.split('\n'):
                     if line.startswith('layout:'):
                         layouts_str = line.split(':', 1)[1].strip()
@@ -451,30 +512,87 @@ class LSwitchControlPanel(QSystemTrayIcon):
                         layouts = ['en' if l == 'us' else l for l in layouts if l]
                         print(f"✓ Раскладки из setxkbmap: {layouts}", flush=True)
                         break
-            
+
             # ВАЛИДАЦИЯ: НЕ публикуем если меньше 2 раскладок
             if len(layouts) < 2:
                 print(f"⚠️  Игнорируем некорректные раскладки: {layouts} (ожидается >= 2)", flush=True)
                 return False
-            
+
             if layouts:
                 # Пишем в runtime файл
                 runtime_dir = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
                 layouts_file = f'{runtime_dir}/lswitch_layouts.json'
-                
+
                 import time
                 with open(layouts_file, 'w') as f:
                     json.dump({
                         'layouts': layouts, 
                         'timestamp': int(time.time())
                     }, f)
-                
+
                 self.last_published_layouts = layouts
                 return True
-                    
         except Exception as e:
             print(f"Ошибка публикации раскладок: {e}", file=sys.stderr, flush=True)
             return False
+
+    def apply_admin_policy_to_ui(self):
+        """Adjust UI elements according to system admin policy (allow_user_overrides)."""
+        system_path = os.environ.get('LSWITCH_TEST_SYSTEM_CONFIG', '/etc/lswitch/config.json')
+        allow_over = True
+        if os.path.exists(system_path):
+            try:
+                with open(system_path, 'r') as f:
+                    data = json.load(f)
+                    allow_over = data.get('allow_user_overrides', True)
+            except Exception:
+                allow_over = True
+
+        if not allow_over:
+            # Disable checkboxes which would have no effect
+            try:
+                self.auto_switch_action.setEnabled(False)
+                self.auto_switch_action.setToolTip('Игнорируется системой: администратор запретил пользовательские переопределения')
+            except Exception:
+                pass
+            try:
+                self.user_dict_action.setEnabled(False)
+                self.user_dict_action.setToolTip('Игнорируется системой: администратор запретил пользовательские переопределения')
+            except Exception:
+                pass
+            try:
+                self.apply_global_default_action.setEnabled(False)
+                self.apply_global_default_action.setToolTip('Нельзя включить автоматическое применение: администратор запретил переопределения')
+            except Exception:
+                pass
+            # Keep 'Apply global now' enabled so admin or privileged users can still try to apply
+            try:
+                self.apply_global_now_action.setEnabled(True)
+                self.apply_global_now_action.setToolTip('Требуются права администратора для применения глобально')
+            except Exception:
+                pass
+        else:
+            # Restore defaults (in case policy was changed)
+            try:
+                self.auto_switch_action.setEnabled(True)
+                self.auto_switch_action.setToolTip('')
+            except Exception:
+                pass
+            try:
+                self.user_dict_action.setEnabled(True)
+                self.user_dict_action.setToolTip('')
+            except Exception:
+                pass
+            try:
+                self.apply_global_default_action.setEnabled(True)
+                self.apply_global_default_action.setToolTip('')
+            except Exception:
+                pass
+            try:
+                self.apply_global_now_action.setEnabled(True)
+                self.apply_global_now_action.setToolTip('')
+            except Exception:
+                pass
     
     def check_and_publish_layouts(self):
         """Проверяет и публикует раскладки только при изменении (с защитой от глюков KDE)"""
@@ -594,6 +712,13 @@ class LSwitchControlPanel(QSystemTrayIcon):
                 QSystemTrayIcon.Information,
                 2000
             )
+            # Если системный конфиг есть, но мы не записали туда изменения — предупредим пользователя
+            try:
+                if os.path.exists('/etc/lswitch/config.json') and not getattr(self, 'system_config_applied', False):
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.information(None, "Внимание", "Изменение сохранено локально. Чтобы служба использовала новые настройки, примените их глобально в /etc/lswitch/config.json (появится запрос прав).")
+            except Exception:
+                pass
     
     def toggle_user_dict(self):
         """Переключает самообучающийся словарь"""
@@ -611,14 +736,191 @@ class LSwitchControlPanel(QSystemTrayIcon):
                 QSystemTrayIcon.Information,
                 3000
             )
+
+    def toggle_apply_global_default(self):
+        """Toggle the user's preference to apply changes globally by default"""
+        new = not self.config.get('apply_system_by_default', False)
+        self.config['apply_system_by_default'] = new
+        self.apply_global_default_action.setChecked(new)
+        if self.save_config():
+            msg = "Настройки будут применяться глобально по умолчанию" if new else "Настройки будут применяться локально"
+            self.showMessage("LSwitch", msg, QSystemTrayIcon.Information, 2000)
+
+    def apply_global_config(self):
+        """User requested to apply current local config to system-level right now (interactive)."""
+        try:
+            ok = self._attempt_apply_system_config(interactive=True)
+            if ok:
+                self.showMessage("LSwitch", "Системный конфиг обновлён и служба уведомлена (SIGHUP)", QSystemTrayIcon.Information, 2000)
+            else:
+                self.showMessage("LSwitch", "Не удалось обновить системный конфиг", QSystemTrayIcon.Critical, 3000)
+        except Exception as e:
+            print(f"Ошибка при применении глобального конфига: {e}", file=sys.stderr, flush=True)
+            self.showMessage("LSwitch", "Не удалось обновить системный конфиг", QSystemTrayIcon.Critical, 3000)
+
+    def _attempt_apply_system_config(self, interactive=True):
+        """Attempts to write current `self.config` to /etc/lswitch/config.json.
+
+        If running as root (GUI started via pkexec/sudo), the file will be written directly.
+        Returns True on success. If interactive=True, will show confirmation dialogs.
+        """
+        """Attempts to write current `self.config` to /etc/lswitch/config.json.
+
+        Returns True on success. If interactive=True, will show confirmation dialogs.
+        """
+        system_path = '/etc/lswitch/config.json'
+        # Read existing system config to check allow_user_overrides
+        allow_over = True
+        if os.path.exists(system_path):
+            try:
+                with open(system_path, 'r') as sf:
+                    sys_json = json.load(sf)
+                    allow_over = sys_json.get('allow_user_overrides', True)
+            except Exception:
+                allow_over = True
+
+        # If admin disabled overrides, inform user and ask if they still want to apply globally
+        if not allow_over and interactive:
+            from PyQt5.QtWidgets import QMessageBox
+            info = QMessageBox()
+            info.setIcon(QMessageBox.Information)
+            info.setWindowTitle("Изменение локального конфига")
+            info.setText("Системный конфиг отключает пользовательские переопределения (allow_user_overrides=false). Ваши локальные изменения не будут применены службой.")
+            info.setInformativeText("Хотите применить изменения глобально (потребуются права администратора)?")
+            info.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            reply = info.exec_()
+            if reply != QMessageBox.Yes:
+                return False
+        elif not allow_over and not interactive:
+            # in non-interactive mode we shouldn't override admin's policy
+            return False
+
+        # Prepare temp file
+        new_cfg_str = json.dumps(self.config, indent=4)
+        import tempfile, subprocess
+        fd, tmp = tempfile.mkstemp(prefix='lswitch-config-')
+        os.close(fd)
+        with open(tmp, 'w') as tf:
+            tf.write(new_cfg_str)
+
+        moved = False
+        try:
+            # If running as root (pkexec/sudo started GUI), write directly
+            if os.geteuid() == 0:
+                try:
+                    shutil.move(tmp, system_path)
+                    moved = True
+                except Exception as e:
+                    if interactive:
+                        from PyQt5.QtWidgets import QMessageBox
+                        QMessageBox.critical(None, "Ошибка", f"Не удалось записать /etc/lswitch/config.json: {e}")
+                    try:
+                        os.remove(tmp)
+                    except Exception:
+                        pass
+                    return False
+            else:
+                subprocess.run(['pkexec', 'mv', tmp, system_path], check=True, timeout=30)
+                moved = True
+        except Exception:
+            try:
+                subprocess.run(['sudo', 'mv', tmp, system_path], check=True, timeout=30)
+                moved = True
+            except Exception as e:
+                if interactive:
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.critical(None, "Ошибка", "Не удалось записать /etc/lswitch/config.json (проверьте права)")
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+                return False
+
+        # Try to notify service
+        try:
+            subprocess.run(['systemctl', '--user', 'kill', '--signal=HUP', 'lswitch'], check=False, timeout=5)
+        except Exception:
+            pass
+
+        self.system_config_applied = moved
+        return moved
+
+    def is_gui_autostart_enabled(self):
+        """Проверяет, установлен ли автозапуск панели для текущего пользователя"""
+        autostart_path = os.path.expanduser('~/.config/autostart/lswitch-control.desktop')
+        return os.path.exists(autostart_path)
+
+    def toggle_gui_autostart(self):
+        """Включает/выключает автозапуск GUI панели (копирует .desktop в ~/.config/autostart)
+
+        Ищет файл-источник в нескольких распространённых локациях и копирует первый найденный.
+        """
+        autostart_dir = os.path.expanduser('~/.config/autostart')
+        autostart_file = os.path.join(autostart_dir, 'lswitch-control.desktop')
+        # Возможные места, где может лежать системный .desktop
+        candidates = [
+            '/usr/share/applications/lswitch-control.desktop',
+            '/usr/local/share/applications/lswitch-control.desktop',
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', 'lswitch-control.desktop'),
+        ]
+        try:
+            os.makedirs(autostart_dir, exist_ok=True)
+            if self.gui_autostart_action.isChecked():
+                src = None
+                for c in candidates:
+                    if os.path.exists(c):
+                        src = c
+                        break
+                if not src:
+                    # Если исходный .desktop не найден — создаём минимальный .desktop в автозапуске
+                    content = """[Desktop Entry]
+Type=Application
+Exec=/usr/local/bin/lswitch-control
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=LSwitcher
+Comment=Control panel for LSwitch
+"""
+                    with open(autostart_file, 'w') as f:
+                        f.write(content)
+                else:
+                    shutil.copy(src, autostart_file)
+
+                # Попытка установить владельца файла текущего пользователя (на случай sudo запусков)
+                try:
+                    import pwd
+                    uid = os.getuid()
+                    gid = os.getgid()
+                    os.chown(autostart_file, uid, gid)
+                except Exception:
+                    pass
+
+                self.showMessage("LSwitch", t('autostart_enabled'), QSystemTrayIcon.Information, 2000)
+            else:
+                try:
+                    os.remove(autostart_file)
+                except FileNotFoundError:
+                    pass
+                self.showMessage("LSwitch", t('autostart_disabled'), QSystemTrayIcon.Information, 2000)
+        except Exception as e:
+            print(f"Ошибка при изменении автозапуска GUI: {e}", file=sys.stderr, flush=True)
+            # Откатываем чекбокс
+            self.gui_autostart_action.setChecked(self.is_gui_autostart_enabled())
+            self.showMessage(t('error'), t('failed_to_change_autostart'), QSystemTrayIcon.Critical, 3000)
     
     def reload_service_config(self):
         """Перезагружает конфигурацию службы без перезапуска"""
         try:
-            # Отправляем SIGHUP процессу lswitch
-            subprocess.run(['pkill', '-HUP', '-f', 'lswitch.py'], timeout=2)
-        except Exception as e:
-            print(f"Не удалось отправить сигнал: {e}", file=sys.stderr, flush=True)
+            # Сначала пробуем через systemctl (корректно целит unit для user/system служб)
+            subprocess.run(['systemctl', '--user', 'kill', '--signal=HUP', 'lswitch'], check=True, timeout=5)
+            return
+        except Exception:
+            # Фолбэк: pkill по имени (подходит для /usr/local/bin/lswitch и других инсталляций)
+            try:
+                subprocess.run(['pkill', '-HUP', '-f', 'lswitch'], timeout=2)
+            except Exception as e:
+                print(f"Не удалось отправить сигнал: {e}", file=sys.stderr, flush=True)
     
     def toggle_autostart(self):
         """Включает/выключает автозапуск службы"""
