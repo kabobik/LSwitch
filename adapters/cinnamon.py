@@ -56,7 +56,12 @@ class CustomMenuItem(QWidget):
                     content: "✓";
                 }}
             """)
-            self.checkbox.setAttribute(Qt.WA_TransparentForMouseEvents)
+            # Allow the checkbox to receive clicks and forward them to the item
+            try:
+                self.checkbox.clicked.connect(lambda checked=None: self.clicked.emit())
+            except Exception:
+                pass
+            self.checkbox.setFocusPolicy(Qt.NoFocus)
             layout.addWidget(self.checkbox)
             self.icon_label = None
         else:

@@ -692,10 +692,22 @@ class LSwitchControlPanel(QSystemTrayIcon):
 
 
 
+    def _system_autostart_present(self):
+        """Return path to system-level autostart launcher if present, otherwise None."""
+        candidates = [
+            '/etc/xdg/autostart/lswitch-control.desktop',
+            '/usr/share/applications/lswitch-control.desktop',
+            '/usr/local/share/applications/lswitch-control.desktop'
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                return c
+        return None
+
     def is_gui_autostart_enabled(self):
-        """Проверяет, установлен ли автозапуск панели для текущего пользователя"""
+        """Проверяет, установлен ли автозапуск панели для текущего пользователя или системой"""
         autostart_path = os.path.expanduser('~/.config/autostart/lswitch-control.desktop')
-        return os.path.exists(autostart_path)
+        return os.path.exists(autostart_path) or bool(self._system_autostart_present())
 
     def toggle_gui_autostart(self):
         """Включает/выключает автозапуск GUI панели (копирует .desktop в ~/.config/autostart)
@@ -743,13 +755,43 @@ Comment=Control panel for LSwitch
                 except Exception:
                     pass
 
-                self.showMessage("LSwitch", t('autostart_enabled'), QSystemTrayIcon.Information, 2000)
+                # After attempting to enable, read actual state and reflect it in the UI
+                enabled = self.is_gui_autostart_enabled()
+                try:
+                    self.gui_autostart_action.setChecked(enabled)
+                except Exception:
+                    pass
+                if enabled:
+                    self.showMessage("LSwitch", t('autostart_enabled'), QSystemTrayIcon.Information, 2000)
+                else:
+                    self.showMessage("LSwitch", t('autostart_disabled'), QSystemTrayIcon.Information, 2000)
             else:
+                # Block disabling up-front to avoid brief flicker when the checkbox is unchecked.
+                sys_path = self._system_autostart_present()
+                print(f"toggle_gui_autostart: disabling requested, local_exists={os.path.exists(autostart_file)}, system_path={sys_path}", flush=True)
+                if sys_path:
+                    try:
+                        self.gui_autostart_action.setChecked(True)
+                    except Exception:
+                        pass
+                    msg = t('autostart_managed_by_system', path=sys_path)
+                    self.showMessage("LSwitch", msg, QSystemTrayIcon.Information, 4000)
+                    return
+
                 try:
                     os.remove(autostart_file)
                 except FileNotFoundError:
                     pass
-                self.showMessage("LSwitch", t('autostart_disabled'), QSystemTrayIcon.Information, 2000)
+                # After attempting to disable, read actual state and reflect it in the UI
+                enabled = self.is_gui_autostart_enabled()
+                try:
+                    self.gui_autostart_action.setChecked(enabled)
+                except Exception:
+                    pass
+                if enabled:
+                    self.showMessage("LSwitch", t('autostart_enabled'), QSystemTrayIcon.Information, 2000)
+                else:
+                    self.showMessage("LSwitch", t('autostart_disabled'), QSystemTrayIcon.Information, 2000)
         except Exception as e:
             print(f"Ошибка при изменении автозапуска GUI: {e}", file=sys.stderr, flush=True)
             # Откатываем чекбокс

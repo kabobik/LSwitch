@@ -78,6 +78,7 @@ class I18n:
                 'autostart_enabled': 'Autostart enabled',
                 'autostart_disabled': 'Autostart disabled',
                 'failed_to_change_autostart': 'Failed to change autostart',
+                'autostart_managed_by_system': 'Autostart is managed by the system ({path}) and cannot be disabled here',
                 
                 # About dialog
                 'about_title': 'LSwitch v{version}',
@@ -135,6 +136,7 @@ class I18n:
                 'autostart_enabled': 'Автозапуск включен',
                 'autostart_disabled': 'Автозапуск выключен',
                 'failed_to_change_autostart': 'Не удалось изменить автозапуск',
+                'autostart_managed_by_system': 'Автозапуск управляется системой ({path}) и не может быть отключён здесь',
                 
                 # Диалог О программе
                 'about_title': 'LSwitch v{version}',
