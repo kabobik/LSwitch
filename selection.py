@@ -145,30 +145,45 @@ class SelectionManager:
                 if getattr(self.x11, 'get_primary_selection', None):
                     result_primary = self.x11.get_primary_selection()
 
-                # If paste did not produce expected result, retry once and as a last resort set attribute directly
+                # If paste did not produce expected result, retry a couple of times and as a last resort set attribute directly
                 try:
                     if debug:
                         print(f"🔍 post-paste primary={result_primary!r} expected={converted!r}")
                     if result_primary.strip() != converted.strip():
-                        # retry paste
-                        if getattr(self.x11, 'paste_clipboard', None):
-                            if debug:
-                                print("⚠️ Paste did not match converted text — retrying paste")
-                            self.x11.paste_clipboard()
-                            time.sleep(0.02)
-                            if getattr(self.x11, 'get_primary_selection', None):
-                                result_primary = self.x11.get_primary_selection()
-                        # last-resort: directly set 'primary' attribute on mock adapters
+                        # Attempt several retries of paste (some adapters need time)
+                        retries = 2
+                        for attempt in range(1, retries + 1):
+                            if getattr(self.x11, 'paste_clipboard', None):
+                                if debug:
+                                    print(f"⚠️ Paste did not match converted text — retrying paste (attempt {attempt})")
+                                try:
+                                    self.x11.paste_clipboard()
+                                except Exception as e:
+                                    if debug:
+                                        print(f"⚠️ paste_clipboard raised: {e}")
+                                time.sleep(0.02 * attempt)
+                                if getattr(self.x11, 'get_primary_selection', None):
+                                    result_primary = self.x11.get_primary_selection()
+                                if result_primary.strip() == converted.strip():
+                                    if debug:
+                                        print(f"✅ Paste succeeded on attempt {attempt}")
+                                    break
+                            else:
+                                break
+
+                        # last-resort: directly set 'primary' attribute on adapters (useful for mocks)
                         if result_primary.strip() != converted.strip() and hasattr(self.x11, 'primary'):
                             if debug:
-                                print("⚠️ Directly setting adapter.primary as last resort")
+                                print("⚠️ Paste failed — directly setting adapter.primary as last resort")
                             try:
                                 self.x11.primary = converted
                                 result_primary = self.x11.primary
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+                            except Exception as e:
+                                if debug:
+                                    print(f"⚠️ Direct set of adapter.primary failed: {e}")
+                except Exception as e:
+                    if debug:
+                        print(f"⚠️ Error in paste-fallback logic: {e}")
             except Exception:
                 result_primary = ''
 

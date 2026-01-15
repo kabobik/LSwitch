@@ -3,7 +3,7 @@
 Setup script для LSwitch
 """
 
-from setuptools import setup
+from setuptools import setup, find_packages
 import os
 import sys
 
@@ -24,16 +24,21 @@ setup(
     long_description_content_type='text/markdown',
     author='Anton',
     url='https://github.com/yourusername/lswitch',
-    py_modules=['lswitch', 'lswitch_control', 'dictionary', 'ngrams', 'user_dictionary', 'i18n'],
-    packages=['adapters', 'utils'],
+    py_modules=['lswitch_control', 'dictionary', 'ngrams', 'user_dictionary', 'i18n'],
+    packages=find_packages(exclude=['tests', 'docs']),
     python_requires='>=3.6',
     install_requires=[
-        # evdev должен быть установлен через системный менеджер пакетов
+        'evdev',
+        'python-xlib'
     ],
     entry_points={
         'console_scripts': [
-            'lswitch=lswitch:main',
+            'lswitch=lswitch.cli:main',
         ],
+    },
+    package_data={
+        # Include configuration and assets with the package for easier installs
+        '': ['config/*', 'assets/*'],
     },
     data_files=[
         ('/etc/lswitch', ['config/config.json.example']),
