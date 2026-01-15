@@ -371,20 +371,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
             with open(config_path, 'w') as f:
                 json.dump(self.config, f, indent=4)
 
-            # If user requested automatic global apply, attempt it (non-interactive)
-            if self.config.get('apply_system_by_default'):
-                applied = self._attempt_apply_system_config(interactive=False)
-                if not applied:
-                    # Inform the user if admin policy prevented automatic apply
-                    try:
-                        if os.path.exists('/etc/lswitch/config.json'):
-                            with open('/etc/lswitch/config.json','r') as sf:
-                                sys_json = json.loads(sf.read())
-                                if sys_json.get('allow_user_overrides', True) is False:
-                                    from PyQt5.QtWidgets import QMessageBox
-                                    QMessageBox.information(None, "Внимание", "Изменения сохранены локально, но системная политика запрещает переопределения (allow_user_overrides=false).")
-                    except Exception:
-                        pass
+
             return True
         except Exception as e:
             print(f"Не удалось сохранить конфиг: {e}", file=sys.stderr, flush=True)

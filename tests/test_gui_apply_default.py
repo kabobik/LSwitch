@@ -17,19 +17,11 @@ def test_save_triggers_auto_apply(monkeypatch, tmp_path):
     panel = LSwitchControlPanel(QIcon())
     # Make sure there's no system config
     monkeypatch.setenv('LSWITCH_TEST_SYSTEM_CONFIG', str(tmp_path / 'etc' / 'lswitch' / 'config.json'))
-    # Ensure save will attempt to call pkexec or sudo: monkeypatch subprocess.run
-    calls = []
-
-    def fake_run(cmd, *args, **kwargs):
-        calls.append(cmd)
-        class R: pass
-        return R()
-
-    monkeypatch.setattr('subprocess.run', fake_run)
-
-    panel.config['apply_system_by_default'] = True
+    # Save should write local user config and not attempt system apply
     panel.config['auto_switch'] = True
     ok = panel.save_config()
     assert ok is True
-    # Because no system config is present, it will still try to move via pkexec/sudo to default /etc path
-    assert any('pkexec' in c or 'sudo' in c for c in calls)
+    # verify user config written
+    cfg_path = os.path.expanduser('~/.config/lswitch/config.json')
+    assert os.path.exists(cfg_path)
+
