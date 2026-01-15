@@ -208,70 +208,21 @@ class LSwitch:
             self.running = False
 
     def load_config(self, config_path):
-        """Загружает конфигурацию из файла.
-
-        Поддерживает системный конфиг (обычно `/etc/lswitch/config.json`) и
-        пользовательский конфиг `~/.config/lswitch/config.json`, который
-        перекрывает системные значения при наличии.
-        """
-        default_config = {
-            'double_click_timeout': 0.3,
-            'debug': False,
-            'switch_layout_after_convert': True,
-            'layout_switch_key': 'Alt_L+Shift_L',
-            'auto_switch': False
-        }
-
-        # Helper to try read + validate a config file and merge into defaults
-        def _sanitize_json_text(s: str) -> str:
-            # Remove shell-style comments (# ...) and C++ style // ...
-            import re
-            # Remove lines that start with optional whitespace followed by # or //
-            s = re.sub(r"^[ \t]*#.*$", "", s, flags=re.MULTILINE)
-            s = re.sub(r"//.*$", "", s, flags=re.MULTILINE)
-            # Remove trailing commas before } or ]
-            s = re.sub(r",[ \t\r\n]+(\}|\])", r"\1", s)
-            return s
-
-        def _read_and_merge(path):
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    raw = f.read()
-                try:
-                    cfg = json.loads(raw)
-                except json.JSONDecodeError:
-                    # Try sanitized version (strip comments, trailing commas)
-                    try:
-                        sanitized = _sanitize_json_text(raw)
-                        cfg = json.loads(sanitized)
-                        print(f"⚠️  Конфиг {path} содержал комментарии/трейлинг-запятые — применена попытка санации")
-                    except json.JSONDecodeError as e:
-                        print(f"⚠️  Ошибка разбора JSON в конфиге {path}: {e}")
-                        return False
-                try:
-                    validated = validate_config(cfg)
-                    default_config.update(validated)
-                    print(f"✓ Конфиг загружен и валидирован: {path}")
-                    return True
-                except ValueError as verr:
-                    print(f"⚠️  Неверный формат конфига {path}: {verr}")
-            except Exception:
-                # Silent: файл может не существовать
-                return False
-            return False
-
-        # 1) Try the explicit path (system /etc/lswitch/config.json or config.json in cwd)
-        _read_and_merge(config_path)
-
-        # 2) Then try per-user config as an override if present
-        user_cfg = os.path.expanduser('~/.config/lswitch/config.json')
-        if os.path.exists(user_cfg):
-            _read_and_merge(user_cfg)
-
-        # Keep path for reference (prefer system path; note user override exists separately)
-        default_config['_config_path'] = config_path
-        default_config['_user_config_path'] = user_cfg if os.path.exists(user_cfg) else None
-        return default_config
+        """Delegate to `lswitch.config.load_config` (non-verbose by default)."""
+        try:
+            from lswitch import config as _cfg
+            return _cfg.load_config(config_path, debug=False)
+        except Exception:
+            # Ultimate fallback: return minimal defaults
+            return {
+                'double_click_timeout': 0.3,
+                'debug': False,
+                'switch_layout_after_convert': True,
+                'layout_switch_key': 'Alt_L+Shift_L',
+                'auto_switch': False,
+                '_config_path': config_path,
+                '_user_config_path': None
+            }
 
     def reload_config(self):
         """Перезагружает конфигурацию без перезапуска"""
@@ -1673,78 +1624,9 @@ class LSwitch:
                 pass
 
 
-def validate_config(conf: dict) -> dict:
-    """Validate and normalize configuration dictionary.
-
-    Ensures expected keys have correct types and sensible ranges. Returns
-    a normalized config dict (filling missing keys with defaults). Raises
-    ValueError with a descriptive message if validation fails.
-    """
-    if conf is None:
-        conf = {}
-
-    defaults = {
-        'double_click_timeout': 0.3,
-        'debug': False,
-        'switch_layout_after_convert': True,
-        'layout_switch_key': 'Alt_L+Shift_L',
-        'auto_switch': False,
-        'user_dict_enabled': False,
-        'user_dict_min_weight': 2,
-    }
-
-    out = dict(defaults)
-
-    # double_click_timeout: positive number between 0.05 and 10
-    dct = conf.get('double_click_timeout', defaults['double_click_timeout'])
-    try:
-        dct_val = float(dct)
-        if not (0.05 <= dct_val <= 10.0):
-            raise ValueError('double_click_timeout must be between 0.05 and 10.0')
-        out['double_click_timeout'] = dct_val
-    except Exception:
-        raise ValueError(f"Invalid 'double_click_timeout': {dct}")
-
-    # debug
-    dbg = conf.get('debug', defaults['debug'])
-    if not isinstance(dbg, bool):
-        raise ValueError("Invalid 'debug' flag: must be boolean")
-    out['debug'] = dbg
-
-    # switch_layout_after_convert
-    sl = conf.get('switch_layout_after_convert', defaults['switch_layout_after_convert'])
-    if not isinstance(sl, bool):
-        raise ValueError("Invalid 'switch_layout_after_convert': must be boolean")
-    out['switch_layout_after_convert'] = sl
-
-    # layout_switch_key
-    lsk = conf.get('layout_switch_key', defaults['layout_switch_key'])
-    if not isinstance(lsk, str) or not lsk:
-        raise ValueError("Invalid 'layout_switch_key': must be a non-empty string")
-    out['layout_switch_key'] = lsk
-
-    # auto_switch
-    autos = conf.get('auto_switch', defaults['auto_switch'])
-    if not isinstance(autos, bool):
-        raise ValueError("Invalid 'auto_switch': must be boolean")
-    out['auto_switch'] = autos
-
-    # user_dict_enabled
-    ude = conf.get('user_dict_enabled', defaults['user_dict_enabled'])
-    if not isinstance(ude, bool):
-        raise ValueError("Invalid 'user_dict_enabled': must be boolean")
-    out['user_dict_enabled'] = ude
-
-    # user_dict_min_weight
-    udw = conf.get('user_dict_min_weight', defaults['user_dict_min_weight'])
-    try:
-        udw_i = int(udw)
-        if udw_i < 0:
-            raise ValueError('user_dict_min_weight must be >= 0')
-        out['user_dict_min_weight'] = udw_i
-    except Exception:
-        raise ValueError(f"Invalid 'user_dict_min_weight': {udw}")
-
-    return out
+# validate_config is provided by lswitch.config for reusability
+from lswitch.config import validate_config  # re-export for backward compatibility
+# Also expose load_config at module-level for convenience (back-compat)
+from lswitch.config import load_config as _module_load_config
 
 
