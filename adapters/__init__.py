@@ -4,8 +4,6 @@ import sys
 sys.path.insert(0, '/home/anton/VsCode/LSwitch')
 
 from adapters.base import BaseGUIAdapter
-from adapters.cinnamon import CinnamonAdapter
-from adapters.kde import KDEAdapter
 from utils.desktop import detect_desktop_environment
 
 
@@ -16,15 +14,23 @@ def get_adapter():
         BaseGUIAdapter: Адаптер для текущего DE
     """
     de = detect_desktop_environment()
-    
-    if de == 'cinnamon':
-        return CinnamonAdapter()
-    elif de == 'kde':
-        return KDEAdapter()
-    else:
-        # По умолчанию используем CinnamonAdapter (более универсальный)
-        print(f"Warning: Unknown DE '{de}', using CinnamonAdapter as fallback")
-        return CinnamonAdapter()
+
+    try:
+        if de == 'cinnamon':
+            from adapters.cinnamon import CinnamonAdapter
+            return CinnamonAdapter()
+        elif de == 'kde':
+            from adapters.kde import KDEAdapter
+            return KDEAdapter()
+        else:
+            # По умолчанию используем CinnamonAdapter (более универсальный)
+            print(f"Warning: Unknown DE '{de}', using CinnamonAdapter as fallback")
+            from adapters.cinnamon import CinnamonAdapter
+            return CinnamonAdapter()
+    except Exception as e:
+        # If importing GUI adapters fails (e.g. PyQt5 missing), return None so tests can handle it
+        print(f"⚠️  GUI adapter import failed: {e}")
+        return None
 
 
-__all__ = ['BaseGUIAdapter', 'CinnamonAdapter', 'KDEAdapter', 'get_adapter']
+__all__ = ['BaseGUIAdapter', 'get_adapter']

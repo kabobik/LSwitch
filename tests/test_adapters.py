@@ -5,6 +5,14 @@
 
 import sys
 import os
+import pytest
+
+# Mark this module as GUI-dependent and skip if PyQt5 is not available
+pytestmark = pytest.mark.gui
+try:
+    import PyQt5  # presence check
+except Exception:
+    pytest.skip("PyQt5 not available", allow_module_level=True)
 
 sys.path.insert(0, '/home/anton/VsCode/LSwitch')
 

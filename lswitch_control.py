@@ -8,9 +8,8 @@ LSwitch - GUI панель управления службой
 import sys
 import os
 
-# Добавляем пути для импорта модулей
+# Добавляем проектную директорию в путь для локальной разработки
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, '/usr/local/lib/lswitch')
 
 from __version__ import __version__
 import json
@@ -615,10 +614,15 @@ class LSwitchControlPanel(QSystemTrayIcon):
     def reload_service_config(self):
         """Перезагружает конфигурацию службы без перезапуска"""
         try:
-            # Отправляем SIGHUP процессу lswitch
-            subprocess.run(['pkill', '-HUP', '-f', 'lswitch.py'], timeout=2)
+            # Используем systemctl --user чтобы корректно адресовать сервис
+            # (ExecStart теперь использует `-m lswitch`, поэтому pkill по имени скрипта не подходит)
+            subprocess.run(['systemctl', '--user', 'kill', '--signal=HUP', 'lswitch'], timeout=2)
         except Exception as e:
-            print(f"Не удалось отправить сигнал: {e}", file=sys.stderr, flush=True)
+            # Фолбэк: старый метод (pkill) на случай, если service не управляется systemd
+            try:
+                subprocess.run(['pkill', '-HUP', '-f', 'lswitch.py'], timeout=2)
+            except Exception:
+                print(f"Не удалось отправить сигнал: {e}", file=sys.stderr, flush=True)
     
     def toggle_autostart(self):
         """Включает/выключает автозапуск службы"""

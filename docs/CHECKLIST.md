@@ -50,7 +50,7 @@ sudo systemctl status lswitch
 - [ ] Сервис запущен: `sudo systemctl status lswitch`
 - [ ] Автозапуск включён: `systemctl is-enabled lswitch` (должно быть: enabled)
 - [ ] Конфигурация создана: `ls -l /etc/lswitch/config.json`
-- [ ] Исполняемый файл создан: `ls -l /usr/local/bin/lswitch`
+- [ ] Команда `lswitch` доступна в PATH: `command -v lswitch` (или используйте `python3 -m lswitch`)
 
 ## Тестирование
 
@@ -79,7 +79,7 @@ sudo journalctl -u lswitch -n 50
 sudo journalctl -u lswitch -n 100
 
 # Пробуем запустить вручную для диагностики
-sudo /usr/local/bin/lswitch
+sudo python3 -u -m lswitch
 ```
 
 ### Не работает конвертация

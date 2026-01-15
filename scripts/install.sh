@@ -25,18 +25,24 @@ echo -e "${YELLOW}📦 Установка зависимостей...${NC}"
 apt-get update -qq
 apt-get install -y python3-evdev python3-pyqt5 xclip xdotool
 
-echo -e "${YELLOW}📁 Копирование файлов...${NC}"
-# Копируем основной скрипт
-install -m 755 lswitch.py /usr/local/bin/lswitch
+echo -e "${YELLOW}📁 Установка пакета и копирование GUI...${NC}"
+# Предпочтительная установка через pip (если доступна) — это установит пакет и консольный скрипт
+if command -v python3 >/dev/null 2>&1; then
+    echo "   Попытка: python3 -m pip install --upgrade ."
+    if python3 -m pip install --upgrade .; then
+        echo "   ✓ Пакет установлен через pip"
+    else
+        echo "   ⚠️  pip install завершился с ошибкой — выполню fallback copy"
+        install -m 755 lswitch.py /usr/local/bin/lswitch || true
+    fi
+else
+    echo "   ⚠️ python3 не найден — выполняю fallback copy"
+    install -m 755 lswitch.py /usr/local/bin/lswitch || true
+fi
 
-# Копируем модули
-install -m 644 dictionary.py /usr/local/bin/dictionary.py
-install -m 644 ngrams.py /usr/local/bin/ngrams.py
-install -m 644 user_dictionary.py /usr/local/bin/user_dictionary.py
-
-# Копируем GUI версии
-install -m 755 lswitch_tray.py /usr/local/bin/lswitch-tray  # Старая версия (запускает процесс)
-install -m 755 lswitch_control.py /usr/local/bin/lswitch-control  # Новая версия (панель управления)
+# GUI: панель управления всё ещё копируем в системные пути (desktop file и исполняемый скрипт)
+install -m 755 lswitch_control.py /usr/local/bin/lswitch-control || true
+install -m 755 lswitch_tray.py /usr/local/bin/lswitch-tray || true
 
 # Копируем иконку
 install -Dm644 lswitch.svg /usr/share/pixmaps/lswitch.svg

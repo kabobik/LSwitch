@@ -95,7 +95,7 @@ sudo systemctl status lswitch
 sudo journalctl -u lswitch -n 50
 
 # Пробуем запустить вручную
-sudo /usr/bin/python3 -u /usr/local/bin/lswitch
+sudo python3 -u -m lswitch
 ```
 
 ### 3. Нет python3-evdev

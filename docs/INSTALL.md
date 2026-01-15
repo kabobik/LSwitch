@@ -11,7 +11,7 @@ sudo ./install.sh
 
 Скрипт автоматически:
 - Установит python3-evdev
-- Скопирует lswitch в /usr/local/bin/
+- Установит пакет (через pip) и создаст консольный скрипт `lswitch` (альтернативно `python3 -m lswitch`)
 - Создаст конфигурацию в /etc/lswitch/
 - Установит systemd сервис
 - Предложит включить автозапуск
@@ -126,11 +126,11 @@ make uninstall
 # Проверьте логи
 sudo journalctl -u lswitch -n 50
 
-# Проверьте права
-ls -l /usr/local/bin/lswitch
+# Проверьте установку и права на команду `lswitch`
+command -v lswitch || echo "lswitch не найден; попробуйте: python3 -m lswitch"
 
 # Попробуйте запустить вручную
-sudo /usr/local/bin/lswitch
+sudo python3 -m lswitch
 ```
 
 ### Не работает конвертация

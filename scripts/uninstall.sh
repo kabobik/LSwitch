@@ -29,14 +29,21 @@ systemctl disable lswitch 2>/dev/null || true
 pkill -f lswitch-tray 2>/dev/null || true
 pkill -f lswitch_tray.py 2>/dev/null || true
 
-echo -e "${YELLOW}Удаление файлов...${NC}"
+echo -e "${YELLOW}Удаление файлов и пакета...${NC}"
+# Попытка удалить пакет через pip
+if command -v python3 >/dev/null 2>&1; then
+    echo "   Попытка: sudo python3 -m pip uninstall -y lswitch"
+    sudo python3 -m pip uninstall -y lswitch || echo "   pip uninstall failed or package not found; продолжу удаление файлов"
+fi
+
+# Удаление unit и бинарников (fallback)
 rm -f /etc/systemd/system/lswitch.service
-rm -f /usr/local/bin/lswitch
-rm -f /usr/local/bin/lswitch-tray
-rm -f /usr/share/pixmaps/lswitch.svg
-rm -f /usr/share/applications/lswitch-tray.desktop
-rm -f /etc/xdg/autostart/lswitch-tray.desktop
-rm -rf /etc/lswitch
+rm -f /usr/local/bin/lswitch || true
+rm -f /usr/local/bin/lswitch-tray || true
+rm -f /usr/share/pixmaps/lswitch.svg || true
+rm -f /usr/share/applications/lswitch-tray.desktop || true
+rm -f /etc/xdg/autostart/lswitch-tray.desktop || true
+rm -rf /etc/lswitch || true
 
 echo -e "${YELLOW}Перезагрузка systemd...${NC}"
 systemctl daemon-reload

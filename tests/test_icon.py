@@ -6,13 +6,19 @@
 
 import sys
 import os
+import pytest
+
+# Mark module as GUI-dependent and skip if PyQt5 is not available
+pytestmark = pytest.mark.gui
+try:
+    from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
+    from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor
+    from PyQt5.QtCore import Qt
+except Exception:
+    pytest.skip("PyQt5 not available", allow_module_level=True)
 
 # Добавляем родительскую директорию в путь
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
-from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
-from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor
-from PyQt5.QtCore import Qt
 
 
 def create_simple_icon(color):

@@ -48,29 +48,28 @@ echo -e "${YELLOW}📦 Установка зависимостей...${NC}"
 apt-get update -qq
 apt-get install -y python3-evdev python3-pyqt5 xclip xdotool
 
-echo -e "${YELLOW}📁 Копирование файлов...${NC}"
-# Копируем основной скрипт
-install -m 755 lswitch.py /usr/local/bin/lswitch
+echo -e "${YELLOW}📁 Установка пакета и копирование GUI...${NC}"
+# Предпочтительная установка через pip — установит пакет и консольный скрипт
+if command -v python3 >/dev/null 2>&1; then
+    echo "   Попытка: python3 -m pip install --upgrade ."
+    if python3 -m pip install --upgrade .; then
+        echo "   ✓ Пакет установлен через pip"
+    else
+        echo "   ⚠️  pip install завершился с ошибкой — выполню fallback копированием файлов"
+        install -m 755 lswitch.py /usr/local/bin/lswitch || true
+        install -m 644 dictionary.py /usr/local/bin/dictionary.py || true
+        install -m 644 ngrams.py /usr/local/bin/ngrams.py || true
+        install -m 644 user_dictionary.py /usr/local/bin/user_dictionary.py || true
+    fi
+else
+    echo "   ⚠️ python3 не найден — выполняю fallback копированием файлов"
+    install -m 755 lswitch.py /usr/local/bin/lswitch || true
+    install -m 644 dictionary.py /usr/local/bin/dictionary.py || true
+fi
 
-# Копируем модули
-install -m 644 dictionary.py /usr/local/bin/dictionary.py
-install -m 644 ngrams.py /usr/local/bin/ngrams.py
-install -m 644 user_dictionary.py /usr/local/bin/user_dictionary.py
-install -m 644 __version__.py /usr/local/bin/__version__.py
-
-# Копируем адаптеры и утилиты
-mkdir -p /usr/local/lib/lswitch
-cp i18n.py /usr/local/lib/lswitch/i18n.py
-cp __version__.py /usr/local/lib/lswitch/__version__.py
-cp -r adapters /usr/local/lib/lswitch/
-cp -r utils /usr/local/lib/lswitch/
-chmod -R 755 /usr/local/lib/lswitch
-
-# Копируем GUI панель управления (lswitch-control)
-install -m 755 lswitch_control.py /usr/local/bin/lswitch-control
-
-# Копируем иконку (программная генерация в runtime)
-install -Dm644 assets/lswitch.svg /usr/share/pixmaps/lswitch.svg
+# GUI (иконка и .desktop оставляем как раньше)
+install -m 755 lswitch_control.py /usr/local/bin/lswitch-control || true
+install -Dm644 assets/lswitch.svg /usr/share/pixmaps/lswitch.svg || true
 
 # Копируем .desktop файл для системного меню
 install -Dm644 config/lswitch-control.desktop /usr/share/applications/lswitch-control.desktop
