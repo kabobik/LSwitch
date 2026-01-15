@@ -281,6 +281,13 @@ class LSwitch:
         from utils.buffer import InputBuffer
         self.buffer = InputBuffer(maxlen=1000)
 
+        # InputHandler encapsulates input/event handling logic
+        try:
+            from lswitch.input import InputHandler
+            self.input_handler = InputHandler(self)
+        except Exception:
+            self.input_handler = None
+
         # Проекционные свойства для обратной совместимости
         self.had_backspace = False  # Флаг: был ли backspace (пользователь исправляет)
         self.consecutive_backspace_repeats = 0  # Счетчик подряд идущих repeat Backspace
@@ -691,25 +698,16 @@ class LSwitch:
                 self.fake_kb.syn()
     
     def replay_events(self, events):
-        """Воспроизводит записанные события клавиатуры"""
-        shift_codes = {ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT}
-        
-        if self.config.get('debug'):
-            shift_events = [e for e in events if e.code in shift_codes]
-            letter_events = [e for e in events if e.code not in shift_codes and e.value == 0]
-            print(f"  Воспроизвожу: {len(events)} событий ({len(shift_events)} Shift, {len(letter_events)} букв)", flush=True)
-            
-            # Показываем первые 5 событий для диагностики
-            print("  Первые события:", flush=True)
-            for i, e in enumerate(events[:5]):
-                shift_str = "SHIFT" if e.code in shift_codes else f"KEY_{e.code}"
-                val_str = "↓" if e.value == 1 else "↑"
-                print(f"    {i+1}. {shift_str} {val_str}", flush=True)
-        
+        """Delegate to InputHandler.replay_events when available."""
+        if getattr(self, 'input_handler', None):
+            return self.input_handler.replay_events(events)
+        # Fallback: direct write
         for event in events:
-            # Без задержки - evdev обрабатывает события моментально
-            self.fake_kb.write(ecodes.EV_KEY, event.code, event.value)
-            self.fake_kb.syn()
+            try:
+                self.fake_kb.write(ecodes.EV_KEY, event.code, event.value)
+                self.fake_kb.syn()
+            except Exception:
+                pass
     
     def clear_buffer(self):
         """Очищает буфер событий и текстовый буфер"""
@@ -1125,6 +1123,9 @@ class LSwitch:
         it can be invoked and tested independently from low-level event
         handling.
         """
+        # Delegate to InputHandler if available
+        if getattr(self, 'input_handler', None):
+            return self.input_handler.on_double_shift()
         # Diagnostic snapshot
         try:
             has_sel = self.has_selection()
@@ -1180,6 +1181,9 @@ class LSwitch:
         self.last_shift_press = 0
     
     def handle_event(self, event):
+        # Delegate to InputHandler if present (preferred path)
+        if getattr(self, 'input_handler', None):
+            return self.input_handler.handle_event(event)
         """Обработка событий клавиатуры"""
         # For debugging: only log blocked space events when debug is enabled
         if event.type == ecodes.EV_KEY and event.code == ecodes.KEY_SPACE:
