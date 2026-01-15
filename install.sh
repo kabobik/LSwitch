@@ -140,8 +140,9 @@ install -Dm644 assets/lswitch.svg /usr/share/pixmaps/lswitch.svg
 
 # Копируем .desktop файл для системного меню
 install -Dm644 config/lswitch-control.desktop /usr/share/applications/lswitch-control.desktop
-# Копируем админский лаунчер (запускает GUI с pkexec для редактирования системных конфигов)
-install -Dm644 config/lswitch-control-admin.desktop /usr/share/applications/lswitch-control-admin.desktop
+# Админский лаунчер не устанавливаем в системное меню по умолчанию
+# Админ-панель доступна только через секретный триггер (5 кликов по заголовку меню) и запускается через pkexec
+# (Если всё же нужно установить админский лаунчер вручную, выполните: install -Dm644 config/lswitch-control-admin.desktop /usr/share/applications/lswitch-control-admin.desktop)
 
 # Предложим включить автозапуск GUI панели для пользователя X-сессии
 # Если скрипт не интерактивен, просто выведем инструкцию
