@@ -21,7 +21,7 @@ sudo ./install.sh
 ```bash
 # By default LSwitch uses per-user config: `~/.config/lswitch/config.json`.
 # Installer will create a user config for the detected X user during installation.
-# System-wide config `/etc/lswitch/config.json` is supported for administrative control.
+# Configuration is user-scoped (`~/.config/lswitch/config.json`). The application will create a default config if none exists.
 # If present, the `allow_user_overrides` flag in `/etc/lswitch/config.json` controls whether
 # users can override system settings with their local config (default: true).
 
