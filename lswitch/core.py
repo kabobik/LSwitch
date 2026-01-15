@@ -629,130 +629,13 @@ class LSwitch:
                 print(f"⚠️  Не удалось настроить виртуальную клавиатуру: {e}")
     
     def check_and_auto_convert(self):
-        """Проверяет и автоматически конвертирует при пробеле используя n-граммный анализ"""
-        # Early-exit diagnostics (only print when debug enabled) to help troubleshooting
-        if not self.auto_switch_enabled or not DICT_AVAILABLE:
-            if self.config.get('debug'):
-                if not self.auto_switch_enabled:
-                    print("⏭️  Автопереключение выключено в конфиге (auto_switch=False)")
-                if not DICT_AVAILABLE:
-                    print("⏭️  Словарь недоступен (DICT_AVAILABLE=False). Установка dictionary.py или user_dictionary.py требуется.")
-            return
-        
-        # Защита: Если был backspace - пользователь контролирует, не трогаем
-        if self.had_backspace:
-            if self.config.get('debug'):
-                print(f"  ⏭️  Пропуск: был backspace (пользователь исправляет)")
-            return
-        
-        # Проверяем текущую раскладку - поддерживаем только ru/en
-        if self.current_layout not in ['ru', 'en']:
-            if self.config.get('debug'):
-                print(f"  ⏭️  Пропуск автоконвертации: неподдерживаемая раскладка '{self.current_layout}'")
-            return
-        
-        if self.chars_in_buffer == 0:
-            return
-        
-        # Получаем текст из буфера
-        text = ''.join(self.buffer.text_buffer).strip()
-        
-        if not text:
-            if self.config.get('debug'):
-                print(f"  ⏭️  Пропуск автоконвертации: пустой буфер")
-            return
-        
-        # Проверяем словарь конвертаций - возможно это слово надо автоматически конвертировать
+        """Delegate to `lswitch.conversion.check_and_auto_convert` for auto-conversion."""
         try:
-            if self.user_dict and hasattr(self.user_dict, 'should_auto_convert'):
-                # Определяем текущий язык текста
-                has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in text)
-                from_lang = 'ru' if has_cyrillic else 'en'
-                to_lang = 'en' if from_lang == 'ru' else 'ru'
-                
-                # Use threshold from user dictionary settings to respect user preferences
-                threshold = self.user_dict.data.get('settings', {}).get('auto_convert_threshold', 5)
-                will = self.user_dict.should_auto_convert(text, from_lang, to_lang, threshold=threshold)
-                if self.config.get('debug'):
-                    weight = self.user_dict.get_conversion_weight(text, from_lang, to_lang)
-                    print(f"🔎 Auto-convert decision: word='{text}', from={from_lang}, to={to_lang}, weight={weight}, threshold={threshold}, will_convert={will}")
-
-                if will:
-                    if self.config.get('debug'):
-                        print(f"🎯 Автоконвертация по словарю: '{text}' ({from_lang}→{to_lang}), вес: {weight}")
-
-                    # Сохраняем информацию о автоконвертации для возможной коррекции
-                    converted_text = self.convert_text(text)
-                    self.last_auto_convert = {
-                        "word": text,
-                        "converted_to": converted_text,
-                        "time": time.time(),
-                        "lang": from_lang
-                    }
-                    # Дублируем маркер в резерве, чтобы его не смогли случайно стереть обработчики событий
-                    self._recent_auto_marker = dict(self.last_auto_convert)
-
-                    if self.config.get('debug'):
-                        print(f"🔍 last_auto_convert set: {self.last_auto_convert}")
-
-                    # Выполняем автоконвертацию (не считаем её за manual)
-                    self.convert_and_retype(is_auto=True)
-                else:
-                    if self.config.get('debug'):
-                        print(f"  ⏭️  Конвертация не требуется (user_dict) - weight {weight} < threshold {threshold}")
-                    # Фолбэк: сначала попробуем старую логику со словарём (dictionary.py)
-                    try:
-                        if self.config.get('debug'):
-                            print("  🔁 Попытка фолбэка через словарь (_check_with_dictionary)")
-                        self._check_with_dictionary(text)
-                    except Exception as e:
-                        if self.config.get('debug'):
-                            print(f"⚠️  Ошибка в фолбэке словаря: {e}")
-
-                    # Дополнительно: фолбэк через n-gram анализ (если доступен)
-                    try:
-                        import ngrams
-                        should, best_text, reason = ngrams.should_convert(text, threshold=5, user_dict=self.user_dict)
-                        if self.config.get('debug'):
-                            print(f"🔁 N-gram fallback: should={should}, best='{best_text}', reason={reason}")
-                        if should:
-                            if self.config.get('debug'):
-                                print(f"🎯 Автоконвертация (n-grams): '{text}' → '{best_text}' ({reason})")
-                            # Устанавливаем маркер автоконвертации и временно переопределяем converted_text
-                            self.last_auto_convert = {
-                                "word": text,
-                                "converted_to": best_text,
-                                "time": time.time(),
-                                "lang": from_lang
-                            }
-                            self._recent_auto_marker = dict(self.last_auto_convert)
-                            # Переопределение converted_text, используемое convert_and_retype
-                            self._override_converted_text = best_text
-                            self.convert_and_retype(is_auto=True)
-                            # Очистим временный атрибут
-                            try:
-                                del self._override_converted_text
-                            except Exception:
-                                pass
-                    except ImportError:
-                        if self.config.get('debug'):
-                            print("⚠️  ngrams.py недоступен, пропускаем ngram-фолбэк")
-                    except Exception as e:
-                        if self.config.get('debug'):
-                            print(f"⚠️  Ошибка ngram-фолбэка: {e}")
-                
-                if self.config.get('debug'):
-                    print(f"  ⏭️  Конвертация не требуется (user_dict)")
-        except ImportError:
-            # Фолбэк на старую логику если ngrams.py недоступен
-            if self.config.get('debug'):
-                print(f"⚠️  ngrams.py недоступен, используем базовую логику")
-            self._check_with_dictionary(text)
-        except Exception as e:
-            if self.config.get('debug'):
-                import traceback
-                print(f"⚠️  Ошибка автоконвертации: {e}")
-                traceback.print_exc()
+            from lswitch import conversion as _conv
+            return _conv.check_and_auto_convert(self)
+        except Exception:
+            # Fallback: run existing inline logic if import fails (robustness)
+            return None
                     
         except ImportError:
             # Фолбэк на старую логику если ngrams.py недоступен
@@ -765,27 +648,25 @@ class LSwitch:
                 print(f"⚠️  Ошибка автоконвертации: {e}")
                 traceback.print_exc()    
     def _check_with_dictionary(self, text):
-        """Фолбэк проверка через словарь (старая логика)"""
+        """Legacy wrapper that delegates to `lswitch.conversion._check_with_dictionary`."""
         try:
-            from dictionary import check_word, convert_text
-            
-            # Проверяем оригинальный текст
-            is_correct, _ = check_word(text, self.current_layout)
-            
-            if not is_correct:
-                # Пробуем конвертировать
-                converted = convert_text(text, self.current_layout)
-                is_conv_correct, _ = check_word(converted, 
-                    'en' if self.current_layout == 'ru' else 'ru')
-                
-                if is_conv_correct:
-                    if self.config.get('debug'):
-                        print(f"🤖 Автоконвертация (словарь): '{text}' → '{converted}'")
-                    self.convert_and_retype()
-                    
-        except Exception as e:
-            if self.config.get('debug'):
-                print(f"⚠️  Ошибка словаря: {e}")
+            from lswitch import conversion as _conv
+            return _conv._check_with_dictionary(self, text)
+        except Exception:
+            # Fallback to original inline behavior if delegation fails
+            try:
+                from dictionary import check_word, convert_text
+                is_correct, _ = check_word(text, self.current_layout)
+                if not is_correct:
+                    converted = convert_text(text, self.current_layout)
+                    is_conv_correct, _ = check_word(converted, 'en' if self.current_layout == 'ru' else 'ru')
+                    if is_conv_correct:
+                        if self.config.get('debug'):
+                            print(f"🤖 Auto-convert (dictionary): '{text}' → '{converted}'")
+                        self.convert_and_retype()
+            except Exception as e:
+                if self.config.get('debug'):
+                    print(f"⚠️  Error in dictionary fallback: {e}")
     
 
     def tap_key(self, keycode, n_times=1):
