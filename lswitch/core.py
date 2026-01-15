@@ -323,14 +323,21 @@ class LSwitch:
 
         # Start background threads and runtime integrations only if requested
         if start_threads:
-            # Запускаем поток мониторинга раскладки
-            self.layout_thread = threading.Thread(target=self.monitor_layout_changes, daemon=True)
-            self.layout_thread.start()
-            
-            # Запускаем поток мониторинга файла с раскладками
-            self.layouts_file_monitor_thread = threading.Thread(target=self.monitor_layouts_file, daemon=True)
-            self.layouts_file_monitor_thread.start()
-            
+            # Use LayoutMonitor to manage layout polling and runtime file monitoring
+            try:
+                from lswitch.monitor import LayoutMonitor
+                self.layout_monitor = LayoutMonitor(self)
+                self.layout_monitor.start()
+                # Keep old attributes for backwards compatibility
+                self.layout_thread = self.layout_monitor.thread_layout
+                self.layouts_file_monitor_thread = self.layout_monitor.thread_file
+            except Exception:
+                # Fallback to legacy threads if monitor import fails
+                self.layout_thread = threading.Thread(target=self.monitor_layout_changes, daemon=True)
+                self.layout_thread.start()
+                self.layouts_file_monitor_thread = threading.Thread(target=self.monitor_layouts_file, daemon=True)
+                self.layouts_file_monitor_thread.start()
+
             # Применяем раскладки к виртуальному устройству (иначе KDE глючит)
             self.configure_virtual_keyboard_layouts()
 
