@@ -20,6 +20,6 @@ def test_admin_policy_disables_actions(monkeypatch, tmp_path):
     # The actions should be disabled
     assert not panel.auto_switch_action.isEnabled()
     assert not panel.user_dict_action.isEnabled()
-    assert not panel.apply_global_default_action.isEnabled()
-    # Apply now should still be enabled
-    assert panel.apply_global_now_action.isEnabled()
+    # Global-apply actions are no longer part of the user menu
+    assert not hasattr(panel, 'apply_global_default_action')
+    assert not hasattr(panel, 'apply_global_now_action')

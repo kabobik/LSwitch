@@ -821,13 +821,11 @@ class LSwitch:
             'allow_user_overrides': True
         }
 
-        # Allow overriding paths for tests via environment variables
-        system_path = os.environ.get('LSWITCH_TEST_SYSTEM_CONFIG', '/etc/lswitch/config.json')
+        # User-only config mode: only load ~/.config/lswitch/config.json (tests may override)
         user_path = os.environ.get('LSWITCH_TEST_USER_CONFIG', os.path.expanduser('~/.config/lswitch/config.json'))
 
         config = default_config.copy()
 
-        # Helper to load JSON with comment-stripping fallback
         def _load_json_file(path):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
@@ -841,28 +839,26 @@ class LSwitch:
                 except Exception:
                     return None
 
-        # 1) Load system config if present
-        system_cfg = _load_json_file(system_path) if os.path.exists(system_path) else None
-        if system_cfg:
-            config.update(system_cfg)
-            print(f"✓ Системный конфиг загружен: {system_path}", flush=True)
-        else:
-            if os.path.exists(system_path) and self.config.get('debug') if hasattr(self, 'config') else False:
-                print(f"⚠️  Не удалось прочитать системный конфиг: {system_path}", flush=True)
-
-        # 2) Load user config and overlay if allowed
+        # Load or create user config
         user_cfg = _load_json_file(user_path) if os.path.exists(user_path) else None
         if user_cfg:
-            if config.get('allow_user_overrides', True):
-                config.update(user_cfg)
-                print(f"✓ Персональный конфиг применён: {user_path}", flush=True)
-            else:
-                print(f"⚠️  Игнорируем персональный конфиг {user_path} — переопределения отключены администратором", flush=True)
+            config.update(user_cfg)
+            print(f"✓ Персональный конфиг применён: {user_path}", flush=True)
+        else:
+            # If not present, create a default user config file atomically
+            try:
+                dirname = os.path.dirname(user_path)
+                if not os.path.exists(dirname):
+                    os.makedirs(dirname, exist_ok=True)
+                with open(user_path, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, indent=2)
+                print(f"✓ Создан персональный конфиг: {user_path}", flush=True)
+            except Exception:
+                print(f"⚠️ Не удалось создать персональный конфиг: {user_path}", flush=True)
 
-        # Track paths for reload and UI
-        config['_system_config_path'] = system_path if system_cfg else None
-        config['_user_config_path'] = user_path if user_cfg else None
-        config['_config_path'] = config['_system_config_path'] or config['_user_config_path'] or system_path
+        # Track path for reload and UI
+        config['_user_config_path'] = user_path
+        config['_config_path'] = user_path
 
         print(f"✓ Конфиг загружен (итоговый): {config['_config_path']}", flush=True)
         return config
@@ -882,9 +878,6 @@ class LSwitch:
             status = "включено" if self.auto_switch_enabled else "выключено"
             print(f"✓ Автопереключение {status}", flush=True)
 
-        # Inform if user overrides are disabled
-        if self.config.get('_system_config_path') and not self.config.get('allow_user_overrides', True):
-            print("⚠️  Персональные конфиги игнорируются (allow_user_overrides=false в системном конфиге)", flush=True)
 
         print("✓ Конфигурация перезагружена", flush=True)
         self.config_reload_requested = False

@@ -91,6 +91,7 @@ class I18n:
                 'using_native_menu': 'Using native QMenu',
                 'detected_layouts': '✓ Layouts from KDE config: {layouts}',
                 'panel_started': 'LSwitch Control Panel started',
+                
             },
             'ru': {
                 # Пункты меню
@@ -147,6 +148,7 @@ class I18n:
                 'using_native_menu': 'Используется нативное QMenu',
                 'detected_layouts': '✓ Раскладки из конфига KDE: {layouts}',
                 'panel_started': 'Панель управления LSwitch запущена',
+                
             }
         }
         
