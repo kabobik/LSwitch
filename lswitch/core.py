@@ -67,62 +67,14 @@ except ImportError as e:
     print(f"⚠️  python-xlib не найден: {e}")
     print("   sudo apt install python3-xlib")
 
-# Загружаем libX11 для XKB функций
-try:
-    libX11_path = ctypes.util.find_library('X11')
-    if libX11_path:
-        libX11 = ctypes.CDLL(libX11_path)
-        
-        # Структура XkbStateRec для получения состояния XKB
-        class XkbStateRec(ctypes.Structure):
-            _fields_ = [
-                ("group", ctypes.c_ubyte),           # Текущая группа раскладки
-                ("locked_group", ctypes.c_ubyte),
-                ("base_group", ctypes.c_ushort),
-                ("latched_group", ctypes.c_ushort),
-                ("mods", ctypes.c_ubyte),
-                ("base_mods", ctypes.c_ubyte),
-                ("latched_mods", ctypes.c_ubyte),
-                ("locked_mods", ctypes.c_ubyte),
-                ("compat_state", ctypes.c_ubyte),
-                ("grab_mods", ctypes.c_ubyte),
-                ("compat_grab_mods", ctypes.c_ubyte),
-                ("lookup_mods", ctypes.c_ubyte),
-                ("compat_lookup_mods", ctypes.c_ubyte),
-                ("ptr_buttons", ctypes.c_ushort),
-            ]
-        
-        # Настройка XKB функций
-        libX11.XOpenDisplay.argtypes = [ctypes.c_char_p]
-        libX11.XOpenDisplay.restype = ctypes.c_void_p
-        
-        libX11.XkbGetState.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(XkbStateRec)]
-        libX11.XkbGetState.restype = ctypes.c_int
-        
-        libX11.XkbLockGroup.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
-        libX11.XkbLockGroup.restype = ctypes.c_int
-        
-        libX11.XFlush.argtypes = [ctypes.c_void_p]
-        libX11.XFlush.restype = ctypes.c_int
-        
-        libX11.XCloseDisplay.argtypes = [ctypes.c_void_p]
-        
-        # Функции для получения символов из KeyCode
-        libX11.XkbKeycodeToKeysym.argtypes = [ctypes.c_void_p, ctypes.c_ubyte, ctypes.c_uint, ctypes.c_uint]
-        libX11.XkbKeycodeToKeysym.restype = ctypes.c_ulong
-        
-        libX11.XKeysymToString.argtypes = [ctypes.c_ulong]
-        libX11.XKeysymToString.restype = ctypes.c_char_p
-        
-        XKB_AVAILABLE = True
-    else:
-        XKB_AVAILABLE = False
-        libX11 = None
-        print("⚠️  libX11 не найдена")
-except Exception as e:
-    XKB_AVAILABLE = False
-    libX11 = None
-    print(f"⚠️  Ошибка загрузки XKB: {e}")
+from lswitch.xkb import (
+    XKB_AVAILABLE,
+    libX11,
+    XkbStateRec,
+    get_layouts_from_xkb,
+    get_current_layout,
+    keycode_to_char,
+)
 
 # Импортируем словарь для автопереключения
 try:
@@ -516,181 +468,16 @@ class LSwitch:
         self.last_config_check = time.time()
     
     def get_layouts_from_xkb(self):
-        """Получает список раскладок - сначала из файла от control panel, затем через setxkbmap"""
-        # Сначала пробуем прочитать из файла, который публикует lswitch_control.py
-        try:
-            runtime_dir = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
-            layouts_file = f'{runtime_dir}/lswitch_layouts.json'
-            
-            if os.path.exists(layouts_file):
-                # Проверяем свежесть файла (не старше 60 секунд)
-                import time as time_module
-                file_age = time_module.time() - os.path.getmtime(layouts_file)
-                
-                if file_age < 60:
-                    with open(layouts_file, 'r') as f:
-                        data = json.load(f)
-                        layouts = data.get('layouts', [])
-                        
-                        if len(layouts) >= 2:
-                            if self.config.get('debug'):
-                                print(f"✓ Раскладки из control panel: {layouts}", flush=True)
-                            return layouts
-        except Exception as e:
-            if self.config.get('debug'):
-                print(f"⚠️  Не удалось прочитать раскладки из файла: {e}", flush=True)
-        
-        # Фолбэк: читаем через setxkbmap
-        try:
-            result = subprocess.run(
-                ['setxkbmap', '-query'],
-                capture_output=True, text=True, timeout=2
-            )
-            
-            for line in result.stdout.split('\n'):
-                if line.startswith('layout:'):
-                    layouts_str = line.split(':', 1)[1].strip()
-                    layouts = [l.strip() for l in layouts_str.split(',')]
-                    # Нормализуем: us -> en
-                    result = ['en' if l == 'us' else l for l in layouts if l]
-                    
-                    if len(result) >= 2:
-                        if self.config.get('debug'):
-                            print(f"✓ Раскладки: {result}", flush=True)
-                        return result
-                    elif len(result) == 1:
-                        if self.config.get('debug'):
-                            print(f"⚠️  Обнаружена только 1 раскладка: {result}", flush=True)
-                        return result
-                        
-        except Exception as e:
-            if self.config.get('debug'):
-                print(f"⚠️  Ошибка чтения раскладок: {e}", flush=True)
-        
-        # Фолбэк - по умолчанию
-        if self.config.get('debug'):
-            print("⚠️  Использую fallback: ['en', 'ru']", flush=True)
-        return ['en', 'ru']
+        """Delegate to `lswitch.xkb.get_layouts_from_xkb` (keeps debug from config)."""
+        return get_layouts_from_xkb(debug=self.config.get('debug'))
     
     def get_current_layout(self):
-        """Получает текущую активную раскладку через XKB GetState"""
-        if not XKB_AVAILABLE or not libX11:
-            # Fallback к первой раскладке
-            return self.layouts[0] if self.layouts else 'en'
-        
-        try:
-            # Открываем Display
-            display_ptr = libX11.XOpenDisplay(None)
-            if not display_ptr:
-                return self.layouts[0] if self.layouts else 'en'
-            
-            try:
-                # Создаём структуру для результата
-                state = XkbStateRec()
-                
-                # Вызываем XkbGetState (0x100 = XkbUseCoreKbd)
-                status = libX11.XkbGetState(display_ptr, 0x100, ctypes.byref(state))
-                
-                if status == 0:  # Success
-                    group = state.group
-                    # Возвращаем соответствующую раскладку
-                    if group < len(self.layouts):
-                        return self.layouts[group]
-                    else:
-                        return self.layouts[0] if self.layouts else 'en'
-            finally:
-                libX11.XCloseDisplay(display_ptr)
-        except Exception as e:
-            if self.config.get('debug'):
-                print(f"⚠️  Ошибка получения раскладки через XKB: {e}")
-        
-        return self.layouts[0] if self.layouts else 'en'
+        """Delegate to `lswitch.xkb.get_current_layout` using cached layouts."""
+        return get_current_layout(self.layouts, debug=self.config.get('debug'))
     
     def keycode_to_char(self, keycode, layout='en', shift=False):
-        """Преобразует evdev keycode в символ согласно раскладке используя XKB"""
-        if not XKB_AVAILABLE or not libX11:
-            return ''
-        
-        try:
-            # Открываем Display
-            display_ptr = libX11.XOpenDisplay(None)
-            if not display_ptr:
-                return ''
-            
-            try:
-                # Преобразуем evdev keycode в X11 keycode (evdev + 8)
-                x11_keycode = keycode + 8
-                
-                # Определяем группу раскладки (0=en, 1=ru, ...)
-                group = 0
-                if layout == 'en':
-                    # Ищем индекс английской раскладки
-                    for i, lay in enumerate(self.layouts):
-                        if lay == 'en':
-                            group = i
-                            break
-                elif layout == 'ru':
-                    # Ищем индекс русской раскладки
-                    for i, lay in enumerate(self.layouts):
-                        if lay == 'ru':
-                            group = i
-                            break
-                
-                # level: 0 = без shift, 1 = с shift
-                level = 1 if shift else 0
-                
-                # Получаем KeySym для указанной группы и уровня
-                keysym = libX11.XkbKeycodeToKeysym(display_ptr, x11_keycode, group, level)
-                
-                if keysym == 0:
-                    return ''
-                
-                # Конвертируем KeySym в строку
-                keysym_str = libX11.XKeysymToString(keysym)
-                if not keysym_str:
-                    return ''
-                
-                keysym_name = keysym_str.decode('utf-8')
-                
-                # Простые символы (1 буква) - возвращаем как есть
-                if len(keysym_name) == 1:
-                    return keysym_name
-                
-                # Cyrillic буквы вида "Cyrillic_a" -> "а"
-                if keysym_name.startswith('Cyrillic_'):
-                    cyrillic_map = {
-                        'io': 'ё', 'IO': 'Ё',
-                        'a': 'а', 'A': 'А', 'be': 'б', 'BE': 'Б',
-                        've': 'в', 'VE': 'В', 'ghe': 'г', 'GHE': 'Г',
-                        'de': 'д', 'DE': 'Д', 'ie': 'е', 'IE': 'Е',
-                        'zhe': 'ж', 'ZHE': 'Ж', 'ze': 'з', 'ZE': 'З',
-                        'i': 'и', 'I': 'И', 'shorti': 'й', 'SHORTI': 'Й',
-                        'ka': 'к', 'KA': 'К', 'el': 'л', 'EL': 'Л',
-                        'em': 'м', 'EM': 'М', 'en': 'н', 'EN': 'Н',
-                        'o': 'о', 'O': 'О', 'pe': 'п', 'PE': 'П',
-                        'er': 'р', 'ER': 'Р', 'es': 'с', 'ES': 'С',
-                        'te': 'т', 'TE': 'Т', 'u': 'у', 'U': 'У',
-                        'ef': 'ф', 'EF': 'Ф', 'ha': 'х', 'HA': 'Х',
-                        'tse': 'ц', 'TSE': 'Ц', 'che': 'ч', 'CHE': 'Ч',
-                        'sha': 'ш', 'SHA': 'Ш', 'shcha': 'щ', 'SHCHA': 'Щ',
-                        'hardsign': 'ъ', 'HARDSIGN': 'Ъ',
-                        'yeru': 'ы', 'YERU': 'Ы',
-                        'softsign': 'ь', 'SOFTSIGN': 'Ь',
-                        'e': 'э', 'E': 'Э', 'yu': 'ю', 'YU': 'Ю',
-                        'ya': 'я', 'YA': 'Я'
-                    }
-                    key = keysym_name[9:]  # Убираем "Cyrillic_"
-                    return cyrillic_map.get(key, '')
-                
-                return ''
-                
-            finally:
-                libX11.XCloseDisplay(display_ptr)
-        except Exception as e:
-            if self.config.get('debug'):
-                if self.config.get('debug'):
-                    print(f"⚠️  Ошибка keycode_to_char({keycode}, {layout}): {e}")
-            return ''
+        """Delegate to `lswitch.xkb.keycode_to_char` using current layouts and debug flag."""
+        return keycode_to_char(keycode, layout, self.layouts, shift=shift, debug=self.config.get('debug'))
     
     def get_buffer_text(self):
         """Извлекает текст из буфера событий"""

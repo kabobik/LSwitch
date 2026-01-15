@@ -158,7 +158,14 @@ class I18n:
     
     def t(self, key, **kwargs):
         """Возвращает перевод для ключа с подстановкой параметров"""
-        text = self.translations.get(key, key)
+        # Support two shapes of self.translations:
+        # 1) full mapping {'en': {...}, 'ru': {...}}
+        # 2) already selected language mapping { 'lswitch_control': '...' }
+        if isinstance(self.translations, dict) and 'en' in self.translations and 'ru' in self.translations:
+            lang_map = self.translations.get(self.lang, self.translations.get('en', {}))
+        else:
+            lang_map = self.translations or {}
+        text = lang_map.get(key, key)
         if kwargs:
             try:
                 return text.format(**kwargs)

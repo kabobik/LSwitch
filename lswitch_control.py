@@ -775,6 +775,9 @@ Comment=Control panel for LSwitch
                     except Exception:
                         pass
                     msg = t('autostart_managed_by_system', path=sys_path)
+                    # Ensure system path is visible in message even if translation lookup failed
+                    if sys_path and sys_path not in (msg or ''):
+                        msg = f"Autostart is managed by the system ({sys_path}) and cannot be disabled here"
                     self.showMessage("LSwitch", msg, QSystemTrayIcon.Information, 4000)
                     return
 
