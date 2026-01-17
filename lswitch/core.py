@@ -314,10 +314,17 @@ class LSwitch:
 
         self.config = self.load_config(config_path)
         # Track mtime safely — file may not exist in test environments
-        cfg_path = self.config.get('_config_path', '/etc/lswitch/config.json')
+        cfg_path = self.config.get('_config_path')
+        if cfg_path is None:
+            cfg_path = self.config.get('_user_config_path')
+        if cfg_path is None:
+            cfg_path = '/etc/lswitch/config.json'
         try:
-            self.config_mtime = os.path.getmtime(cfg_path)
-        except (OSError, FileNotFoundError):
+            if isinstance(cfg_path, str):
+                self.config_mtime = os.path.getmtime(cfg_path)
+            else:
+                self.config_mtime = None
+        except (OSError, FileNotFoundError, TypeError):
             self.config_mtime = None
 
         self.last_shift_press = 0
