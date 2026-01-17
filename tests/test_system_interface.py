@@ -54,7 +54,7 @@ def test_replace_system_instance_and_call_wrappers(monkeypatch):
     system_mod.xclip_set('hey', selection='clipboard')
 
     # Ensure adapter code (adapters/x11) uses system module and therefore the mock
-    import adapters.x11 as x11
+    import lswitch.adapters.x11 as x11
     res = x11.get_primary_selection(timeout=0.1)
     assert res == 'clipboard'
     # mock recorded runs

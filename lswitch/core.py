@@ -343,11 +343,11 @@ class LSwitch:
             pass
 
         # Keyboard controller wraps fake_kb operations
-        from utils.keyboard import KeyboardController
+        from lswitch.utils.keyboard import KeyboardController
         self.kb = KeyboardController(self.fake_kb)
         
         # Инкапсулированный буфер ввода
-        from utils.buffer import InputBuffer
+        from lswitch.utils.buffer import InputBuffer
         self.buffer = InputBuffer(maxlen=1000)
 
         # InputHandler encapsulates input/event handling logic
