@@ -1,14 +1,14 @@
-.PHONY: install uninstall start stop restart status enable disable logs clean diagnose
+.PHONY: install uninstall start stop restart status enable disable logs clean test
 
-# Установка
+# Установка (используется setup.py через pip)
 install:
 	@echo "📦 Установка LSwitch..."
-	@sudo bash install.sh
+	@sudo pip3 install -e .
 
 # Удаление
 uninstall:
 	@echo "🗑️  Удаление LSwitch..."
-	@sudo bash uninstall.sh
+	@sudo pip3 uninstall -y lswitch
 
 # Управление сервисом
 start:
@@ -41,31 +41,32 @@ disable:
 logs:
 	@sudo journalctl -u lswitch -f
 
-# Диагностика
-diagnose:
-	@echo "🔍 Диагностика LSwitch..."
-	@sudo bash diagnose.sh
+# Тестирование
+test:
+	@echo "🧪 Запуск тестов..."
+	@pytest -v
 
 # Очистка
 clean:
 	@rm -rf __pycache__
 	@rm -rf *.pyc
 	@rm -rf .pytest_cache
+	@rm -rf build dist *.egg-info
 	@echo "🧹 Очистка завершена"
 
 # Помощь
 help:
 	@echo "LSwitch - Команды управления:"
 	@echo ""
-	@echo "  make install    - Установить в систему"
+	@echo "  make install    - Установить в систему (pip3)"
 	@echo "  make uninstall  - Удалить из системы"
 	@echo "  make start      - Запустить сервис"
 	@echo "  make stop       - Остановить сервис"
-	@echo "  make diagnose   - Запустить диагностику"
 	@echo "  make restart    - Перезапустить сервис"
 	@echo "  make status     - Статус сервиса"
 	@echo "  make enable     - Включить автозапуск"
 	@echo "  make disable    - Отключить автозапуск"
 	@echo "  make logs       - Просмотр логов в реальном времени"
+	@echo "  make test       - Запустить тесты (pytest)"
 	@echo "  make clean      - Очистить временные файлы"
 	@echo ""
