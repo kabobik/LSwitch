@@ -1,4 +1,4 @@
-import adapters.x11 as x11
+import lswitch.adapters.x11 as x11
 
 
 class MockSystem:

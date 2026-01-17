@@ -1,4 +1,4 @@
-import utils.theme as theme
+import lswitch.utils.theme as theme
 
 
 class MockSystem:

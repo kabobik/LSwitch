@@ -1,5 +1,5 @@
 import time
-from conversion import ConversionManager
+from lswitch.conversion import ConversionManager
 
 
 class DummyUserDict:

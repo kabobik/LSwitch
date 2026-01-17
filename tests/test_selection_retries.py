@@ -1,5 +1,5 @@
 import pytest
-from selection import SelectionManager
+from lswitch.selection import SelectionManager
 
 
 class RetryAdapter:

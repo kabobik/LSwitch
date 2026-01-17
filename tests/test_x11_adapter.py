@@ -2,7 +2,7 @@ import importlib
 import types
 import pytest
 
-import adapters.x11 as x11
+import lswitch.adapters.x11 as x11
 
 
 def test_expand_selection_to_space_basic(monkeypatch):

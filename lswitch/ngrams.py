@@ -106,7 +106,7 @@ def evaluate_text_variants(text):
     
     Возвращает: (best_text, conversion_type, score_original, score_best)
     """
-    from dictionary import EN_TO_RU, RU_TO_EN
+    from lswitch.dictionary import EN_TO_RU, RU_TO_EN
     
     # 1. Определяем текущий язык текста
     has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in text)
@@ -154,7 +154,7 @@ def should_convert(text, threshold=10, user_dict=None):
     
     Возвращает: (should_convert: bool, best_text: str, reason: str)
     """
-    from dictionary import RUSSIAN_WORDS, ENGLISH_WORDS, EN_TO_RU, RU_TO_EN
+    from lswitch.dictionary import RUSSIAN_WORDS, ENGLISH_WORDS, EN_TO_RU, RU_TO_EN
     
     # Определяем текущий язык
     has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in text)
@@ -210,7 +210,7 @@ def should_convert(text, threshold=10, user_dict=None):
         # Но если оба score очень низкие (< 0), проверяем словарь
         if score_orig < 0 and score_best < 0:
             try:
-                from dictionary import check_word
+                from lswitch.dictionary import check_word
                 
                 # Проверяем оригинал и конвертированный в словаре
                 is_orig_valid, _ = check_word(text, 'en' if conversion_type == 'en_to_ru' else 'ru')

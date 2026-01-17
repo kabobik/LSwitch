@@ -1,6 +1,6 @@
 import time
 
-from selection import SelectionManager
+from lswitch.selection import SelectionManager
 
 
 class MockX11FailOnce:

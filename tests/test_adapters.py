@@ -9,7 +9,7 @@ import os
 sys.path.insert(0, '/home/anton/VsCode/LSwitch')
 
 # Тестируем определение DE
-from utils.desktop import detect_desktop_environment, detect_display_server, get_environment_info
+from lswitch.utils.desktop import detect_desktop_environment, detect_display_server, get_environment_info
 
 print("=== Тест определения окружения ===")
 de = detect_desktop_environment()
@@ -22,7 +22,7 @@ print(f"Полная информация: {info}")
 print()
 
 # Тестируем получение цветов темы
-from utils.theme import get_theme_colors, get_kde_theme_colors, get_cinnamon_theme_colors
+from lswitch.utils.theme import get_theme_colors, get_kde_theme_colors, get_cinnamon_theme_colors
 
 print("=== Тест получения цветов темы ===")
 colors = get_theme_colors(de)
@@ -30,7 +30,7 @@ print(f"Цвета темы для {de}: {colors}")
 print()
 
 # Тестируем адаптеры
-from adapters import get_adapter, CinnamonAdapter, KDEAdapter
+from lswitch.adapters import get_adapter, CinnamonAdapter, KDEAdapter
 
 print("=== Тест адаптеров ===")
 adapter = get_adapter()

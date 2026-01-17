@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import lswitch as ls_mod
 from lswitch import LSwitch
-from selection import SelectionManager
+from lswitch.selection import SelectionManager
 
 
 class MockX11_Trim:

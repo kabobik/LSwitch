@@ -1,5 +1,5 @@
 import pytest
-from conversion import ConversionManager
+from lswitch.conversion import ConversionManager
 
 
 class DummyBuffer:

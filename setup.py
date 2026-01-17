@@ -24,7 +24,7 @@ setup(
     long_description_content_type='text/markdown',
     author='Anton',
     url='https://github.com/yourusername/lswitch',
-    py_modules=['lswitch_control', 'dictionary', 'ngrams', 'user_dictionary', 'i18n'],
+    py_modules=['lswitch_control'],  # Top-level modules only
     packages=find_packages(exclude=['tests', 'docs']),
     python_requires='>=3.6',
     install_requires=[

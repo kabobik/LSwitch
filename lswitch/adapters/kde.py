@@ -4,8 +4,8 @@
 from PyQt5.QtWidgets import QMenu, QAction
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtCore import Qt
-from adapters.base import BaseGUIAdapter
-from utils.theme import get_kde_theme_colors, get_default_dark_colors
+from lswitch.adapters.base import BaseGUIAdapter
+from lswitch.utils.theme import get_kde_theme_colors, get_default_dark_colors
 
 
 class KDEAdapter(BaseGUIAdapter):

@@ -51,11 +51,11 @@ from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPalette, QCursor, QFo
 from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, QSize
 
 # Импортируем локализацию
-from i18n import t, get_lang
+from lswitch.i18n import t, get_lang
 
 # Импортируем адаптеры
-from adapters import get_adapter
-from utils.desktop import detect_desktop_environment, detect_display_server
+from lswitch.adapters import get_adapter
+from lswitch.utils.desktop import detect_desktop_environment, detect_display_server
 import shutil
 
 

@@ -1,6 +1,6 @@
 import pytest
 from types import SimpleNamespace
-from selection import SelectionManager
+from lswitch.selection import SelectionManager
 
 
 class MockX11:

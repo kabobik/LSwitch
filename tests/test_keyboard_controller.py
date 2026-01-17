@@ -1,5 +1,5 @@
 import types
-from utils.keyboard import KeyboardController
+from lswitch.utils.keyboard import KeyboardController
 
 
 class DummyUInput:

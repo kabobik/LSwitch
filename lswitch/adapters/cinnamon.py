@@ -5,8 +5,8 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QSize
 from PyQt5.QtWidgets import QDesktopWidget
 from PyQt5.QtGui import QIcon
-from adapters.base import BaseGUIAdapter
-from utils.theme import get_cinnamon_theme_colors, get_default_dark_colors
+from lswitch.adapters.base import BaseGUIAdapter
+from lswitch.utils.theme import get_cinnamon_theme_colors, get_default_dark_colors
 
 
 class CustomMenuItem(QWidget):

@@ -3,10 +3,10 @@
 import sys
 sys.path.insert(0, '/home/anton/VsCode/LSwitch')
 
-from adapters.base import BaseGUIAdapter
-from adapters.cinnamon import CinnamonAdapter
-from adapters.kde import KDEAdapter
-from utils.desktop import detect_desktop_environment
+from lswitch.adapters.base import BaseGUIAdapter
+from lswitch.adapters.cinnamon import CinnamonAdapter
+from lswitch.adapters.kde import KDEAdapter
+from lswitch.utils.desktop import detect_desktop_environment
 
 
 def get_adapter():

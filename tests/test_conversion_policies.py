@@ -1,4 +1,4 @@
-from conversion import ConversionManager
+from lswitch.conversion import ConversionManager
 
 
 class MockX11:

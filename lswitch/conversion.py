@@ -1,185 +1,156 @@
-"""Conversion utilities (text conversion and auto-convert checks).
+"""ConversionManager: central logic for choosing conversion mode.
 
-This module provides pure functions that encapsulate the logic for converting
-text between layouts and for deciding / performing auto-conversions. They are
-written to be easily testable and to be callable from `LSwitch`.
+Responsibility:
+- Decide between 'retype' (fast) and 'selection' (slow) conversion modes,
+  based on buffer state, backspace hold, presence of selection, and config.
+- Provide an API `choose_mode` and `execute` to call the appropriate callback.
 """
-from __future__ import annotations
-
+from typing import Callable
 import time
 
-# Maps used for conversion (EN -> RU and RU -> EN)
-EN_TO_RU = {
-    'q': 'й', 'w': 'ц', 'e': 'у', 'r': 'к', 't': 'е', 'y': 'н', 'u': 'г', 'i': 'ш', 'o': 'щ', 'p': 'з',
-    '[': 'х', ']': 'ъ', 'a': 'ф', 's': 'ы', 'd': 'в', 'f': 'а', 'g': 'п', 'h': 'р', 'j': 'о', 'k': 'л',
-    'l': 'д', ';': 'ж', "'": 'э', 'z': 'я', 'x': 'ч', 'c': 'с', 'v': 'м', 'b': 'и', 'n': 'т', 'm': 'ь',
-    ',': 'б', '.': 'ю', '/': '.', '`': 'ё',
-    '{': 'х', '}': 'ъ', ':': 'ж', '"': 'э', '<': 'б', '>': 'ю', '?': ',', '~': 'ё',
-    '@': '"', '#': '№', '$': ';', '^': ':', '&': '?'
+# Default application policies: prefer retype (fast) in IDEs, selection (slow) in browsers
+DEFAULT_APP_POLICIES = {
+    'Code': 'retype',        # VSCode
+    'IntelliJ': 'retype',    # JetBrains IDEs
+    'Gedit': 'retype',       # simple editors
+    'Firefox': 'selection',  # browsers tend to have complex widgets
+    'Chromium': 'selection',
+    'Google-chrome': 'selection'
 }
-RU_TO_EN = {v: k for k, v in EN_TO_RU.items()}
-PREFERRED_REVERSE = {
-    'б': ',',
-    'ю': '.',
-    'ё': '`',
-    'э': "'",
-}
-for ru, en in PREFERRED_REVERSE.items():
-    RU_TO_EN[ru] = en
 
 
-def convert_text(text: str) -> str:
-    """Convert text between EN and RU preserving case.
+class ConversionManager:
+    def __init__(self, config=None, x11_adapter=None):
+        self.config = config or {}
+        self.x11_adapter = x11_adapter
+        # Merge defaults with config-provided overrides
+        base = DEFAULT_APP_POLICIES.copy()
+        base.update(self.config.get('app_policies', {}))
+        self.app_policies = base
+        self.policies = []  # list of callables(context) -> 'retype'|'selection'|None
 
-    This mirrors the behavior originally implemented as `LSwitch.convert_text`.
-    """
-    if not text:
-        return text
+    def register_policy(self, policy_callable):
+        """Register a policy callable that receives a context dict and may return a mode or None."""
+        self.policies.append(policy_callable)
 
-    ru_chars = sum(1 for c in text.lower() if c in RU_TO_EN)
-    en_chars = sum(1 for c in text.lower() if c in EN_TO_RU)
+    def _detect_lang(self, s: str) -> str:
+        s_clean = (s or '').strip()
+        return 'ru' if any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in s_clean) else 'en'
 
-    result = []
-    if ru_chars > en_chars:
-        # RU -> EN
-        for c in text:
-            is_upper = c.isupper()
-            converted = RU_TO_EN.get(c.lower(), c)
-            result.append(converted.upper() if is_upper else converted)
-    else:
-        # EN -> RU
-        for c in text:
-            is_upper = c.isupper()
-            converted = EN_TO_RU.get(c.lower(), c)
-            result.append(converted.upper() if is_upper else converted)
+    def _canonicalize(self, s: str, user_dict=None) -> str:
+        s_clean = (s or '').strip()
+        if not s_clean:
+            return ''
+        lang = self._detect_lang(s_clean)
+        if user_dict:
+            try:
+                return user_dict._canonicalize(s_clean, lang)
+            except Exception:
+                return s_clean.lower()
+        return s_clean.lower()
 
-    return ''.join(result)
+    def is_correction(self, auto_marker: dict, original_text: str, converted_text: str, user_dict=None, timeout=5.0) -> bool:
+        """Return True if the manual conversion should be considered a correction after an auto conversion."""
+        try:
+            if not auto_marker:
+                return False
+            time_since_auto = time.time() - auto_marker.get('time', 0)
+            if time_since_auto >= timeout:
+                return False
 
+            orig_canon = self._canonicalize(original_text, user_dict)
+            auto_conv_canon = self._canonicalize(auto_marker.get('converted_to', ''), user_dict)
+            conv_canon = self._canonicalize(converted_text, user_dict)
+            auto_word_canon = self._canonicalize(auto_marker.get('word', ''), user_dict)
 
-def _check_with_dictionary(ls, text: str):
-    """Legacy fallback using dictionary.py; tries to convert and will call
-    `ls.convert_and_retype()` if conversion applies.
-    """
-    try:
-        from dictionary import check_word, convert_text as dict_convert
+            if orig_canon == auto_conv_canon and conv_canon == auto_word_canon:
+                return True
+            return False
+        except Exception:
+            return False
 
-        is_correct, _ = check_word(text, ls.current_layout)
-        if not is_correct:
-            converted = dict_convert(text, ls.current_layout)
-            is_conv_correct, _ = check_word(converted, 'en' if ls.current_layout == 'ru' else 'ru')
-            if is_conv_correct:
-                if ls.config.get('debug'):
-                    print(f"🤖 Auto-convert (dictionary): '{text}' → '{converted}'")
-                ls.convert_and_retype()
-    except Exception as e:
-        if ls.config.get('debug'):
-            print(f"⚠️ Error in _check_with_dictionary: {e}")
+    def apply_correction(self, user_dict, auto_marker: dict, original_text: str, converted_text: str, timeout=None, debug=False) -> bool:
+        """If correction is detected, call user_dict.add_correction and return True."""
+        try:
+            t = timeout if timeout is not None else user_dict.data['settings'].get('correction_timeout', 5.0) if user_dict else 5.0
+            if self.is_correction(auto_marker, original_text, converted_text, user_dict=user_dict, timeout=t):
+                corrected_word = converted_text.strip().lower()
+                lang = self._detect_lang(corrected_word)
+                if user_dict:
+                    user_dict.add_correction(corrected_word, lang, debug=debug)
+                if debug:
+                    print(f"📚 APPLY CORRECTION (via ConversionManager): '{corrected_word}' ({lang})")
+                return True
+            return False
+        except Exception as e:
+            if debug:
+                print(f"⚠️ ConversionManager.apply_correction error: {e}")
+            return False
+    def choose_mode(self, buffer, has_selection_fn: Callable[[], bool], backspace_hold=False):
+        """Return 'retype' or 'selection'.
 
+        Rules (simple, testable):
+        - If backspace_hold is True or buffer.chars_in_buffer == 0 -> prefer selection
+        - Else if has_selection_fn() is True -> selection
+        - Else if config has prefer_retype_when_possible True -> retype
+        - Else -> retype
+        """
+        # If explicit backspace hold or empty buffer -> selection
+        if backspace_hold or getattr(buffer, 'chars_in_buffer', 0) == 0:
+            if self.config.get('debug'):
+                print(f"🔧 choose_mode decision: backspace_hold={backspace_hold}, chars_in_buffer={getattr(buffer,'chars_in_buffer',0)} -> selection", flush=True)
+            return 'selection'
 
-def check_and_auto_convert(ls):
-    """Full auto-conversion flow. Accepts `LSwitch` instance and executes
-    conversion as required by its configuration.
+        # If there's a fresh selection -> selection
+        try:
+            has_sel = has_selection_fn()
+            if self.config.get('debug'):
+                print(f"🔧 choose_mode: has_selection_fn() -> {has_sel}", flush=True)
+            if has_sel:
+                if self.config.get('debug'):
+                    print(f"🔧 choose_mode decision: has_selection -> selection", flush=True)
+                return 'selection'
+        except Exception:
+            # If has_selection fails, prefer retype if possible
+            if self.config.get('debug'):
+                print(f"🔧 choose_mode: has_selection_fn() raised, falling through", flush=True)
+            pass
 
-    This function mirrors the original `LSwitch.check_and_auto_convert` but
-    is placed here to enable testing and easier refactoring.
-    """
-    if not ls.config.get('auto_switch') or not getattr(ls, 'DICT_AVAILABLE', False):
-        if ls.config.get('debug'):
-            if not ls.config.get('auto_switch'):
-                print("⏭️ Auto-switch disabled in config")
-            if not getattr(ls, 'DICT_AVAILABLE', False):
-                print("⏭️ Dictionary not available")
-        return
-
-    if ls.had_backspace:
-        if ls.config.get('debug'):
-            print("⏭️ Skip auto-convert: user used backspace")
-        return
-
-    if ls.current_layout not in ['ru', 'en']:
-        if ls.config.get('debug'):
-            print(f"⏭️ Skip auto-convert: unsupported layout {ls.current_layout}")
-        return
-
-    if ls.chars_in_buffer == 0:
-        return
-
-    text = ''.join(ls.buffer.text_buffer).strip()
-    if not text:
-        if ls.config.get('debug'):
-            print("⏭️ Skip auto-convert: empty buffer")
-        return
-
-    try:
-        if ls.user_dict and hasattr(ls.user_dict, 'should_auto_convert'):
-            has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in text)
-            from_lang = 'ru' if has_cyrillic else 'en'
-            to_lang = 'en' if from_lang == 'ru' else 'ru'
-
-            threshold = ls.user_dict.data.get('settings', {}).get('auto_convert_threshold', 5)
-            will = ls.user_dict.should_auto_convert(text, from_lang, to_lang, threshold=threshold)
-            if ls.config.get('debug'):
-                weight = ls.user_dict.get_conversion_weight(text, from_lang, to_lang)
-                print(f"🔎 Auto-convert decision: word='{text}', from={from_lang}, to={to_lang}, weight={weight}, threshold={threshold}, will_convert={will}")
-
-            if will:
-                if ls.config.get('debug'):
-                    print(f"🎯 Auto-convert (user_dict): '{text}' ({from_lang}→{to_lang}), weight: {weight}")
-                converted_text = convert_text(text)
-                ls.last_auto_convert = {
-                    "word": text,
-                    "converted_to": converted_text,
-                    "time": time.time(),
-                    "lang": from_lang
-                }
-                ls._recent_auto_marker = dict(ls.last_auto_convert)
-                ls.convert_and_retype(is_auto=True)
-            else:
-                # fallback to dictionary and ngrams
+        # Check app-specific policies (config mapping)
+        try:
+            if self.app_policies and self.x11_adapter:
                 try:
-                    if ls.config.get('debug'):
-                        print("  🔁 Trying dictionary fallback (_check_with_dictionary)")
-                    _check_with_dictionary(ls, text)
-                except Exception as e:
-                    if ls.config.get('debug'):
-                        print(f"⚠️ dictionary fallback error: {e}")
+                    win = None
+                    if hasattr(self.x11_adapter, 'get_active_window_class'):
+                        win = self.x11_adapter.get_active_window_class()
+                    elif hasattr(self.x11_adapter, 'get_active_window_name'):
+                        win = self.x11_adapter.get_active_window_name()
+                    if win and win in self.app_policies:
+                        return self.app_policies[win]
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
-                try:
-                    import ngrams
-                    should, best_text, reason = ngrams.should_convert(text, threshold=5, user_dict=ls.user_dict)
-                    if ls.config.get('debug'):
-                        print(f"🔁 N-gram fallback: should={should}, best='{best_text}', reason={reason}")
-                    if should:
-                        if ls.config.get('debug'):
-                            print(f"🎯 Auto-convert (n-grams): '{text}' → '{best_text}' ({reason})")
-                        ls.last_auto_convert = {
-                            "word": text,
-                            "converted_to": best_text,
-                            "time": time.time(),
-                            "lang": from_lang
-                        }
-                        ls._recent_auto_marker = dict(ls.last_auto_convert)
-                        ls._override_converted_text = best_text
-                        ls.convert_and_retype(is_auto=True)
-                        try:
-                            del ls._override_converted_text
-                        except Exception:
-                            pass
-                except ImportError:
-                    if ls.config.get('debug'):
-                        print("⚠️ ngrams.py not available, skipping ngram fallback")
-                except Exception as e:
-                    if ls.config.get('debug'):
-                        print(f"⚠️ ngram fallback error: {e}")
+        # Call registered policy callables (higher priority)
+        for p in self.policies:
+            try:
+                res = p({'buffer': buffer, 'has_selection': has_selection_fn, 'x11': self.x11_adapter, 'config': self.config})
+                if res in ('retype', 'selection'):
+                    return res
+            except Exception:
+                continue
 
-            if ls.config.get('debug'):
-                print("  ⏭️ Auto-convert check finished (user_dict path)")
-    except ImportError:
-        if ls.config.get('debug'):
-            print("⚠️ ngrams.py not available, using fallback")
-        _check_with_dictionary(ls, text)
-    except Exception as e:
-        if ls.config.get('debug'):
-            import traceback
-            print(f"⚠️ Error during auto-convert: {e}")
-            traceback.print_exc()
+        # Config override
+        if self.config.get('prefer_retype_when_possible'):
+            return 'retype'
+
+        # Default to retype when buffer has chars
+        return 'retype'
+
+    def execute(self, mode: str, retype_cb: Callable[[], None], selection_cb: Callable[[], None]):
+        """Execute provided callback based on mode."""
+        if mode == 'retype':
+            return retype_cb()
+        else:
+            return selection_cb()

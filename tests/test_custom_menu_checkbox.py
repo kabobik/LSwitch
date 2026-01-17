@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.insert(0, os.getcwd())
-from adapters.cinnamon import CustomMenuItem
+from lswitch.adapters.cinnamon import CustomMenuItem
 from PyQt5.QtWidgets import QApplication
 
 

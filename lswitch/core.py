@@ -78,7 +78,7 @@ from lswitch.xkb import (
 
 # Импортируем словарь для автопереключения
 try:
-    from dictionary import is_likely_wrong_layout
+    from lswitch.dictionary import is_likely_wrong_layout
     DICT_AVAILABLE = True
 except ImportError:
     DICT_AVAILABLE = False
@@ -86,7 +86,7 @@ except ImportError:
 
 # Импортируем пользовательский словарь для самообучения
 try:
-    from user_dictionary import UserDictionary
+    from lswitch.user_dictionary import UserDictionary
     USER_DICT_AVAILABLE = True
 except ImportError:
     USER_DICT_AVAILABLE = False
@@ -735,7 +735,7 @@ class LSwitch:
         except Exception:
             # Fallback to original inline behavior if delegation fails
             try:
-                from dictionary import check_word, convert_text
+                from lswitch.dictionary import check_word, convert_text
                 is_correct, _ = check_word(text, self.current_layout)
                 if not is_correct:
                     converted = convert_text(text, self.current_layout)
