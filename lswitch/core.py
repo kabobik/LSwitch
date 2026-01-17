@@ -518,8 +518,14 @@ class LSwitch:
         
         # Отслеживание изменений конфига
         try:
-            self.config_mtime = os.path.getmtime(self.config.get('_config_path', '/etc/lswitch/config.json'))
-        except (OSError, FileNotFoundError):
+            cfg_path = self.config.get('_config_path') or self.config.get('_user_config_path')
+            if cfg_path is None:
+                cfg_path = '/etc/lswitch/config.json'
+            if isinstance(cfg_path, str):
+                self.config_mtime = os.path.getmtime(cfg_path)
+            else:
+                self.config_mtime = None
+        except (OSError, FileNotFoundError, TypeError):
             self.config_mtime = None
         self.last_config_check = time.time()
     
@@ -1752,14 +1758,17 @@ class LSwitch:
                 current_time = time.time()
                 if current_time - self.last_config_check >= 1.0:
                     self.last_config_check = current_time
-                    config_path = self.config.get('_config_path', '/etc/lswitch/config.json')
+                    config_path = self.config.get('_config_path') or self.config.get('_user_config_path')
+                    if config_path is None:
+                        config_path = '/etc/lswitch/config.json'
                     try:
-                        current_mtime = os.path.getmtime(config_path)
-                        if current_mtime != self.config_mtime:
-                            self.config_mtime = current_mtime
-                            print(f"📝 Обнаружено изменение {config_path}", flush=True)
-                            self.reload_config()
-                    except OSError:
+                        if isinstance(config_path, str):
+                            current_mtime = os.path.getmtime(config_path)
+                            if current_mtime != self.config_mtime:
+                                self.config_mtime = current_mtime
+                                print(f"📝 Обнаружено изменение {config_path}", flush=True)
+                                self.reload_config()
+                    except (OSError, TypeError):
                         pass  # Файл не существует или недоступен
                 
                 # Проверяем флаг перезагрузки конфигурации (для SIGHUP)
