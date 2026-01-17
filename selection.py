@@ -181,6 +181,27 @@ class SelectionManager:
                             except Exception as e:
                                 if debug:
                                     print(f"⚠️ Direct set of adapter.primary failed: {e}")
+
+                        # If paste still did not produce expected result, attempt to restore the
+                        # original selection to avoid data loss: set clipboard back to original
+                        # selection and paste it (best-effort). This prevents the case where
+                        # delete/remove occurred but the converted text was not inserted.
+                        if result_primary.strip() != converted.strip():
+                            try:
+                                if debug:
+                                    print("⚠️ Paste failed — attempting to restore original selection")
+                                if getattr(self.x11, 'set_clipboard', None) and getattr(self.x11, 'paste_clipboard', None):
+                                    self.x11.set_clipboard(selected.strip())
+                                    time.sleep(0.02)
+                                    self.x11.paste_clipboard()
+                                    time.sleep(0.03)
+                                    if getattr(self.x11, 'get_primary_selection', None):
+                                        result_primary = self.x11.get_primary_selection()
+                                        if debug:
+                                            print(f"🔄 After restore attempt, primary={result_primary!r}")
+                            except Exception as e:
+                                if debug:
+                                    print(f"⚠️ Error during restore attempt: {e}")
                 except Exception as e:
                     if debug:
                         print(f"⚠️ Error in paste-fallback logic: {e}")
