@@ -150,17 +150,25 @@ class SelectionManager:
                     if debug:
                         print(f"🔍 post-paste primary={result_primary!r} expected={converted!r}")
                     if result_primary.strip() != converted.strip():
-                        # Attempt several retries of paste (some adapters need time)
-                        retries = 2
+                        # Attempt several retries of paste (some adapters need time and may clear clipboard)
+                        retries = 3
                         for attempt in range(1, retries + 1):
                             if getattr(self.x11, 'paste_clipboard', None):
                                 if debug:
-                                    print(f"⚠️ Paste did not match converted text — retrying paste (attempt {attempt})")
+                                    print(f"⚠️ Paste did not match converted text — retrying paste (attempt {attempt}/{retries})")
+                                # Re-set clipboard before retry — some adapters may lose it
+                                try:
+                                    if getattr(self.x11, 'set_clipboard', None):
+                                        self.x11.set_clipboard(converted.strip())
+                                except Exception as e:
+                                    if debug:
+                                        print(f"⚠️ set_clipboard raised during retry prep: {e}")
                                 try:
                                     self.x11.paste_clipboard()
                                 except Exception as e:
                                     if debug:
                                         print(f"⚠️ paste_clipboard raised: {e}")
+                                # Backoff increasing delay for stability
                                 time.sleep(0.02 * attempt)
                                 if getattr(self.x11, 'get_primary_selection', None):
                                     result_primary = self.x11.get_primary_selection()
