@@ -97,14 +97,23 @@ class ConversionManager:
         """
         # If explicit backspace hold or empty buffer -> selection
         if backspace_hold or getattr(buffer, 'chars_in_buffer', 0) == 0:
+            if self.config.get('debug'):
+                print(f"🔧 choose_mode decision: backspace_hold={backspace_hold}, chars_in_buffer={getattr(buffer,'chars_in_buffer',0)} -> selection", flush=True)
             return 'selection'
 
         # If there's a fresh selection -> selection
         try:
-            if has_selection_fn():
+            has_sel = has_selection_fn()
+            if self.config.get('debug'):
+                print(f"🔧 choose_mode: has_selection_fn() -> {has_sel}", flush=True)
+            if has_sel:
+                if self.config.get('debug'):
+                    print(f"🔧 choose_mode decision: has_selection -> selection", flush=True)
                 return 'selection'
         except Exception:
             # If has_selection fails, prefer retype if possible
+            if self.config.get('debug'):
+                print(f"🔧 choose_mode: has_selection_fn() raised, falling through", flush=True)
             pass
 
         # Check app-specific policies (config mapping)

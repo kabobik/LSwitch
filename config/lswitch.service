@@ -5,7 +5,11 @@ After=network.target multi-user.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 -u /usr/local/bin/lswitch
+# Prefer running the package as a module and ensure the installed
+# package dir is available via PYTHONPATH so imports resolve correctly.
+ExecStart=/usr/local/bin/lswitch-run
+# NOTE: `lswitch-run` will ensure the installed package dir is available on PYTHONPATH and
+# avoid name-shadowing issues that can occur when a script shares the package name.
 Restart=on-failure
 RestartSec=5s
 WorkingDirectory=/etc/lswitch

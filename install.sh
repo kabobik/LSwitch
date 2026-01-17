@@ -159,9 +159,10 @@ run_or_log apt-get update -qq
 run_or_log apt-get install -y python3-evdev xclip xdotool
 
 echo -e "${YELLOW}📁 Копирование файлов...${NC}"
-# Копируем основной скрипт
-pref_install lswitch.py /usr/local/bin/lswitch
-
+# Install the primary runtime launcher as the `lswitch` CLI
+pref_install lswitch-run /usr/local/bin/lswitch
+# The legacy top-level module `lswitch.py` is NOT installed to avoid
+# shadowing the package import mechanism in installed environments.
 # Копируем модули
 pref_install dictionary.py /usr/local/bin/dictionary.py
 pref_install ngrams.py /usr/local/bin/ngrams.py
@@ -179,7 +180,17 @@ cp i18n.py "$LIB_DIR/i18n.py"
 cp __version__.py "$LIB_DIR/__version__.py"
 cp -r adapters "$LIB_DIR/"
 cp -r utils "$LIB_DIR/"
+# Also copy the package dir so installed shims can import lswitch.core
+cp -r lswitch "$LIB_DIR/lswitch"
 chmod -R 755 "$LIB_DIR"
+
+# Install the lightweight runtime launcher used by system service
+pref_install lswitch-run /usr/local/bin/lswitch-run
+# Ensure legacy module file is removed to avoid import-time shadowing
+if [ -f /usr/local/bin/lswitch.py ]; then
+    echo "Removing legacy /usr/local/bin/lswitch.py -> /usr/local/bin/lswitch.py.bak"
+    mv /usr/local/bin/lswitch.py /usr/local/bin/lswitch.py.bak || rm -f /usr/local/bin/lswitch.py
+fi
 
 # Копируем GUI панель управления (lswitch-control)
 pref_install lswitch_control.py /usr/local/bin/lswitch-control

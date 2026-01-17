@@ -32,6 +32,12 @@ def pytest_addoption(parser):
 def qt_offscreen(monkeypatch):
     """Ensure Qt uses an offscreen platform in tests to avoid loading XCB/DBus in headless CI environments."""
     monkeypatch.setenv('QT_QPA_PLATFORM', 'offscreen')
+    # Disable all GUI interactions
+    monkeypatch.setenv('QT_QPA_PLATFORMTHEME', 'offscreen')
+    monkeypatch.setenv('DBUS_SYSTEM_BUS_ADDRESS', 'unix:path=/dev/null')
+    monkeypatch.setenv('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/dev/null')
+    # Disable PolicyKit/sudo prompts
+    monkeypatch.setenv('SUDO_ASKPASS', '/bin/false')
     # Also ensure DBUS_SESSION_BUS_ADDRESS is not set to avoid DBus threads where possible
     monkeypatch.delenv('DBUS_SESSION_BUS_ADDRESS', raising=False)
     yield
@@ -93,3 +99,30 @@ def keyboard_watchdog(request):
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old_handler)
+
+
+@pytest.fixture(autouse=True)
+def block_sudo_prompts(monkeypatch):
+    """Block sudo/pkexec prompts that may appear in GUI tests."""
+    import subprocess
+    
+    original_run = subprocess.run
+    
+    def patched_run(cmd, *args, **kwargs):
+        # Convert to list if string
+        if isinstance(cmd, str):
+            cmd = [cmd]
+        elif not isinstance(cmd, list):
+            cmd = list(cmd)
+        
+        # Block sudo/pkexec/systemctl commands that might prompt
+        if any(blocked in cmd[0] for blocked in ['sudo', 'pkexec', 'systemctl']):
+            # Return a dummy result instead of prompting
+            result = subprocess.CompletedProcess(args=cmd, returncode=1, stdout='', stderr='')
+            if kwargs.get('capture_output') or kwargs.get('stdout'):
+                return result
+        
+        return original_run(cmd, *args, **kwargs)
+    
+    monkeypatch.setattr('subprocess.run', patched_run)
+    yield

@@ -23,6 +23,10 @@ except Exception:
 class InputHandler:
     def __init__(self, lswitch):
         self.ls = lswitch
+        # Track whether we've seen a real Shift press recently so we can
+        # distinguish stray release events from legitimate user actions.
+        self._shift_pressed = False
+        self._shift_last_press_time = 0.0
 
     def replay_events(self, events):
         """Replays events into the virtual keyboard device."""
@@ -81,11 +85,19 @@ class InputHandler:
                             time.sleep(0.03)
 
                         try:
-                            self.ls.convert_selection()
-                            self.ls.backspace_hold_detected = False
-                        except Exception:
                             if self.ls.config.get('debug'):
-                                print("⚠️ Selection conversion failed — falling back to retype")
+                                print(f"{time.time():.6f} ▸ calling convert_selection(prefer_trim_leading={(not has_sel)}) (has_sel={has_sel})", flush=True)
+                            try:
+                                self.ls.convert_selection(prefer_trim_leading=(not has_sel))
+                            except TypeError:
+                                # Backwards compatibility for patched objects in tests
+                                self.ls.convert_selection()
+                            self.ls.backspace_hold_detected = False
+                        except Exception as e:
+                            if self.ls.config.get('debug'):
+                                print(f"⚠️ Selection conversion failed — falling back to retype: {e}")
+                                import traceback
+                                traceback.print_exc()
                             self.ls.convert_and_retype()
                     except Exception:
                         if self.ls.config.get('debug'):
@@ -102,7 +114,8 @@ class InputHandler:
                     try:
                         system.xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
                         time.sleep(0.03)
-                        self.ls.convert_selection()
+                        # Legacy path: for empty buffer/backspace hold, prefer trimming
+                        self.ls.convert_selection(prefer_trim_leading=True)
                     except Exception:
                         pass
                     self.ls.backspace_hold_detected = False
@@ -129,7 +142,9 @@ class InputHandler:
                 print(f"🔍 SPACE BLOCKED is_converting=True!")
 
         if self.ls.is_converting:
-            return
+            if self.ls.config.get('debug'):
+                print(f"{time.time():.6f} ▸ Event ignored: is_converting=True", flush=True)
+            return True
 
         if event.type != getattr(ecodes, 'EV_KEY', None):
             return
@@ -138,10 +153,14 @@ class InputHandler:
 
         # Navigation keys - clear buffer
         if getattr(event, 'code', None) in getattr(self.ls, 'navigation_keys', set()) and event.value == 0:
-            if self.ls.chars_in_buffer > 0:
+            # Always clear buffer on navigation to ensure transient flags (like had_backspace)
+            # don't persist and influence later conversions unexpectedly.
+            try:
                 self.ls.clear_buffer()
-                if self.ls.config.get('debug'):
-                    print("Buffer cleared (navigation)")
+            except Exception:
+                pass
+            if self.ls.config.get('debug'):
+                print("Buffer cleared (navigation)")
             return
 
         # Shift handling
@@ -150,8 +169,35 @@ class InputHandler:
             self.ls.event_buffer.append(event)
 
             if event.value == 1:  # press
-                pass
+                # Mark that we've seen a real press and remember time (used to
+                # ignore stray releases that are not preceded by a press).
+                self._shift_pressed = True
+                self._shift_last_press_time = current_time
+                if self.ls.config.get('debug'):
+                    print(f"{time.time():.6f} ▸ SHIFT press (handler): _shift_pressed={self._shift_pressed}, _shift_last_press_time={self._shift_last_press_time:.6f}", flush=True)
             elif event.value == 0:  # release
+                # Reset pressed flag for this release
+                self._shift_pressed = False
+                if self.ls.config.get('debug'):
+                    print(f"{time.time():.6f} ▸ SHIFT release (handler): last_shift_press={self.ls.last_shift_press:.6f}, _shift_pressed={self._shift_pressed}, suppress={getattr(self.ls, 'suppress_shift_detection', False)}, post_until={getattr(self.ls, '_post_replay_suppress_until', 0):.6f}, is_converting={getattr(self.ls, 'is_converting', False)}", flush=True)
+
+                # If suppression is active (e.g., we're replaying synthetic events),
+                # ignore shift releases so they don't retrigger conversions.
+                if getattr(self.ls, 'suppress_shift_detection', False):
+                    if self.ls.config.get('debug'):
+                        print("🔕 Suppressing shift detection due to replay", flush=True)
+                    # Clear marker to avoid partial detection after suppression
+                    self.ls.last_shift_press = 0
+                    return
+
+                # Also ignore double-shift detection for a short period after replay
+                # to allow delivery timing jitter to settle.
+                if getattr(self.ls, '_post_replay_suppress_until', 0) and current_time < self.ls._post_replay_suppress_until:
+                    if self.ls.config.get('debug'):
+                        print("🔕 Ignoring shift release due to post-replay suppression window", flush=True)
+                    self.ls.last_shift_press = 0
+                    return
+
                 if current_time - self.ls.last_shift_press < self.ls.double_click_timeout:
                     if self.ls.config.get('debug'):
                         print("✓ Double Shift detected!")
@@ -160,10 +206,10 @@ class InputHandler:
                         self.on_double_shift()
                     except Exception as e:
                         print(f"⚠️ Error in on_double_shift: {e}")
-                    return
+                    return True
                 else:
                     self.ls.last_shift_press = current_time
-            return
+            return True
 
         # ESC - exit
         if getattr(event, 'code', None) == getattr(ecodes, 'KEY_ESC', None) and event.value == 0:
@@ -276,10 +322,11 @@ class InputHandler:
                             if len(self.ls.text_buffer) > 0:
                                 print(f"Buffer: {self.ls.chars_in_buffer} chars, text: '{''.join(self.ls.text_buffer)}'")
                         self.ls.check_and_auto_convert()
-                return
+                return True
 
         else:
             if event.value == 0:
                 self.ls.clear_buffer()
                 if self.ls.config.get('debug'):
                     print("Buffer cleared")
+            return True

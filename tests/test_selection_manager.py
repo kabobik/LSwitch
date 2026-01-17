@@ -38,7 +38,9 @@ def test_convert_selection_roundtrip(monkeypatch):
     assert orig.strip() == 'hello,world'
     assert conv == 'HELLO,WORLD'
     assert adapter.expanded
-    assert adapter.primary == conv
+    # Expansion added a leading space; when caller does not request trimming,
+    # preserve that leading whitespace in the replaced primary.
+    assert adapter.primary == (' ' + conv)
 
 
 def test_no_adapter():

@@ -322,6 +322,14 @@ class LSwitch:
 
         self.last_shift_press = 0
         self.double_click_timeout = self.config.get('double_click_timeout', 0.3)
+        # Flag used to temporarily suppress double-Shift detection while the
+        # instance is programmatically replaying events (to avoid re-triggering
+        # conversions due to synthetic Shift events emitted during replay).
+        self.suppress_shift_detection = False
+        # Short-lived post-replay suppression window (timestamp). During this
+        # period we also ignore double-shift detection to account for timing
+        # and delivery delays of synthetic events.
+        self._post_replay_suppress_until = 0.0
         
         # Создаём виртуальную клавиатуру для эмуляции событий
         self.fake_kb_name = 'LSwitch Virtual Keyboard'
@@ -852,7 +860,16 @@ class LSwitch:
         # Сбрасываем локальные флаги Backspace
         self.had_backspace = False
         self.consecutive_backspace_repeats = 0
-        self.backspace_hold_detected = False
+        # Keep backspace_hold flag recent timestamp; do not eagerly clear it here
+        # to avoid losing the hold marker due to incidental navigation/events.
+        if getattr(self, 'backspace_hold_detected_at', 0) and (time.time() - self.backspace_hold_detected_at) < 0.5:
+            # Recent hold: preserve flag for short window
+            if self.config.get('debug'):
+                print(f"{time.time():.6f} ▸ Preserving backspace_hold_detected (recent: {time.time() - self.backspace_hold_detected_at:.3f}s)", flush=True)
+            # leave self.backspace_hold_detected as-is
+        else:
+            self.backspace_hold_detected = False
+            self.backspace_hold_detected_at = 0.0
 
         # NOTE: раньше тут обнулялся last_auto_convert, но это мешало ручной коррекции сразу после автоконвертации.
         # Оставляем last_auto_convert до тех пор, пока пользователь не начнёт ввод (в другом месте оно сбрасывается),
@@ -883,7 +900,7 @@ class LSwitch:
         
         return ''.join(result)
     
-    def convert_selection(self):
+    def convert_selection(self, prefer_trim_leading=False, user_has_selection=False):
         """Конвертирует выделенный текст через PRIMARY selection (без порчи clipboard)"""
         # Проверяем наличие минимум 2 раскладок
         if len(self.layouts) < 2:
@@ -895,27 +912,39 @@ class LSwitch:
             return
         
         self.is_converting = True
+        # Suppress double-shift detection while performing selection conversion
+        # to avoid replayed events (or adapter-triggered key events) from
+        # retriggering the double-shift handler.
+        self.suppress_shift_detection = True
+        if self.config.get('debug'):
+            print(f"{time.time():.6f} ▸ convert_selection ENTER: suppress={self.suppress_shift_detection}, is_converting={self.is_converting}, user_has_selection={user_has_selection}", flush=True)
         
         try:
             # Получаем выделенный текст из PRIMARY selection (не трогаем clipboard!)
             try:
                 import lswitch as _pkg
                 adapter = getattr(_pkg, 'x11_adapter', None)
+                if self.config.get('debug'):
+                    print(f"{time.time():.6f} ▸ convert_selection: adapter_present={bool(adapter)}", flush=True)
                 if adapter:
                     selected_text = adapter.get_primary_selection(timeout=0.5)
                 else:
                     selected_text = self.system.xclip_get(selection='primary', timeout=0.5).stdout
-            except Exception:
+                if self.config.get('debug'):
+                    print(f"{time.time():.6f} ▸ convert_selection: selected_text={selected_text!r}", flush=True)
+            except Exception as e:
+                if self.config.get('debug'):
+                    print(f"{time.time():.6f} ▸ convert_selection: error getting primary selection: {e}", flush=True)
                 selected_text = ''
             
             if selected_text:
                 # Delegate selection conversion to SelectionManager
                 try:
                     from selection import SelectionManager
-                    sm = SelectionManager(adapter)
+                    sm = SelectionManager(adapter, repair_enabled=self.config.get('selection_repair', False))
                     switch_fn = (self.switch_keyboard_layout if self.config.get('switch_layout_after_convert', True) else None)
 
-                    orig, conv = sm.convert_selection(self.convert_text, user_dict=self.user_dict, switch_layout_fn=switch_fn, debug=self.config.get('debug'))
+                    orig, conv = sm.convert_selection(self.convert_text, user_dict=self.user_dict, switch_layout_fn=switch_fn, debug=self.config.get('debug'), prefer_trim_leading=prefer_trim_leading, user_has_selection=user_has_selection)
 
                     if conv:
                         if self.user_dict and not self.last_auto_convert:
@@ -977,9 +1006,33 @@ class LSwitch:
                 import traceback
                 traceback.print_exc()
         finally:
-            time.sleep(0.1)
+            # Give a small grace period for any synthetic events emitted by
+            # the selection conversion/adapters to be processed.
+            time.sleep(0.05)
+            # Emit explicit Shift releases to avoid stuck-key scenarios
+            try:
+                self.fake_kb.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
+                self.fake_kb.syn()
+                self.fake_kb.write(ecodes.EV_KEY, ecodes.KEY_RIGHTSHIFT, 0)
+                self.fake_kb.syn()
+            except Exception:
+                pass
+            self.suppress_shift_detection = False
+            if self.config.get('debug'):
+                print(f"{time.time():.6f} ▸ convert_selection EXIT: suppress={self.suppress_shift_detection}, is_converting={self.is_converting}, last_shift_press={self.last_shift_press:.6f}", flush=True)
+            # Reset marker as a safety measure
+            self.last_shift_press = 0
+            try:
+                if getattr(self, 'input_handler', None):
+                    self.input_handler._shift_pressed = False
+                    self.input_handler._shift_last_press_time = 0.0
+            except Exception:
+                pass
+            # Allow a short grace period and clear the converting flag so subsequent
+            # conversion requests are permitted.
+            time.sleep(0.05)
             self.is_converting = False
-    
+
     def switch_keyboard_layout(self):
         """Переключает раскладку клавиатуры через XKB LockGroup"""
         try:
@@ -1074,6 +1127,9 @@ class LSwitch:
             return
         
         self.is_converting = True
+        if self.config.get('debug'):
+            print(f"{time.time():.6f} ▸ convert_and_retype ENTER (is_auto={is_auto}) chars_in_buffer={self.chars_in_buffer} is_converting={self.is_converting} last_shift_press={self.last_shift_press:.6f} suppress={getattr(self,'suppress_shift_detection',False)}")
+
         
         # Если была недавняя автоконвертация — отметим её в логах, но НЕ очищаем маркер.
         # Это нужно, чтобы последующая ручная конвертация могла быть распознана как коррекция
@@ -1176,56 +1232,101 @@ class LSwitch:
                 self.switch_keyboard_layout()
             
             time.sleep(0.02)  # Маленькая задержка перед вводом
-            
-            # Воспроизводим сохранённые события в новой раскладке
-            self.replay_events(events_to_replay)
 
-            # Если реплей событий не содержал release-ивентов для обычных клавиш,
-            # то на некоторых системах/адаптерах никакой текст не появится на экране.
-            # В этом случае делаем fallback: напрямую набираем `converted_text` через tap_key.
+            # Print a short summary of events and reason for suppression
             try:
-                release_count = sum(1 for ev in events_to_replay if getattr(ev, 'value', None) in (0, 2) and ev.code not in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT, ecodes.KEY_BACKSPACE))
+                shift_count = sum(1 for ev in events_to_replay if getattr(ev, 'code', None) in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT))
+                total = len(events_to_replay)
+                if self.config.get('debug'):
+                    print(f"{time.time():.6f} ▸ Preparing to replay events: total={total}, Shift_count={shift_count}, release_count={release_count if 'release_count' in locals() else 'unknown'}, suppress_before={getattr(self,'suppress_shift_detection',False)}", flush=True)
             except Exception:
-                release_count = 0
+                pass
 
-            if release_count == 0 and 'converted_text' in locals() and converted_text:
+            # Suppress double-Shift detection during replay/typing to avoid the
+            # replayed Shift events retriggering conversions.
+            self.suppress_shift_detection = True
+            if self.config.get('debug'):
+                print(f"{time.time():.6f} ▸ suppress_shift_detection=True (replay)", flush=True)
+            try:
+                # Воспроизводим сохранённые события в новой раскладке
+                self.replay_events(events_to_replay)
+
+                # Если реплей событий не содержал release-ивентов для обычных клавиш,
+                # то на некоторых системах/адаптерах никакой текст не появится на экране.
+                # В этом случае делаем fallback: напрямую набираем `converted_text` через tap_key.
                 try:
-                    if self.config.get('debug'):
-                        print("⚠️ Replay missing releases — using fallback typing for converted text")
-                    self._fallback_type_text(converted_text)
-                except Exception as e:
-                    if self.config.get('debug'):
-                        print(f"⚠️ fallback typing failed: {e}")
+                    release_count = sum(1 for ev in events_to_replay if getattr(ev, 'value', None) in (0, 2) and ev.code not in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT, ecodes.KEY_BACKSPACE))
+                except Exception:
+                    release_count = 0
 
-            # КРИТИЧНО: заполняем буфер заново конвертированными событиями!
-            # Это позволяет конвертировать назад при повторном двойном Shift
-            try:
-                self.buffer.set_events(events_to_replay)
-                self.buffer.chars_in_buffer = num_chars
-            except Exception:
-                # Фолбэк
-                self.event_buffer = collections.deque(events_to_replay, maxlen=1000)
-                self.chars_in_buffer = num_chars
+                if release_count == 0 and 'converted_text' in locals() and converted_text:
+                    try:
+                        if self.config.get('debug'):
+                            print("⚠️ Replay missing releases — using fallback typing for converted text")
+                        self._fallback_type_text(converted_text)
+                    except Exception as e:
+                        if self.config.get('debug'):
+                            print(f"⚠️ fallback typing failed: {e}")
 
-            # ВАЖНО: обновляем текстовый буфер, чтобы он отражал текущий (сконвертированный) текст.
-            # Иначе при немедленном ручном возврате (double Shift) мы будем читать старый текст и
-            # неправильно фиксировать направление. Если у нас есть вычисленный converted_text — используем его.
-            try:
-                if 'converted_text' in locals() and converted_text:
-                    # converted_text — строка
-                    self.buffer.text_buffer = list(converted_text)
-                else:
-                    # Фолбэк: восстановим из событий, если есть
-                    self.buffer.text_buffer = []
-                    layout = self.get_current_layout()
-                    for ev in events_to_replay:
-                        if ev.value == 0:
-                            ch = self.keycode_to_char(ev.code, layout, shift=False)
-                            if ch:
-                                self.buffer.text_buffer.append(ch)
-            except Exception:
-                # Не фатально — оставим буфер пустым
-                self.text_buffer = []
+                # КРИТИЧНО: заполняем буфер заново конвертированными событиями!
+                # Это позволяет конвертировать назад при повторном двойном Shift
+                try:
+                    self.buffer.set_events(events_to_replay)
+                    self.buffer.chars_in_buffer = num_chars
+                except Exception:
+                    # Фолбэк
+                    self.event_buffer = collections.deque(events_to_replay, maxlen=1000)
+                    self.chars_in_buffer = num_chars
+
+                # ВАЖНО: обновляем текстовый буфер, чтобы он отражал текущий (сконвертированный) текст.
+                # Иначе при немедленном ручном возврате (double Shift) мы будем читать старый текст и
+                # неправильно фиксировать направление. Если у нас есть вычисленный converted_text — используем его.
+                try:
+                    if 'converted_text' in locals() and converted_text:
+                        # converted_text — строка
+                        self.buffer.text_buffer = list(converted_text)
+                    else:
+                        # Фолбэк: восстановим из событий, если есть
+                        self.buffer.text_buffer = []
+                        layout = self.get_current_layout()
+                        for ev in events_to_replay:
+                            if ev.value == 0:
+                                ch = self.keycode_to_char(ev.code, layout, shift=False)
+                                if ch:
+                                    self.buffer.text_buffer.append(ch)
+                except Exception:
+                    # Не фатально — оставим буфер пустым
+                    self.text_buffer = []
+            finally:
+                # Give a short grace period so replayed events can be fully processed by the event loop
+                time.sleep(0.05)
+                # As a safety, explicitly emit release events for Shift so that
+                # the system/virtual device won't be left in a pressed state.
+                try:
+                    # Use fake_kb directly; we're still in suppression so these
+                    # releases won't retrigger the handler.
+                    self.fake_kb.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
+                    self.fake_kb.syn()
+                    self.fake_kb.write(ecodes.EV_KEY, ecodes.KEY_RIGHTSHIFT, 0)
+                    self.fake_kb.syn()
+                except Exception:
+                    pass
+
+                self.suppress_shift_detection = False
+                if self.config.get('debug'):
+                    print(f"{time.time():.6f} ▸ suppress_shift_detection=False (replay complete)", flush=True)
+                # Reset marker to avoid immediate re-detection and establish a
+                # short post-replay suppression window to handle delayed delivery
+                # of synthetic events.
+                self.last_shift_press = 0
+                # Also reset InputHandler's shift-pressed flag if present
+                try:
+                    if getattr(self, 'input_handler', None):
+                        self.input_handler._shift_pressed = False
+                        self.input_handler._shift_last_press_time = 0.0
+                except Exception:
+                    pass
+                self._post_replay_suppress_until = time.time() + max(0.1, self.double_click_timeout)
             
             if self.config.get('debug'):
                 print("✓ Конвертация завершена")
@@ -1291,11 +1392,22 @@ class LSwitch:
 
                     # Now try to convert the selection; if it fails, fallback to retype
                     try:
-                        self.convert_selection()
-                        self.backspace_hold_detected = False
-                    except Exception:
                         if self.config.get('debug'):
-                            print("⚠️ Selection conversion failed — falling back to retype")
+                            print(f"{time.time():.6f} ▸ calling convert_selection(prefer_trim_leading={(not has_sel)}, user_has_selection={has_sel}) (has_sel={has_sel})", flush=True)
+                        # If we expanded selection because there was no prior
+                        # fresh selection, request trimming of any leading
+                        # whitespace the adapter may have captured.
+                        try:
+                            self.convert_selection(prefer_trim_leading=(not has_sel), user_has_selection=has_sel)
+                        except TypeError:
+                            # Backwards compatibility for tests/monkeypatched methods
+                            self.convert_selection()
+                        self.backspace_hold_detected = False
+                    except Exception as e:
+                        if self.config.get('debug'):
+                            print(f"⚠️ Selection conversion failed — falling back to retype: {e}")
+                            import traceback
+                            traceback.print_exc()
                         self.convert_and_retype()
                 except Exception as e:
                     if self.config.get('debug'):
@@ -1368,6 +1480,20 @@ class LSwitch:
             if event.value == 1:  # Нажатие
                 pass  # Просто добавляем в буфер, отслеживание не нужно
             elif event.value == 0:  # Отпускание
+                # If suppression is active, ignore shift releases to avoid retriggering
+                if getattr(self, 'suppress_shift_detection', False):
+                    if self.config.get('debug'):
+                        print("🔕 Подавление детекции Shift (реплей/конвертация)")
+                    self.last_shift_press = 0
+                    return
+
+                # Also ignore releases briefly after replay to account for delivery jitter
+                if getattr(self, '_post_replay_suppress_until', 0) and current_time < self._post_replay_suppress_until:
+                    if self.config.get('debug'):
+                        print("🔕 Игнорирование релиза Shift (пост-реплей окно)")
+                    self.last_shift_press = 0
+                    return
+
                 if current_time - self.last_shift_press < self.double_click_timeout:
                     if self.config.get('debug'):
                         print("✓ Двойной Shift обнаружен!")

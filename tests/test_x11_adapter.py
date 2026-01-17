@@ -24,33 +24,41 @@ def test_expand_selection_to_space_basic(monkeypatch):
 
 
 def test_safe_replace_selection_cut_success(monkeypatch):
-    # Simulate cut working: cut_selection sets clipboard to selected_text
+    # Simulate xclip_set + paste inserting the converted text
     state = {'clip': '', 'primary': 'hello'}
 
     def fake_get_clipboard(timeout=0.3):
         return state['clip']
 
-    def fake_set_clipboard(text):
+    def fake_set_clipboard(text, timeout=0.5):
         state['clip'] = text
 
-    def fake_cut():
-        state['clip'] = state['primary']
-        state['primary'] = ''
-
     def fake_paste():
+        # Paste inserts clipboard content to primary
         state['primary'] = state['clip']
 
     def fake_get_primary(timeout=0.3):
         return state['primary']
 
+    # Mock the system's xclip_set to set PRIMARY selection
+    class FakeSystem:
+        def xclip_set(self, text, selection='clipboard', timeout=0.5):
+            if selection == 'primary':
+                state['primary'] = text
+            else:
+                state['clip'] = text
+
+    def fake_get_system():
+        return FakeSystem()
+
     monkeypatch.setattr(x11, 'get_clipboard', fake_get_clipboard)
     monkeypatch.setattr(x11, 'set_clipboard', fake_set_clipboard)
-    monkeypatch.setattr(x11, 'cut_selection', fake_cut)
     monkeypatch.setattr(x11, 'paste_clipboard', fake_paste)
     monkeypatch.setattr(x11, 'get_primary_selection', fake_get_primary)
+    monkeypatch.setattr(x11, 'get_system', fake_get_system)
 
     out = x11.safe_replace_selection('WORLD', selected_text='hello', debug=True)
-    assert out == 'WORLD' or out == 'WORLD'  # primary updated
+    assert out == 'WORLD'  # primary updated with pasted text
 
 
 def test_safe_replace_selection_cut_fails_then_delete(monkeypatch):
@@ -59,28 +67,32 @@ def test_safe_replace_selection_cut_fails_then_delete(monkeypatch):
     def fake_get_clipboard(timeout=0.3):
         return state['clip']
 
-    def fake_set_clipboard(text):
+    def fake_set_clipboard(text, timeout=0.5):
         state['clip'] = text
 
-    def fake_cut():
-        # Simulate app that ignores ctrl+x (no change)
-        pass
-
-    def fake_delete():
-        state['primary'] = ''
-
     def fake_paste():
+        # Paste inserts clipboard content
         state['primary'] = state['clip']
 
     def fake_get_primary(timeout=0.3):
         return state['primary']
 
+    # Mock the system's xclip_set to set PRIMARY selection
+    class FakeSystem:
+        def xclip_set(self, text, selection='clipboard', timeout=0.5):
+            if selection == 'primary':
+                state['primary'] = text
+            else:
+                state['clip'] = text
+
+    def fake_get_system():
+        return FakeSystem()
+
     monkeypatch.setattr(x11, 'get_clipboard', fake_get_clipboard)
     monkeypatch.setattr(x11, 'set_clipboard', fake_set_clipboard)
-    monkeypatch.setattr(x11, 'cut_selection', fake_cut)
-    monkeypatch.setattr(x11, 'delete_selection', fake_delete)
     monkeypatch.setattr(x11, 'paste_clipboard', fake_paste)
     monkeypatch.setattr(x11, 'get_primary_selection', fake_get_primary)
+    monkeypatch.setattr(x11, 'get_system', fake_get_system)
 
     out = x11.safe_replace_selection('NEW', selected_text='abc,def', debug=True)
     assert out == 'NEW'

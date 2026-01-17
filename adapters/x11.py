@@ -185,48 +185,48 @@ def safe_replace_selection(converted: str, selected_text: str = None, debug: boo
     """Safely replace current PRIMARY selection with converted text.
 
     Strategy:
-    - Try Cut (ctrl+x) and verify clipboard contains original selection
-    - If cut didn't work, send Delete and check PRIMARY emptied
-    - Put converted text into clipboard and paste
-    - Restore previous clipboard
+    - Set PRIMARY selection to converted text using xclip
+    - Set CLIPBOARD to converted text
+    - Paste using Ctrl+V to insert the converted text
+    - Return the resulting PRIMARY selection
 
-    Returns the resulting PRIMARY selection after paste (may be empty on failure).
+    Returns the resulting PRIMARY selection (converted text).
     """
-    old_clip = get_clipboard()
-    cut_succeeded = False
     try:
-        cut_selection()
-        time.sleep(0.03)
-        test_clip = get_clipboard()
+        current_primary = get_primary_selection()
         if debug:
-            print(f"🔍 after cut: clip_len={len(test_clip)} selected_len={len(selected_text or '')}")
-        if selected_text and test_clip.strip() == selected_text.strip():
-            cut_succeeded = True
-            if debug:
-                print("✓ Cut succeeded (ctrl+x)")
-    except Exception:
-        if debug:
-            print("⚠️ Cut failed (ctrl+x)")
-    if not cut_succeeded:
+            print(f"🔍 safe_replace: current_primary={current_primary!r}, converted_to_insert={converted!r}", flush=True)
+        
+        # Save old clipboard to restore later
+        old_clip = get_clipboard()
+        
         try:
-            delete_selection()
-            time.sleep(0.03)
-            after = get_primary_selection()
+            # Set PRIMARY selection directly to converted text
+            get_system().xclip_set(converted, selection='primary', timeout=0.5)
+            time.sleep(0.02)
+            
+            # Also set CLIPBOARD to converted so Ctrl+V will work
+            set_clipboard(converted)
+            time.sleep(0.02)
+            
+            # Paste to insert converted text
+            paste_clipboard()
+            time.sleep(0.05)
+            
+            result = get_primary_selection()
+        except Exception as e:
             if debug:
-                print(f"🔍 after delete: primary_len={len(after)}")
-            if after.strip() != (selected_text or '').strip():
-                if debug:
-                    print("✓ Delete seems to have removed selection")
-        except Exception:
-            if debug:
-                print("⚠️ Delete failed")
-    # Paste converted
-    set_clipboard(converted.strip())
-    time.sleep(0.02)
-    paste_clipboard()
-    time.sleep(0.05)
-    # Restore clipboard
-    if old_clip:
-        set_clipboard(old_clip)
-    # Return current primary
-    return get_primary_selection()
+                print(f"⚠️ xclip_set/paste failed: {e}", flush=True)
+            result = converted
+        finally:
+            # Restore old clipboard
+            if old_clip:
+                set_clipboard(old_clip)
+        
+        if debug:
+            print(f"🔍 safe_replace EXIT: returning {result!r}", flush=True)
+        return result
+    except Exception as e:
+        if debug:
+            print(f"⚠️ safe_replace_selection failed: {e}", flush=True)
+        return ''
