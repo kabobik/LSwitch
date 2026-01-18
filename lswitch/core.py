@@ -1473,6 +1473,7 @@ class LSwitch:
         if event.type == ecodes.EV_KEY and event.code == ecodes.KEY_SPACE:
             if self.is_converting and self.config.get('debug'):
                 print(f"🔍 ПРОБЕЛ ЗАБЛОКИРОВАН is_converting=True!")
+
         
         if self.is_converting:
             return
@@ -1497,6 +1498,8 @@ class LSwitch:
             self.event_buffer.append(event)
             
             if event.value == 1:  # Нажатие
+                if self.config.get('debug'):
+                    print(f"🔑 Shift нажат! last_press={self.last_shift_press:.3f} current={current_time:.3f} delta={current_time - self.last_shift_press:.3f}", flush=True)
                 pass  # Просто добавляем в буфер, отслеживание не нужно
             elif event.value == 0:  # Отпускание
                 # If suppression is active, ignore shift releases to avoid retriggering
@@ -1759,7 +1762,7 @@ class LSwitch:
         
         # Основной цикл обработки событий
         try:
-            if self.config.get('debug'):
+            if False:  # Debug logging disabled
                 print(f"🔄 Начало основного цикла обработки событий", flush=True)
             
             while True:
@@ -1786,7 +1789,21 @@ class LSwitch:
                 
                 for key, mask in device_selector.select(timeout=0.1):
                     device = key.fileobj
-                    for event in device.read():
+                    event_count = 0
+                    try:
+                        events = list(device.read())
+                    except (OSError, IOError) as e:
+                        # Device disconnected
+                        if self.config.get('debug'):
+                            print(f"⚠️ Не могу прочитать события с {device.name}: {e}", flush=True)
+                        continue
+                    
+                    for event in events:
+                        event_count += 1
+                        # Don't print every event - too noisy. Only print important ones in debug mode
+                        # if self.config.get('debug'):
+                        #     print(f"📍 [{device.name}] Event #{event_count}: type={event.type}({ecodes.EV_KEY if event.type==1 else event.type}) code={event.code} value={event.value}", flush=True)
+                        
                         # Log space events only when debug is enabled and relevant (avoid noisy logs)
                         if event.code == ecodes.KEY_SPACE and self.config.get('debug'):
                             # Only print when there's content in buffer or a conversion in progress

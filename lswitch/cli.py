@@ -6,8 +6,7 @@ LSwitch CLI entry point
 import sys
 import argparse
 import signal
-from lswitch.core import LSwitch
-from lswitch.config import load_config
+import os
 
 
 def main():
@@ -35,30 +34,35 @@ def main():
     
     args = parser.parse_args()
     
+    # Import after args parsing to avoid import-time side effects
+    from lswitch.core import LSwitch
+    from lswitch.config import load_config
+    
     # Load configuration
     try:
-        if args.config:
-            config = load_config(args.config)
-        else:
-            # Use default (None means load from standard paths)
-            config = load_config(None)
+        config = load_config(args.config, args.debug)
     except Exception as e:
         print(f"❌ Error loading config: {e}", file=sys.stderr)
         return 1
     
-    # Override debug flag if specified
+    # Override debug flag if specified (ensure it's set)
     if args.debug:
         config['debug'] = True
     
     # Create and run LSwitch
     try:
-        ls = LSwitch(config)
+        # Pass config_path to LSwitch so it can load config itself,
+        # OR pass the loaded config if __init__ supports it
+        # For now, pass args.config (path) so LSwitch reloads if needed
+        ls = LSwitch(args.config)
+        
+        # Override debug after construction
+        if args.debug:
+            ls.config['debug'] = True
         
         # Handle signals gracefully
         def signal_handler(signum, frame):
             print("\n👋 LSwitch закрыт")
-            if hasattr(ls, 'stop'):
-                ls.stop()
             sys.exit(0)
         
         signal.signal(signal.SIGINT, signal_handler)
