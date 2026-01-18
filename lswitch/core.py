@@ -100,29 +100,12 @@ try:
 except Exception:
     x11_adapter = None
 
-# Карта переключения EN -> RU
-EN_TO_RU = {
-    'q': 'й', 'w': 'ц', 'e': 'у', 'r': 'к', 't': 'е', 'y': 'н', 'u': 'г', 'i': 'ш', 'o': 'щ', 'p': 'з',
-    '[': 'х', ']': 'ъ', 'a': 'ф', 's': 'ы', 'd': 'в', 'f': 'а', 'g': 'п', 'h': 'р', 'j': 'о', 'k': 'л',
-    'l': 'д', ';': 'ж', "'": 'э', 'z': 'я', 'x': 'ч', 'c': 'с', 'v': 'м', 'b': 'и', 'n': 'т', 'm': 'ь',
-    ',': 'б', '.': 'ю', '/': '.', '`': 'ё',
-    '{': 'х', '}': 'ъ', ':': 'ж', '"': 'э', '<': 'б', '>': 'ю', '?': ',', '~': 'ё',
-    '@': '"', '#': '№', '$': ';', '^': ':', '&': '?'
-}
+# Импорты процессоров для рефакторинга
+from lswitch.processors.text_processor import TextProcessor
+from lswitch.processors.buffer_manager import BufferManager
 
-# Карта переключения RU -> EN
-RU_TO_EN = {v: k for k, v in EN_TO_RU.items()}
-# При обратной маппинге некоторые символы отображаются неоднозначно
-# (например и ',' и '<' мапятся в 'б'). Выберем предпочтительные ASCII-символы
-# чтобы обратная конвертация была предсказуемой и давала «нормальную» форму.
-PREFERRED_REVERSE = {
-    'б': ',',  # prefer comma over '<'
-    'ю': '.',  # prefer dot over '>'
-    'ё': '`',  # prefer backtick for ё (from `)
-    'э': "'", # prefer single-quote for э
-}
-for ru, en in PREFERRED_REVERSE.items():
-    RU_TO_EN[ru] = en
+# Импорт карт конвертации
+from lswitch.conversion_maps import EN_TO_RU, RU_TO_EN
 
 
 class LSwitch:
@@ -313,6 +296,11 @@ class LSwitch:
         self._injected_layout_monitor = layout_monitor
 
         self.config = self.load_config(config_path)
+        
+        # Initialize processors for refactoring
+        self.text_processor = TextProcessor(None, self.config)  # system passed later
+        self.buffer_manager = BufferManager(self.config, debug=self.config.get('debug', False))
+        
         # Track mtime safely — file may not exist in test environments
         cfg_path = self.config.get('_config_path')
         if cfg_path is None:
@@ -366,6 +354,9 @@ class LSwitch:
                 self.input_handler = InputHandler(self)
             except Exception:
                 self.input_handler = None
+        
+        # Update text_processor with system after it's available
+        self.text_processor.system = self.system
 
         # Проекционные свойства для обратной совместимости
         self.had_backspace = False  # Флаг: был ли backspace (пользователь исправляет)
@@ -406,6 +397,9 @@ class LSwitch:
             except Exception as e:
                 print(f"⚠️  Ошибка загрузки UserDict: {e}")
                 self.user_dict = None
+        
+        # Update text_processor with user_dict after it's available  
+        self.text_processor.user_dict = self.user_dict
 
         # Start background threads and runtime integrations only if requested
         if start_threads:
@@ -896,161 +890,11 @@ class LSwitch:
     
     def convert_text(self, text):
         """Конвертирует текст между раскладками с сохранением регистра"""
-        if not text:
-            return text
-        
-        # Определяем раскладку по количеству символов
-        ru_chars = sum(1 for c in text.lower() if c in RU_TO_EN)
-        en_chars = sum(1 for c in text.lower() if c in EN_TO_RU)
-        
-        result = []
-        if ru_chars > en_chars:
-            # Конвертируем RU -> EN
-            for c in text:
-                is_upper = c.isupper()
-                converted = RU_TO_EN.get(c.lower(), c)
-                result.append(converted.upper() if is_upper else converted)
-        else:
-            # Конвертируем EN -> RU
-            for c in text:
-                is_upper = c.isupper()
-                converted = EN_TO_RU.get(c.lower(), c)
-                result.append(converted.upper() if is_upper else converted)
-        
-        return ''.join(result)
+        return self.text_processor.convert_text(text)
     
     def convert_selection(self, prefer_trim_leading=False, user_has_selection=False):
         """Конвертирует выделенный текст через PRIMARY selection (без порчи clipboard)"""
-        # Проверяем наличие минимум 2 раскладок
-        if len(self.layouts) < 2:
-            if self.config.get('debug'):
-                print(f"⚠️  Конвертация невозможна: только {len(self.layouts)} раскладка")
-            return
-        
-        if self.is_converting:
-            return
-        
-        self.is_converting = True
-        # Suppress double-shift detection while performing selection conversion
-        # to avoid replayed events (or adapter-triggered key events) from
-        # retriggering the double-shift handler.
-        self.suppress_shift_detection = True
-        if self.config.get('debug'):
-            print(f"{time.time():.6f} ▸ convert_selection ENTER: suppress={self.suppress_shift_detection}, is_converting={self.is_converting}, user_has_selection={user_has_selection}", flush=True)
-        
-        try:
-            # Получаем выделенный текст из PRIMARY selection (не трогаем clipboard!)
-            try:
-                import lswitch as _pkg
-                adapter = getattr(_pkg, 'x11_adapter', None)
-                if self.config.get('debug'):
-                    print(f"{time.time():.6f} ▸ convert_selection: adapter_present={bool(adapter)}", flush=True)
-                if adapter:
-                    selected_text = adapter.get_primary_selection(timeout=0.5)
-                else:
-                    selected_text = self.system.xclip_get(selection='primary', timeout=0.5).stdout
-                if self.config.get('debug'):
-                    print(f"{time.time():.6f} ▸ convert_selection: selected_text={selected_text!r}", flush=True)
-            except Exception as e:
-                if self.config.get('debug'):
-                    print(f"{time.time():.6f} ▸ convert_selection: error getting primary selection: {e}", flush=True)
-                selected_text = ''
-            
-            if selected_text:
-                # Delegate selection conversion to SelectionManager
-                try:
-                    from selection import SelectionManager
-                    sm = SelectionManager(adapter, repair_enabled=self.config.get('selection_repair', False))
-                    switch_fn = (self.switch_keyboard_layout if self.config.get('switch_layout_after_convert', True) else None)
-
-                    orig, conv = sm.convert_selection(self.convert_text, user_dict=self.user_dict, switch_layout_fn=switch_fn, debug=self.config.get('debug'), prefer_trim_leading=prefer_trim_leading, user_has_selection=user_has_selection)
-
-                    if conv:
-                        if self.user_dict and not self.last_auto_convert:
-                            self.last_manual_convert = {
-                                'original': orig.strip().lower(),
-                                'converted': conv.strip().lower(),
-                                'from_lang': 'ru' if any(('А' <= c <= 'Я') or ('а' <= c <= 'я') for c in orig) else 'en',
-                                'to_lang': 'ru' if any(('А' <= c <= 'Я') or ('а' <= c <= 'я') for c in conv) else 'en',
-                                'time': time.time()
-                            }
-
-                        # Correction detection
-                        auto_marker = self.last_auto_convert or getattr(self, '_recent_auto_marker', None)
-                        if self.user_dict and auto_marker and self.conversion_manager:
-                            try:
-                                if self.conversion_manager.apply_correction(self.user_dict, auto_marker, orig, conv, debug=self.config.get('debug')):
-                                    self.last_auto_convert = None
-                                    self._recent_auto_marker = None
-                            except Exception as e:
-                                if self.config.get('debug'):
-                                    print(f"⚠️ Error applying correction: {e}")
-
-                    # finalize
-                    self.backspace_hold_detected = False
-                    self.update_selection_snapshot()
-                    self.clear_buffer()
-                except Exception as e:
-                    if self.config.get('debug'):
-                        print(f"⚠️ SelectionManager failed: {e}")
-                    # fallback to legacy path (let existing behavior run)
-                    try:
-                        if x11_adapter:
-                            x11_adapter.ctrl_shift_left()
-                        else:
-                            self.system.xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
-                        time.sleep(0.03)
-                        # fallback: call old inline conversion flow
-                        # (we keep it minimal to avoid code duplication)
-                    except Exception:
-                        if self.config.get('debug'):
-                            print("⚠️ Legacy selection fallback failed")
-                    
-                # end selection handling (either via SelectionManager or fallback)
-                
-                # КРИТИЧНО: Обновляем снимок ПОСЛЕ всех операций
-                # Это выделение уже обработано и не должно считаться новым
-                self.update_selection_snapshot()
-                
-                # КРИТИЧНО: Очищаем буфер после конвертации выделенного
-                # Иначе повторная конвертация попытается использовать старые данные
-                self.clear_buffer()
-            else:
-                if self.config.get('debug'):
-                    print("⚠️  Нет выделенного текста")
-                
-        except Exception as e:
-            print(f"⚠️  Ошибка конвертации выделенного: {e}")
-            if self.config.get('debug'):
-                import traceback
-                traceback.print_exc()
-        finally:
-            # Give a small grace period for any synthetic events emitted by
-            # the selection conversion/adapters to be processed.
-            time.sleep(0.05)
-            # Emit explicit Shift releases to avoid stuck-key scenarios
-            try:
-                self.fake_kb.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
-                self.fake_kb.syn()
-                self.fake_kb.write(ecodes.EV_KEY, ecodes.KEY_RIGHTSHIFT, 0)
-                self.fake_kb.syn()
-            except Exception:
-                pass
-            self.suppress_shift_detection = False
-            if self.config.get('debug'):
-                print(f"{time.time():.6f} ▸ convert_selection EXIT: suppress={self.suppress_shift_detection}, is_converting={self.is_converting}, last_shift_press={self.last_shift_press:.6f}", flush=True)
-            # Reset marker as a safety measure
-            self.last_shift_press = 0
-            try:
-                if getattr(self, 'input_handler', None):
-                    self.input_handler._shift_pressed = False
-                    self.input_handler._shift_last_press_time = 0.0
-            except Exception:
-                pass
-            # Allow a short grace period and clear the converting flag so subsequent
-            # conversion requests are permitted.
-            time.sleep(0.05)
-            self.is_converting = False
+        return self.text_processor.convert_selection(self, prefer_trim_leading, user_has_selection)
 
     def switch_keyboard_layout(self):
         """Переключает раскладку клавиатуры через XKB LockGroup"""
