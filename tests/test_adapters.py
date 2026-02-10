@@ -6,8 +6,6 @@
 import sys
 import os
 
-sys.path.insert(0, '/home/anton/VsCode/LSwitch')
-
 # Тестируем определение DE
 from lswitch.utils.desktop import detect_desktop_environment, detect_display_server, get_environment_info
 

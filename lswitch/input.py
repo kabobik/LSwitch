@@ -8,7 +8,7 @@ services (conversion, selection, user_dict, etc.).
 from __future__ import annotations
 
 import time
-from lswitch import system as system
+from . import system as system
 import collections
 import threading
 

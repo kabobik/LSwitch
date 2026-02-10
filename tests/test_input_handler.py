@@ -1,13 +1,7 @@
 import types
 import time
-import importlib.util
-import os
 
-# Import InputHandler and LSwitch implementation
-spec = importlib.util.spec_from_file_location('lsinput', os.path.join(os.path.dirname(__file__), '..', 'lswitch', 'input.py'))
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-InputHandler = mod.InputHandler
+from lswitch.input import InputHandler
 
 # We'll use small DummyLS objects rather than importing LSwitch to avoid package/import shadowing issues in tests
 

@@ -37,7 +37,7 @@ sudo pacman -S python3 xclip xdotool
 ### Шаг 2: Клонируйте и установите LSwitch
 
 ```bash
-git clone https://github.com/yourusername/lswitch.git
+git clone https://github.com/kabobik/lswitch.git
 cd lswitch
 
 # Установка (потребуются права root для доступа к устройствам ввода)
@@ -247,7 +247,7 @@ EOF
 ### Локальный запуск
 
 ```bash
-git clone https://github.com/yourusername/lswitch.git
+git clone https://github.com/kabobik/lswitch.git
 cd lswitch
 
 # Установить зависимости

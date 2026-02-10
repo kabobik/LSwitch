@@ -1,26 +1,18 @@
 #!/usr/bin/env python3
 """Утилиты для работы с темами различных DE"""
 
+from __future__ import annotations
 import os
 import re
 from pathlib import Path
-import importlib
-import importlib.util
 import sys
+from typing import Optional
 
-# Resolve lswitch.system robustly and allow adapter-level injection for tests
-try:
-    _system_mod = importlib.import_module('lswitch.system')
-except Exception:
-    spec = importlib.util.spec_from_file_location('lswitch.system', os.path.join(os.path.dirname(__file__), '..', 'lswitch', 'system.py'))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    sys.modules['lswitch.system'] = module
-    _system_mod = module
+import lswitch.system as _system_mod
 
 _theme_system = None
 
-def set_system(sys_impl):
+def set_system(sys_impl) -> None:
     global _theme_system
     _theme_system = sys_impl
 
@@ -31,7 +23,7 @@ def get_system():
     return getattr(_system_mod, 'SYSTEM', _system_mod)
 
 
-def get_cinnamon_theme_colors():
+def get_cinnamon_theme_colors() -> Optional[dict[str, tuple[int, int, int]]]:
     """
     Получает цвета темы Cinnamon из GTK файлов
     
@@ -76,7 +68,7 @@ def get_cinnamon_theme_colors():
     return None
 
 
-def get_kde_theme_colors():
+def get_kde_theme_colors() -> Optional[dict[str, tuple[int, int, int]]]:  
     """
     Получает цвета темы KDE из kdeglobals
     
@@ -124,7 +116,7 @@ def get_kde_theme_colors():
     return None
 
 
-def get_theme_colors(de_name):
+def get_theme_colors(de_name: str) -> Optional[dict[str, tuple[int, int, int]]]:  
     """
     Получает цвета темы для указанного DE
     
@@ -143,7 +135,7 @@ def get_theme_colors(de_name):
     return get_cinnamon_theme_colors()
 
 
-def get_default_dark_colors():
+def get_default_dark_colors() -> dict[str, tuple[int, int, int]]:
     """
     Возвращает цвета темной темы по умолчанию
     

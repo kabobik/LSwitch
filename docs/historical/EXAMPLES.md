@@ -48,7 +48,7 @@ $ sudo systemctl status lswitch
 ● lswitch.service - LSwitch - Layout Switcher (evdev)
      Loaded: loaded (/etc/systemd/system/lswitch.service; enabled; vendor preset: enabled)
      Active: active (running) since Sun 2026-01-05 01:20:00 MSK; 5min ago
-       Docs: https://github.com/yourusername/lswitch
+       Docs: https://github.com/kabobik/lswitch
    Main PID: 12345 (python3)
       Tasks: 1 (limit: 4915)
      Memory: 15.2M

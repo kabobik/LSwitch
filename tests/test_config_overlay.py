@@ -5,7 +5,7 @@ import shutil
 import sys
 # Ensure project root is on sys.path for imports
 sys.path.insert(0, os.getcwd())
-from lswitch import LSwitch
+from lswitch.core import LSwitch
 
 
 def write_json(path, data):

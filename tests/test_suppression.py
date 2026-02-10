@@ -6,7 +6,7 @@ import pytest
 from evdev import ecodes
 
 import lswitch as ls_mod
-from lswitch import LSwitch
+from lswitch.core import LSwitch
 
 
 class DummyUInput:

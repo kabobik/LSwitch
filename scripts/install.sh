@@ -1,128 +1,131 @@
 #!/bin/bash
-# Скрипт установки LSwitch в систему
+# ═══════════════════════════════════════════
+# LSwitch — Установка в систему
+# Единственный способ: pip3 install + post-install
+# ═══════════════════════════════════════════
 
 set -e
 
-# Цвета для вывода
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║   LSwitch - Установка в систему        ║${NC}"
+echo -e "${GREEN}║   LSwitch — Установка v1.1             ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
 echo
 
-# Проверка прав root
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}❌ Запустите скрипт с правами root:${NC}"
-    echo -e "   sudo ./install.sh"
+# ── Проверки ──────────────────────────────
+if ! command -v python3 &>/dev/null; then
+    echo -e "${RED}❌ python3 не найден. Установите Python 3.8+${NC}"
     exit 1
 fi
 
-echo -e "${YELLOW}📦 Установка зависимостей...${NC}"
-apt-get update -qq
-apt-get install -y python3-evdev python3-pyqt5 xclip xdotool
-
-echo -e "${YELLOW}📁 Копирование файлов...${NC}"
-# Копируем основной скрипт
-install -m 755 lswitch.py /usr/local/bin/lswitch
-
-# Копируем модули
-install -m 644 dictionary.py /usr/local/bin/dictionary.py
-install -m 644 ngrams.py /usr/local/bin/ngrams.py
-install -m 644 user_dictionary.py /usr/local/bin/user_dictionary.py
-
-# Копируем GUI версии
-install -m 755 lswitch_tray.py /usr/local/bin/lswitch-tray  # Старая версия (запускает процесс)
-install -m 755 lswitch_control.py /usr/local/bin/lswitch-control  # Новая версия (панель управления)
-
-# Копируем иконку
-install -Dm644 lswitch.svg /usr/share/pixmaps/lswitch.svg
-
-# Устанавливаем .desktop файлы
-install -Dm644 lswitch-tray.desktop /usr/share/applications/lswitch-tray.desktop
-install -Dm644 lswitch-control.desktop /usr/share/applications/lswitch-control.desktop
-# Автозапуск: используем новую панель управления
-install -Dm644 lswitch-control.desktop /etc/xdg/autostart/lswitch-control.desktop
-
-# Создаём директорию конфигурации
-mkdir -p /etc/lswitch
-install -m 664 config.json /etc/lswitch/config.json
-# Делаем доступным для группы input (для GUI без sudo)
-chgrp input /etc/lswitch/config.json 2>/dev/null || true
-
-echo -e "${YELLOW}🔐 Настройка прав доступа (input devices)...${NC}"
-# Устанавливаем udev правило для доступа к input устройствам
-install -Dm644 99-lswitch.rules /etc/udev/rules.d/99-lswitch.rules
-
-# Перезагружаем udev правила
-udevadm control --reload-rules
-udevadm trigger
-
-# Создаём группу input если её нет
-if ! getent group input > /dev/null 2>&1; then
-    groupadd -r input
-    echo -e "   ✓ Группа input создана"
+if ! command -v pip3 &>/dev/null; then
+    echo -e "${RED}❌ pip3 не найден. Установите: sudo apt install python3-pip${NC}"
+    exit 1
 fi
 
-echo -e "${YELLOW}⚙️  Установка systemd сервиса...${NC}"
+# ── Системные зависимости ─────────────────
+echo -e "${YELLOW}📦 Установка системных зависимостей...${NC}"
+if command -v apt-get &>/dev/null; then
+    sudo apt-get install -y -qq python3-dev xclip xdotool 2>/dev/null || true
+elif command -v dnf &>/dev/null; then
+    sudo dnf install -y python3-devel xclip xdotool 2>/dev/null || true
+elif command -v pacman &>/dev/null; then
+    sudo pacman -S --noconfirm python xclip xdotool 2>/dev/null || true
+fi
+echo -e "   ${GREEN}✓${NC} Системные зависимости"
 
-# Определяем пользователя X-сессии
-X_USER=$(who | grep -E "\(:0\)" | awk '{print $1}' | head -n1)
-if [ -z "$X_USER" ]; then
-    X_USER=$(logname 2>/dev/null || echo "$SUDO_USER")
+# ── Установка пакета ──────────────────────
+echo -e "${YELLOW}📦 Установка LSwitch через pip...${NC}"
+cd "$SCRIPT_DIR"
+
+# Python 3.12+ требует --break-system-packages (PEP 668)
+PIP_EXTRA=""
+PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.minor}")')
+if [ "$PY_VER" -ge 12 ]; then
+    PIP_EXTRA="--break-system-packages"
 fi
 
-if [ -z "$X_USER" ]; then
-    echo -e "${RED}⚠️  Не удалось определить пользователя X-сессии${NC}"
-    echo -e "   Укажите вручную в /etc/systemd/system/lswitch.service"
-    X_USER="anton"
+sudo pip3 install $PIP_EXTRA -e .
+echo -e "   ${GREEN}✓${NC} Пакет установлен"
+
+# ── Системные файлы ───────────────────────
+# data_files из setup.py не копируются при editable install,
+# поэтому устанавливаем их явно
+echo -e "${YELLOW}📁 Установка системных файлов...${NC}"
+sudo cp -v "$SCRIPT_DIR/assets/lswitch.png" /usr/share/pixmaps/lswitch.png
+sudo mkdir -p /etc/systemd/user
+sudo cp -v "$SCRIPT_DIR/config/lswitch.service" /etc/systemd/user/lswitch.service
+sudo cp -v "$SCRIPT_DIR/config/99-lswitch.rules" /etc/udev/rules.d/99-lswitch.rules
+sudo cp -v "$SCRIPT_DIR/config/lswitch-control.desktop" /usr/share/applications/lswitch-control.desktop
+sudo mkdir -p /etc/xdg/autostart
+sudo cp -v "$SCRIPT_DIR/config/lswitch-control.desktop" /etc/xdg/autostart/lswitch-control.desktop
+
+# Удаляем старый user-level override если есть (приоритет выше /etc)
+if [ -f "$HOME/.config/systemd/user/lswitch.service" ]; then
+    echo -e "   ${YELLOW}⚠${NC} Удаляю старый ~/.config/systemd/user/lswitch.service"
+    rm -f "$HOME/.config/systemd/user/lswitch.service"
+fi
+echo -e "   ${GREEN}✓${NC} Системные файлы установлены"
+
+# ── Проверка entry points ─────────────────
+echo -e "${YELLOW}🔍 Проверка команд...${NC}"
+for cmd in lswitch lswitch-control; do
+    if command -v "$cmd" &>/dev/null; then
+        echo -e "   ${GREEN}✓${NC} $cmd → $(which $cmd)"
+    else
+        echo -e "   ${RED}✗${NC} $cmd не найден в PATH"
+    fi
+done
+
+# ── Права доступа к input ─────────────────
+echo -e "${YELLOW}🔐 Настройка прав доступа...${NC}"
+
+# Группа input
+if ! groups "$USER" | grep -q '\binput\b'; then
+    sudo usermod -a -G input "$USER"
+    echo -e "   ${GREEN}✓${NC} Пользователь $USER добавлен в группу input"
+    echo -e "   ${YELLOW}⚠  Перелогиньтесь для применения!${NC}"
+else
+    echo -e "   ${GREEN}✓${NC} Пользователь уже в группе input"
 fi
 
-echo -e "   Пользователь X-сессии: ${GREEN}$X_USER${NC}"
+# udev правила (устанавливаются через data_files в setup.py)
+sudo udevadm control --reload-rules 2>/dev/null || true
+sudo udevadm trigger 2>/dev/null || true
+echo -e "   ${GREEN}✓${NC} udev правила обновлены"
 
-# Добавляем пользователя в группу input (для работы без root)
-usermod -a -G input $X_USER
-echo -e "   ✓ Пользователь $X_USER добавлен в группу 'input'"
-echo -e "   ${YELLOW}⚠️  ВАЖНО: Перелогиньтесь для применения прав!${NC}"
+# ── systemd сервис ───────────────────────
+echo -e "${YELLOW}⚙️  Настройка systemd...${NC}"
+systemctl --user daemon-reload 2>/dev/null || true
+echo -e "   ${GREEN}✓${NC} systemd перезагружен"
+
+# ── Итог ──────────────────────────────────
+echo
+echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   ✅ Установка завершена!              ║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+echo
+echo -e "${CYAN}Команды:${NC}"
+echo -e "  ${GREEN}systemctl --user enable --now lswitch${NC}  Автозапуск + старт"
+echo -e "  ${GREEN}lswitch-control${NC}                        Открыть GUI"
+echo -e "  ${GREEN}lswitch --debug${NC}                        Запуск в отладке"
+echo
+echo -e "${CYAN}Или через make:${NC}"
+echo -e "  ${GREEN}make enable${NC}   Автозапуск + старт"
+echo -e "  ${GREEN}make status${NC}   Статус демона"
+echo -e "  ${GREEN}make logs${NC}     Логи в реальном времени"
 echo
 
-X_AUTH="/home/$X_USER/.Xauthority"
-
-# Копируем unit файл и подставляем переменные
-sed -e "s|XAUTHORITY=/home/anton/.Xauthority|XAUTHORITY=$X_AUTH|" \
-    lswitch.service > /etc/systemd/system/lswitch.service
-
-# Перезагружаем systemd
-systemctl daemon-reload
-
-echo
-echo -e "${GREEN}✅ Установка завершена!${NC}"
-echo
-echo -e "${YELLOW}Управление сервисом:${NC}"
-echo -e "  • Запустить:           sudo systemctl start lswitch"
-echo -e "  • Остановить:          sudo systemctl stop lswitch"
-echo -e "  • Перезапустить:       sudo systemctl restart lswitch"
-echo -e "  • Статус:              sudo systemctl status lswitch"
-echo -e "  • Включить автозапуск: ${GREEN}sudo systemctl enable lswitch${NC}"
-echo -e "  • Отключить автозапуск: sudo systemctl disable lswitch"
-echo
-echo -e "${YELLOW}Логи:${NC}"
-echo -e "  sudo journalctl -u lswitch -f"
-echo
-echo -e "${YELLOW}Конфигурация:${NC}"
-echo -e "  /etc/lswitch/config.json"
-echo
-read -p "Включить автозапуск при загрузке системы? (y/n): " -n 1 -r
+read -p "Включить автозапуск? (y/n): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    systemctl enable lswitch
-    systemctl start lswitch
-    echo -e "${GREEN}✅ Автозапуск включён и сервис запущен!${NC}"
-else
-    echo -e "${YELLOW}Сервис установлен, но не запущен.${NC}"
-    echo -e "Запустите вручную: ${GREEN}sudo systemctl start lswitch${NC}"
+    systemctl --user enable --now lswitch
+    echo -e "${GREEN}✅ Автозапуск включён, демон запущен!${NC}"
 fi
-echo

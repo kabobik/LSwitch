@@ -1,14 +1,14 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=LSwitcher
-Name[ru]=LSwitcher
+Name=LSwitch Control
+Name[ru]=LSwitch Управление
 GenericName=Keyboard Layout Switcher
 GenericName[ru]=Переключатель раскладки клавиатуры
-Comment=Control panel for LSwitch systemd service
-Comment[ru]=Панель управления службой LSwitch
+Comment=Control panel for LSwitch keyboard layout switcher
+Comment[ru]=Панель управления переключателем раскладки LSwitch
 Icon=lswitch
-Exec=/usr/local/bin/lswitch-control
+Exec=lswitch-control
 Terminal=false
 Categories=Utility;Settings;
 Keywords=keyboard;layout;switch;language;control;

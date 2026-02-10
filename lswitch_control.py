@@ -7,29 +7,15 @@ LSwitch - GUI панель управления службой
 
 import sys
 import os
-
-# Добавляем пути для импорта модулей
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, '/usr/local/lib/lswitch')
-
-from __version__ import __version__
 import json
 import time
 import signal
+import shutil
 import importlib
-import importlib.util
-import os
-import sys
 
-# Import lswitch.system robustly (work even if top-level lswitch.py exists)
-try:
-    _system_mod = importlib.import_module('lswitch.system')
-except Exception:
-    spec = importlib.util.spec_from_file_location('lswitch.system', os.path.join(os.path.dirname(__file__), 'lswitch', 'system.py'))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    sys.modules['lswitch.system'] = module
-    _system_mod = module
+from __version__ import __version__
+
+import lswitch.system as _system_mod
 
 # Adapter-level override for DI in tests
 _control_system = None
@@ -44,7 +30,6 @@ def get_system():
         return _control_system
     return getattr(_system_mod, 'SYSTEM', _system_mod)
 
-import time
 from PyQt5.QtWidgets import (QApplication, QSystemTrayIcon, QAction,
                              QMessageBox, QLabel)
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPalette, QCursor, QFont
@@ -179,9 +164,10 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.adapter = get_adapter()
         print(f"Используется адаптер: {self.adapter.__class__.__name__}", flush=True)
         
-        # Загружаем конфигурацию
-        # Load user-only config
-        self.config = self.load_config()
+        # Загружаем конфигурацию через ConfigManager
+        from lswitch.config import ConfigManager
+        self.config_manager = ConfigManager()
+        self.config = self.config_manager.get_all()
 
         # Состояние чекбоксов
         self.auto_switch_checked = self.config.get('auto_switch', True)
@@ -372,53 +358,42 @@ class LSwitchControlPanel(QSystemTrayIcon):
         # Для CustomMenu обрабатываем правый клик вручную
     
     def load_config(self):
-        """Загружает конфигурацию из файла с терпимым парсером (удаляет строки-комментарии)"""
-        config_path = os.path.expanduser('~/.config/lswitch/config.json')
-        try:
-            with open(config_path, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            try:
-                # Фолбэк: очищаем строки-комментарии и пробуем снова
-                with open(config_path, 'r') as f:
-                    lines = [ln for ln in f if not ln.lstrip().startswith(("#","//"))]
-                    cleaned = ''.join(lines)
-                    return json.loads(cleaned)
-            except Exception as e2:
-                print(f"Не удалось загрузить конфиг: {e2}", file=sys.stderr, flush=True)
-                return {
-                    'auto_switch': True,
-                    'user_dict_enabled': False,
-                    'dictionaries': []
-                }
+        """Load configuration using ConfigManager."""
+        return self.config_manager.get_all()
     
     def save_config(self):
-        """Сохраняет конфигурацию в файл.
-
-        По умолчанию — сохраняет локально без запроса. Если пользователь включил
-        опцию `apply_system_by_default`, выполняется автоматическая попытка применения
-        в `/etc/lswitch/config.json` (через pkexec/sudo), учитывая политику админа.
-        """
-        config_path = os.path.expanduser('~/.config/lswitch/config.json')
+        """Save configuration using ConfigManager."""
         try:
-            os.makedirs(os.path.dirname(config_path), exist_ok=True)
-            with open(config_path, 'w') as f:
-                json.dump(self.config, f, indent=4)
-
-
-            return True
+            # Update config manager with current values
+            self.config_manager.update(self.config)
+            return self.config_manager.save()
         except Exception as e:
             print(f"Не удалось сохранить конфиг: {e}", file=sys.stderr, flush=True)
-            self.system_config_applied = False
             return False
     
     def get_service_status(self):
-        """Получает статус службы"""
+        """Получает статус службы (проверяет systemctl и процессы)"""
         try:
+            # Сначала проверяем systemctl
             result = get_system().run(['systemctl', '--user', 'is-active', 'lswitch'], capture_output=True, text=True, timeout=2)
-            return result.stdout.strip()
+            status = result.stdout.strip()
+            if status == 'active':
+                return 'active'
         except Exception:
-            return 'unknown'
+            pass
+        
+        # Если systemctl не знает о демоне, проверяем процессы
+        try:
+            # Ищем процесс python3 -m lswitch
+            result = get_system().run(['pgrep', '-f', '^python3 -m lswitch'], capture_output=True, text=True, timeout=2)
+            if result.returncode == 0 and result.stdout.strip():
+                # Демон запущен вручную (вне systemctl)
+                return 'active'
+        except Exception:
+            pass
+        
+        # Если оба способа не нашли демон
+        return 'inactive'
     
     def update_service_status(self):
         """Обновляет отображение статуса службы в меню"""
@@ -463,7 +438,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
             return False
     
     def run_systemctl(self, action):
-        """Выполняет команду systemctl"""
+        """Выполняет команду systemctl с защитой от дублей"""
         # Respect config toggle: allow GUI to manage service
         if not self.config.get('gui_manage_service', True):
             # Inform the user that GUI control is disabled
@@ -472,6 +447,19 @@ class LSwitchControlPanel(QSystemTrayIcon):
             except Exception:
                 pass
             return False
+
+        # Дополнительная защита для 'start': проверяем, не запущен ли уже демон
+        if action == 'start':
+            try:
+                result = get_system().run(['pgrep', '-f', '^python3 -m lswitch'], capture_output=True, text=True, timeout=2)
+                if result.returncode == 0 and result.stdout.strip():
+                    try:
+                        self.showMessage("LSwitch", "Демон уже запущен! Остановите его перед повторным запуском.", QSystemTrayIcon.Warning, 3000)
+                    except Exception:
+                        pass
+                    return False
+            except Exception:
+                pass
 
         try:
             get_system().run(['systemctl', '--user', action, 'lswitch'], check=True, timeout=10)
@@ -576,14 +564,15 @@ class LSwitchControlPanel(QSystemTrayIcon):
             env_parts.append(f"DISPLAY={os.environ.get('DISPLAY')}")
 
         # Build sudo-based command to run command in user's session with env
-        cmd = ['sudo', '-u', username, 'env'] + env_parts + ['/usr/local/bin/lswitch-control']
+        lsc_bin = shutil.which('lswitch-control') or 'lswitch-control'
+        cmd = ['sudo', '-u', username, 'env'] + env_parts + [lsc_bin]
         try:
             system.Popen(cmd)
             return True
         except Exception:
             # fallback to su -c
             try:
-                cmd2 = ['su', '-', username, '-c', '/usr/local/bin/lswitch-control &']
+                cmd2 = ['su', '-', username, '-c', f'{lsc_bin} &']
                 system.Popen(cmd2)
                 return True
             except Exception:
@@ -775,9 +764,10 @@ class LSwitchControlPanel(QSystemTrayIcon):
                         break
                 if not src:
                     # Если исходный .desktop не найден — создаём минимальный .desktop в автозапуске
-                    content = """[Desktop Entry]
+                    lsc_bin = shutil.which('lswitch-control') or 'lswitch-control'
+                    content = f"""[Desktop Entry]
 Type=Application
-Exec=/usr/local/bin/lswitch-control
+Exec={lsc_bin}
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true

@@ -1,8 +1,5 @@
 """Адаптеры GUI для различных окружений рабочего стола"""
 
-import sys
-sys.path.insert(0, '/home/anton/VsCode/LSwitch')
-
 from lswitch.adapters.base import BaseGUIAdapter
 from lswitch.adapters.cinnamon import CinnamonAdapter
 from lswitch.adapters.kde import KDEAdapter

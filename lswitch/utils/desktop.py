@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Определение окружения рабочего стола и display server"""
 
+from __future__ import annotations
 import os
 
 
-def detect_desktop_environment():
+def detect_desktop_environment() -> str:
     """
     Определяет текущее окружение рабочего стола
     
@@ -29,7 +30,7 @@ def detect_desktop_environment():
     return 'generic'
 
 
-def detect_display_server():
+def detect_display_server() -> str:
     """
     Определяет используемый display server
     
@@ -45,7 +46,7 @@ def detect_display_server():
     return 'x11'
 
 
-def get_environment_info():
+def get_environment_info() -> dict[str, str]:
     """
     Возвращает полную информацию об окружении
     

@@ -2,20 +2,10 @@
 
 Provides small, test-friendly wrappers so we can mock X11 interactions in tests.
 """
-import importlib
-import importlib.util
 import os
 import sys
 
-# Import lswitch.system robustly (work even if top-level lswitch.py exists)
-try:
-    system_mod = importlib.import_module('lswitch.system')
-except Exception:
-    spec = importlib.util.spec_from_file_location('lswitch.system', os.path.join(os.path.dirname(__file__), '..', 'lswitch', 'system.py'))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    sys.modules['lswitch.system'] = module
-    system_mod = module
+import lswitch.system as system_mod
 
 # Adapter-level override for DI in tests. By default we prefer
 # to call functions on `lswitch.system.SYSTEM` (the module-level instance)

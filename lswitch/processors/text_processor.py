@@ -122,7 +122,7 @@ class TextProcessor:
         try:
             # Получаем выделенный текст из PRIMARY selection (не трогаем clipboard!)
             try:
-                import lswitch as _pkg
+                import lswitch.core as _pkg
                 adapter = getattr(_pkg, 'x11_adapter', None)
                 if self.config.get('debug'):
                     print(f"{time.time():.6f} ▸ convert_selection: adapter_present={bool(adapter)}", flush=True)
@@ -140,7 +140,7 @@ class TextProcessor:
             if selected_text:
                 # Delegate selection conversion to SelectionManager
                 try:
-                    from selection import SelectionManager
+                    from lswitch.selection import SelectionManager
                     sm = SelectionManager(adapter, repair_enabled=self.config.get('selection_repair', False))
                     switch_fn = (parent.switch_keyboard_layout if self.config.get('switch_layout_after_convert', True) else None)
 
@@ -297,135 +297,3 @@ class TextProcessor:
         finally:
             parent.is_converting = False
 
-    def convert_selection(self, parent, prefer_trim_leading=False, user_has_selection=False):
-        """Конвертирует выделенный текст через PRIMARY selection (без порчи clipboard)"""
-        # Проверяем наличие минимум 2 раскладок
-        if len(parent.layouts) < 2:
-            if self.config.get('debug'):
-                print(f"⚠️  Конвертация невозможна: только {len(parent.layouts)} раскладка")
-            return
-        
-        if parent.is_converting:
-            return
-        
-        parent.is_converting = True
-        # Suppress double-shift detection while performing selection conversion
-        # to avoid replayed events (or adapter-triggered key events) from
-        # retriggering the double-shift handler.
-        parent.suppress_shift_detection = True
-        if self.config.get('debug'):
-            print(f"{time.time():.6f} ▸ convert_selection ENTER: suppress={parent.suppress_shift_detection}, is_converting={parent.is_converting}, user_has_selection={user_has_selection}", flush=True)
-        
-        try:
-            # Получаем выделенный текст из PRIMARY selection (не трогаем clipboard!)
-            try:
-                import lswitch as _pkg
-                adapter = getattr(_pkg, 'x11_adapter', None)
-                if self.config.get('debug'):
-                    print(f"{time.time():.6f} ▸ convert_selection: adapter_present={bool(adapter)}", flush=True)
-                if adapter:
-                    selected_text = adapter.get_primary_selection(timeout=0.5)
-                else:
-                    selected_text = self.system.xclip_get(selection='primary', timeout=0.5).stdout
-                if self.config.get('debug'):
-                    print(f"{time.time():.6f} ▸ convert_selection: selected_text={selected_text!r}", flush=True)
-            except Exception as e:
-                if self.config.get('debug'):
-                    print(f"{time.time():.6f} ▸ convert_selection: error getting primary selection: {e}", flush=True)
-                selected_text = ''
-            
-            if selected_text:
-                # Delegate selection conversion to SelectionManager
-                try:
-                    from lswitch.selection import SelectionManager
-                    sm = SelectionManager(adapter, repair_enabled=self.config.get('selection_repair', False))
-                    switch_fn = (parent.switch_keyboard_layout if self.config.get('switch_layout_after_convert', True) else None)
-
-                    orig, conv = sm.convert_selection(self.convert_text, user_dict=self.user_dict, switch_layout_fn=switch_fn, debug=self.config.get('debug'), prefer_trim_leading=prefer_trim_leading, user_has_selection=user_has_selection)
-
-                    if conv:
-                        if self.user_dict and not parent.last_auto_convert:
-                            parent.last_manual_convert = {
-                                'original': orig.strip().lower(),
-                                'converted': conv.strip().lower(),
-                                'from_lang': 'ru' if any(('А' <= c <= 'Я') or ('а' <= c <= 'я') for c in orig) else 'en',
-                                'to_lang': 'ru' if any(('А' <= c <= 'Я') or ('а' <= c <= 'я') for c in conv) else 'en',
-                                'time': time.time()
-                            }
-
-                        # Correction detection
-                        auto_marker = parent.last_auto_convert or getattr(parent, '_recent_auto_marker', None)
-                        if self.user_dict and auto_marker and parent.conversion_manager:
-                            try:
-                                if parent.conversion_manager.apply_correction(self.user_dict, auto_marker, orig, conv, debug=self.config.get('debug')):
-                                    parent.last_auto_convert = None
-                                    parent._recent_auto_marker = None
-                            except Exception as e:
-                                if self.config.get('debug'):
-                                    print(f"⚠️ Error applying correction: {e}")
-
-                    # finalize
-                    parent.backspace_hold_detected = False
-                    parent.update_selection_snapshot()
-                    parent.clear_buffer()
-                except Exception as e:
-                    if self.config.get('debug'):
-                        print(f"⚠️ SelectionManager failed: {e}")
-                    # fallback to legacy path (let existing behavior run)
-                    try:
-                        if adapter:
-                            adapter.ctrl_shift_left()
-                        else:
-                            self.system.xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
-                        time.sleep(0.03)
-                        # fallback: call old inline conversion flow
-                        # (we keep it minimal to avoid code duplication)
-                    except Exception:
-                        if self.config.get('debug'):
-                            print("⚠️ Legacy selection fallback failed")
-                    
-                # end selection handling (either via SelectionManager or fallback)
-                
-                # КРИТИЧНО: Обновляем снимок ПОСЛЕ всех операций
-                # Это выделение уже обработано и не должно считаться новым
-                parent.update_selection_snapshot()
-                
-                # КРИТИЧНО: Очищаем буфер после конвертации выделенного
-                # Иначе повторная конвертация попытается использовать старые данные
-                parent.clear_buffer()
-            else:
-                if self.config.get('debug'):
-                    print("⚠️  Нет выделенного текста")
-                
-        except Exception as e:
-            print(f"⚠️  Ошибка конвертации выделенного: {e}")
-            if self.config.get('debug'):
-                import traceback
-                traceback.print_exc()
-        finally:
-            # Give a small grace period for any synthetic events emitted by
-            # the selection conversion/adapters to be processed.
-            time.sleep(0.05)
-            # Emit explicit Shift releases to avoid stuck-key scenarios
-            try:
-                parent.fake_kb.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
-                parent.fake_kb.syn()
-                parent.fake_kb.write(ecodes.EV_KEY, ecodes.KEY_RIGHTSHIFT, 0)
-                parent.fake_kb.syn()
-            except Exception:
-                pass
-            parent.suppress_shift_detection = False
-            if self.config.get('debug'):
-                print(f"{time.time():.6f} ▸ convert_selection EXIT: suppress={parent.suppress_shift_detection}, is_converting={parent.is_converting}, last_shift_press={parent.last_shift_press:.6f}", flush=True)
-            # Reset marker as a safety measure
-            parent.last_shift_press = 0
-            try:
-                if hasattr(parent, 'input_handler') and parent.input_handler:
-                    parent.input_handler._shift_pressed = False
-                    parent.input_handler._shift_last_press_time = 0.0
-            except Exception:
-                pass
-            # Allow a short grace period and clear the converting flag so subsequent
-            # conversion requests are permitted.
-            time.sleep(0.05)
-            parent.is_converting = False

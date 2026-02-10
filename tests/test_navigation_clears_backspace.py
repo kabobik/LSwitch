@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from lswitch import LSwitch
+from lswitch.core import LSwitch
 from evdev import ecodes
 import time
 

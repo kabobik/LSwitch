@@ -1,72 +1,87 @@
-.PHONY: install uninstall start stop restart status enable disable logs clean test
+.PHONY: install uninstall start stop restart status enable disable logs clean test post-install help
 
-# Установка (используется setup.py через pip)
+# ═══════════════════════════════════════════
+# Установка / удаление (единственный способ)
+# ═══════════════════════════════════════════
+
 install:
 	@echo "📦 Установка LSwitch..."
 	@sudo pip3 install -e .
+	@$(MAKE) post-install
+	@echo "✅ Установка завершена!"
+	@echo ""
+	@echo "Запуск:  make enable   (автостарт + запуск)"
+	@echo "GUI:     lswitch-control"
 
-# Удаление
+post-install:
+	@echo "🔐 Настройка прав..."
+	@sudo usermod -a -G input $(USER) 2>/dev/null || true
+	@sudo udevadm control --reload-rules 2>/dev/null || true
+	@sudo udevadm trigger 2>/dev/null || true
+	@systemctl --user daemon-reload 2>/dev/null || true
+
 uninstall:
 	@echo "🗑️  Удаление LSwitch..."
+	@systemctl --user stop lswitch 2>/dev/null || true
+	@systemctl --user disable lswitch 2>/dev/null || true
 	@sudo pip3 uninstall -y lswitch
+	@echo "✅ Удалено"
 
-# Управление сервисом
+# ═══════════════════════════════════════════
+# Управление сервисом (user-level systemd)
+# ═══════════════════════════════════════════
+
 start:
-	@echo "▶️  Запуск LSwitch..."
-	@sudo systemctl start lswitch
-	@sudo systemctl status lswitch --no-pager
+	@systemctl --user start lswitch
+	@systemctl --user status lswitch --no-pager
 
 stop:
-	@echo "⏸️  Остановка LSwitch..."
-	@sudo systemctl stop lswitch
+	@systemctl --user stop lswitch
 
 restart:
-	@echo "🔄 Перезапуск LSwitch..."
-	@sudo systemctl restart lswitch
-	@sudo systemctl status lswitch --no-pager
+	@systemctl --user restart lswitch
+	@systemctl --user status lswitch --no-pager
 
 status:
-	@sudo systemctl status lswitch --no-pager
+	@systemctl --user status lswitch --no-pager || true
 
 enable:
-	@echo "✅ Включение автозапуска..."
-	@sudo systemctl enable lswitch
-	@sudo systemctl start lswitch
+	@systemctl --user enable lswitch
+	@systemctl --user start lswitch
+	@echo "✅ Автозапуск включён"
 
 disable:
-	@echo "❌ Отключение автозапуска..."
-	@sudo systemctl disable lswitch
+	@systemctl --user disable lswitch
+	@echo "❌ Автозапуск отключён"
 
-# Просмотр логов
 logs:
-	@sudo journalctl -u lswitch -f
+	@journalctl --user-unit=lswitch -f
 
-# Тестирование
+# ═══════════════════════════════════════════
+# Разработка
+# ═══════════════════════════════════════════
+
 test:
-	@echo "🧪 Запуск тестов..."
 	@pytest -v
 
-# Очистка
 clean:
-	@rm -rf __pycache__
-	@rm -rf *.pyc
-	@rm -rf .pytest_cache
-	@rm -rf build dist *.egg-info
+	@rm -rf __pycache__ .pytest_cache build dist *.egg-info
+	@find . -name '*.pyc' -delete
 	@echo "🧹 Очистка завершена"
 
-# Помощь
 help:
-	@echo "LSwitch - Команды управления:"
+	@echo "LSwitch — команды:"
 	@echo ""
-	@echo "  make install    - Установить в систему (pip3)"
-	@echo "  make uninstall  - Удалить из системы"
-	@echo "  make start      - Запустить сервис"
-	@echo "  make stop       - Остановить сервис"
-	@echo "  make restart    - Перезапустить сервис"
-	@echo "  make status     - Статус сервиса"
-	@echo "  make enable     - Включить автозапуск"
-	@echo "  make disable    - Отключить автозапуск"
-	@echo "  make logs       - Просмотр логов в реальном времени"
-	@echo "  make test       - Запустить тесты (pytest)"
-	@echo "  make clean      - Очистить временные файлы"
+	@echo "  make install    Установить (pip + права + systemd)"
+	@echo "  make uninstall  Удалить"
 	@echo ""
+	@echo "  make start      Запустить демон"
+	@echo "  make stop       Остановить"
+	@echo "  make restart    Перезапустить"
+	@echo "  make status     Статус"
+	@echo "  make enable     Автозапуск ON"
+	@echo "  make disable    Автозапуск OFF"
+	@echo "  make logs       Логи (follow)"
+	@echo ""
+	@echo "  make test       Тесты"
+	@echo "  make clean      Очистка"

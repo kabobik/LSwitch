@@ -6,7 +6,7 @@ LSwitch - Layout Switcher for Linux (evdev version)
 
 import sys
 import time
-from lswitch import system as system
+from . import system as system
 import json
 import os
 import collections
@@ -16,9 +16,6 @@ import signal
 import threading
 import ctypes
 import ctypes.util
-
-# Добавляем /usr/local/bin в путь для импорта dictionary.py
-# Также добавляем /usr/local/lib/lswitch в путь — туда копирует инсталлятор утилиты `utils` и `adapters`
 
 try:
     import evdev
@@ -90,13 +87,11 @@ try:
     USER_DICT_AVAILABLE = True
 except ImportError:
     USER_DICT_AVAILABLE = False
-    if os.path.exists('/usr/local/bin/user_dictionary.py'):
-        print("⚠️  user_dictionary.py найден но не импортируется")
 
 
 # Adapter для X11 (xclip/xdotool) — можно мокировать в тестах
 try:
-    from adapters import x11 as x11_adapter
+    from lswitch.adapters import x11 as x11_adapter
 except Exception:
     x11_adapter = None
 
@@ -202,7 +197,7 @@ class LSwitch:
             config_path = os.environ.get('LSWITCH_TEST_SYSTEM_CONFIG') or '/etc/lswitch/config.json'
 
         try:
-            from lswitch import config as _cfg
+            from . import config as _cfg
             cfg = _cfg.load_config(config_path, debug=False)
         except Exception:
             # Ultimate fallback: return minimal defaults
@@ -281,13 +276,13 @@ class LSwitch:
         # Dependency-injectable system wrapper (default to module SYSTEM)
         if system is None:
             try:
-                from lswitch import system as _system_mod
+                from . import system as _system_mod
                 self.system = _system_mod.SYSTEM
             except Exception:
                 # Ultimate fallback: keep using the module-level convenience
                 # functions (legacy behaviour) if SYSTEM is not available.
-                import lswitch as _pkg
-                self.system = getattr(_pkg, 'system', None)
+                import lswitch.core as _core
+                self.system = getattr(_core, 'system', None)
         else:
             self.system = system
 
@@ -431,9 +426,9 @@ class LSwitch:
 
             # Conversion manager: centralizes mode selection
             try:
-                from conversion import ConversionManager
-                import lswitch as _pkg
-                cm_x11 = getattr(_pkg, 'x11_adapter', x11_adapter)
+                from lswitch.conversion import ConversionManager
+                import lswitch.core as _core
+                cm_x11 = getattr(_core, 'x11_adapter', x11_adapter)
                 self.conversion_manager = ConversionManager(config=self.config, x11_adapter=cm_x11)
             except Exception:
                 self.conversion_manager = None
@@ -446,42 +441,6 @@ class LSwitch:
             # If a layout monitor was injected, attach it but do NOT start it
             if self._injected_layout_monitor is not None:
                 self.layout_monitor = self._injected_layout_monitor
-        
-        # Ссылка на текущее устройство для отладки
-        self.current_device = None
-        
-        # X11 для определения раскладки через XKB
-        self.x11_display = display.Display() if XLIB_AVAILABLE else None
-        self.layouts = self.get_layouts_from_xkb()
-        
-        # Проверка минимум 2 раскладок для работы
-        if len(self.layouts) < 2:
-            print(f"⚠️  Обнаружена только {len(self.layouts)} раскладка: {self.layouts}")
-            print("   Программа будет работать в ограниченном режиме (без конвертации)")
-        else:
-            print(f"✓ Раскладки готовы: {self.layouts}")
-        
-        # Синхронизация текущей раскладки
-        self.current_layout = self.get_current_layout()
-        self.layout_lock = threading.Lock()
-        self.running = True
-        
-        # Пользовательский словарь для самообучения
-        self.user_dict = None
-        self.last_auto_convert = None  # {"word": original, "converted_to": result, "time": timestamp, "lang": lang}
-        self.last_manual_convert = None  # {"original": text, "converted": result, "from_lang": lang, "to_lang": lang, "time": timestamp}
-        if USER_DICT_AVAILABLE and self.config.get('user_dict_enabled', False):
-            try:
-                self.user_dict = UserDictionary()
-                min_weight = self.config.get('user_dict_min_weight', 2)
-                self.user_dict.data['settings']['min_weight'] = min_weight
-                if self.config.get('debug'):
-                    stats = self.user_dict.get_stats()
-                    print(f"📚 UserDict загружен: {stats['total_words']} слов, {stats['total_conversions']} конвертаций, {stats['total_corrections']} корректировок")
-            except Exception as e:
-                print(f"⚠️  Ошибка загрузки UserDict: {e}")
-                self.user_dict = None
-        
         
         # Коды клавиш для отслеживания (алфавитно-цифровые + пробел)
         self.active_keycodes = set(range(2, 58))  # От '1' до '/'
@@ -510,17 +469,6 @@ class LSwitch:
         # Флаг для перезагрузки конфигурации
         self.config_reload_requested = False
         
-        # Отслеживание изменений конфига
-        try:
-            cfg_path = self.config.get('_config_path') or self.config.get('_user_config_path')
-            if cfg_path is None:
-                cfg_path = '/etc/lswitch/config.json'
-            if isinstance(cfg_path, str):
-                self.config_mtime = os.path.getmtime(cfg_path)
-            else:
-                self.config_mtime = None
-        except (OSError, FileNotFoundError, TypeError):
-            self.config_mtime = None
         self.last_config_check = time.time()
     
     def get_layouts_from_xkb(self):
@@ -724,26 +672,15 @@ class LSwitch:
     def check_and_auto_convert(self):
         """Delegate to `lswitch.conversion.check_and_auto_convert` for auto-conversion."""
         try:
-            from lswitch import conversion as _conv
+            from . import conversion as _conv
             return _conv.check_and_auto_convert(self)
         except Exception:
             # Fallback: run existing inline logic if import fails (robustness)
-            return None
-                    
-        except ImportError:
-            # Фолбэк на старую логику если ngrams.py недоступен
-            if self.config.get('debug'):
-                print(f"⚠️  ngrams.py недоступен, используем базовую логику")
-            self._check_with_dictionary(text)
-        except Exception as e:
-            if self.config.get('debug'):
-                import traceback
-                print(f"⚠️  Ошибка автоконвертации: {e}")
-                traceback.print_exc()    
+            return None    
     def _check_with_dictionary(self, text):
         """Legacy wrapper that delegates to `lswitch.conversion._check_with_dictionary`."""
         try:
-            from lswitch import conversion as _conv
+            from . import conversion as _conv
             return _conv._check_with_dictionary(self, text)
         except Exception:
             # Fallback to original inline behavior if delegation fails
@@ -825,7 +762,7 @@ class LSwitch:
             # Support Cyrillic characters by mapping via RU_TO_EN when needed
             if code is None:
                 try:
-                    from lswitch.conversion import RU_TO_EN
+                    from lswitch.conversion_maps import RU_TO_EN
                     mapped = RU_TO_EN.get(lower)
                     if mapped:
                         code = CHAR_MAP.get(mapped.lower())
@@ -1232,8 +1169,8 @@ class LSwitch:
                 # Attempt to ensure a selection exists, but do not treat selection
                 # navigation failure as fatal — proceed to convert_selection()
                 # which may still find an existing selection.
-                import lswitch as _pkg
-                adapter = getattr(_pkg, 'x11_adapter', None)
+                import lswitch.core as _core
+                adapter = getattr(_core, 'x11_adapter', None)
 
                 # Try to expand/select last word only if we don't already have a fresh selection
                 try:

@@ -1,4 +1,4 @@
-from lswitch import LSwitch
+from lswitch.core import LSwitch
 import time
 
 

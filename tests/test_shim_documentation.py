@@ -12,5 +12,6 @@ def test_shim_exports_core_symbols():
 
 
 def test_shim_sets_path():
-    root = os.path.dirname(lswitch.__file__)
-    assert os.path.join(root, 'lswitch') in lswitch.__path__
+    # lswitch is a proper package now — __path__ should contain the package dir
+    assert len(lswitch.__path__) >= 1
+    assert lswitch.__path__[0].endswith('lswitch')

@@ -3,7 +3,7 @@ import time
 from types import SimpleNamespace
 
 import lswitch as ls_mod
-from lswitch import LSwitch
+from lswitch.core import LSwitch
 from lswitch.selection import SelectionManager
 
 

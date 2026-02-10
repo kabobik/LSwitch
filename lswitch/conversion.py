@@ -7,6 +7,7 @@ Responsibility:
 """
 from typing import Callable
 import time
+from evdev import ecodes
 
 # Default application policies: prefer retype (fast) in IDEs, selection (slow) in browsers
 DEFAULT_APP_POLICIES = {
@@ -161,6 +162,7 @@ def check_and_auto_convert(ls):
     
     This function is called when space is pressed (end of word).
     It analyzes the word in the buffer and automatically converts if needed.
+    Uses the same reliable mechanism as manual conversion (backspace + switch layout + replay).
     
     Args:
         ls: LSwitch instance with text_buffer, user_dict, config, etc.
@@ -169,21 +171,37 @@ def check_and_auto_convert(ls):
         None
     """
     try:
+        debug = getattr(ls, 'config', {}).get('debug', False)
+        if debug:
+            print(f"🎯 check_and_auto_convert() CALLED! buffer={len(getattr(ls, 'text_buffer', [])) if hasattr(ls, 'text_buffer') else 'NO BUFFER'}")
+        
         # Only proceed if auto_switch is enabled
-        if not ls.config.get('auto_switch', False):
+        auto_switch = ls.config.get('auto_switch', False)
+        if debug:
+            print(f"🎯 auto_switch enabled: {auto_switch}")
+        if not auto_switch:
             return
         
         # Get the word from the text buffer
         if not ls.text_buffer:
             return
         
-        word = ''.join(ls.text_buffer).strip()
+        # Log raw buffer state
+        raw_buffer = ''.join(ls.text_buffer)
+        if debug:
+            print(f"🎯 Raw buffer: {repr(raw_buffer)}, len={len(ls.text_buffer)}")
+        
+        word = raw_buffer.strip()
         if not word or len(word) < 1:
+            if debug:
+                print(f"🎯 Empty word after strip, returning")
             return
         
+        if debug:
+            print(f"🎯 Word to check: {repr(word)}")
+        
         # Use ngrams to check if conversion should happen
-        from lswitch import ngrams
-        import subprocess
+        from . import ngrams
         
         # Get user_dict if available
         user_dict = getattr(ls, 'user_dict', None)
@@ -195,53 +213,34 @@ def check_and_auto_convert(ls):
             user_dict=user_dict
         )
         
-        if ls.config.get('debug'):
-            print(f"🤖 Auto-convert check: '{word}' → should_convert={should_convert}, reason='{reason}'")
+        if debug:
+            print(f"🤖 Auto-convert check: '{word}' → should_convert={should_convert}, best='{best_text}', reason='{reason}'")
         
         if should_convert and best_text != word:
-            # We need to convert the text
-            if ls.config.get('debug'):
+            if debug:
                 print(f"🔄 Auto-converting: '{word}' → '{best_text}'")
             
             try:
-                # Delete the current word (select it backward and delete)
-                # Use Ctrl+Shift+Left to select the word backward
-                ls.system.xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
-                time.sleep(0.05)
+                # Set the auto-convert marker BEFORE conversion so undo is possible
+                ls.last_auto_convert = {
+                    'word': word,
+                    'converted_to': best_text,
+                    'time': time.time()
+                }
+                # Keep a copy for correction detection after marker is cleared
+                ls._recent_auto_marker = dict(ls.last_auto_convert)
                 
-                # Delete the selected text
-                ls.system.xdotool_key('Delete', timeout=0.1, stderr=subprocess.DEVNULL)
-                time.sleep(0.05)
+                # Use the same reliable mechanism as manual conversion:
+                # backspace to delete, switch layout, replay key events
+                ls.convert_and_retype(is_auto=True)
                 
-                # Type the converted text using fallback method for better compatibility
-                if hasattr(ls, '_fallback_type_text'):
-                    ls._fallback_type_text(best_text)
-                else:
-                    # Fallback: use fake_kb directly
-                    from evdev import ecodes
-                    for char in best_text.lower():
-                        if char == ' ':
-                            code = ecodes.KEY_SPACE
-                        elif 'a' <= char <= 'z':
-                            code = getattr(ecodes, f'KEY_{char.upper()}')
-                        else:
-                            continue
-                        ls.fake_kb.write(ecodes.EV_KEY, code, 1)
-                        ls.fake_kb.syn()
-                        ls.fake_kb.write(ecodes.EV_KEY, code, 0)
-                        ls.fake_kb.syn()
-                
-                time.sleep(0.05)
-                
-                # Update buffer to reflect the change
-                ls.text_buffer = list(best_text.lower())
-                ls.chars_in_buffer = len(best_text)
-                
-                if ls.config.get('debug'):
+                if debug:
                     print(f"✓ Auto-conversion applied: '{word}' → '{best_text}'")
             except Exception as e:
-                if ls.config.get('debug'):
+                if debug:
                     print(f"⚠️ Auto-conversion failed: {e}")
+                    import traceback
+                    traceback.print_exc()
     
     except Exception as e:
         if getattr(ls, 'config', {}).get('debug'):

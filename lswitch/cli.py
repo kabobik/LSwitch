@@ -3,13 +3,16 @@
 LSwitch CLI entry point
 """
 
+from __future__ import annotations
 import sys
 import argparse
 import signal
 import os
 
+from __version__ import __version__
 
-def main():
+
+def main() -> int:
     """Main entry point for LSwitch"""
     parser = argparse.ArgumentParser(
         prog='lswitch',
@@ -29,7 +32,7 @@ def main():
     parser.add_argument(
         '--version',
         action='version',
-        version='%(prog)s 1.0'
+        version='%(prog)s ' + __version__
     )
     
     args = parser.parse_args()
@@ -61,7 +64,7 @@ def main():
             ls.config['debug'] = True
         
         # Handle signals gracefully
-        def signal_handler(signum, frame):
+        def signal_handler(signum: int, frame) -> None:
             print("\n👋 LSwitch закрыт")
             sys.exit(0)
         

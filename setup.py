@@ -23,29 +23,33 @@ setup(
     long_description=read_file('README.md'),
     long_description_content_type='text/markdown',
     author='Anton',
-    url='https://github.com/yourusername/lswitch',
+    url='https://github.com/kabobik/lswitch',
     py_modules=['lswitch_control'],  # Top-level modules only
     packages=find_packages(exclude=['tests', 'docs']),
-    python_requires='>=3.6',
+    python_requires='>=3.8',
     install_requires=[
         'evdev',
-        'python-xlib'
+        'python-xlib',
     ],
+    extras_require={
+        'gui': ['PyQt5'],
+    },
     entry_points={
         'console_scripts': [
             'lswitch=lswitch.cli:main',
+            'lswitch-control=lswitch_control:main',
         ],
     },
-    package_data={
-        # Include configuration and assets with the package for easier installs
-        '': ['config/*', 'assets/*'],
-    },
     data_files=[
-        ('/etc/lswitch', ['config/config.json.example']),
+        # systemd user service
         ('/etc/systemd/user', ['config/lswitch.service']),
+        # udev rules for input device access
         ('/etc/udev/rules.d', ['config/99-lswitch.rules']),
+        # Desktop entry for GUI (menu + autostart)
         ('/usr/share/applications', ['config/lswitch-control.desktop']),
-        ('/usr/share/pixmaps', ['assets/lswitch.svg']),
+        ('/etc/xdg/autostart', ['config/lswitch-control.desktop']),
+        # Icon
+        ('/usr/share/pixmaps', ['assets/lswitch.png']),
     ],
     classifiers=[
         'Development Status :: 4 - Beta',
@@ -53,11 +57,11 @@ setup(
         'Topic :: Utilities',
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
         'Operating System :: POSIX :: Linux',
     ],
 )

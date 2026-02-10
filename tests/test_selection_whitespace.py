@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from evdev import ecodes
 
 import lswitch as ls_mod
-from lswitch import LSwitch
+from lswitch.core import LSwitch
 
 
 class MockX11_Space:
@@ -40,6 +40,8 @@ def make_lswitch(mock_x11, monkeypatch):
     monkeypatch.setattr('threading.Thread.start', lambda self: None)
     monkeypatch.setattr('evdev.UInput', DummyUInput)
     monkeypatch.setattr(ls_mod, 'x11_adapter', mock_x11)
+    import lswitch.core as _core_mod
+    monkeypatch.setattr(_core_mod, 'x11_adapter', mock_x11)
     ls = LSwitch(config_path='config.json')
     ls.user_dict = None
     ls.config['debug'] = True

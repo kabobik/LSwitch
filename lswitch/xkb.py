@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import json
-from lswitch import system as system
+from . import system as system
 import ctypes
 import ctypes.util
 
@@ -179,8 +179,26 @@ def keycode_to_char(keycode: int, layout: str, layouts: list, shift: bool = Fals
                 return keysym_name
             if keysym_name.startswith('Cyrillic_'):
                 cyrillic_map = {
-                    'io': 'ё', 'IO': 'Ё',
-                    # partial mapping left intentionally minimal for fallback purposes
+                    # Lowercase
+                    'a': 'а', 'be': 'б', 'tse': 'ц', 'de': 'д',
+                    'ie': 'е', 'ef': 'ф', 'ghe': 'г', 'ha': 'х',
+                    'i': 'и', 'shorti': 'й', 'ka': 'к', 'el': 'л',
+                    'em': 'м', 'en': 'н', 'o': 'о', 'pe': 'п',
+                    'ya': 'я', 'er': 'р', 'es': 'с', 'te': 'т',
+                    'u': 'у', 'zhe': 'ж', 've': 'в', 'softsign': 'ь',
+                    'yeru': 'ы', 'ze': 'з', 'sha': 'ш', 'e': 'э',
+                    'shcha': 'щ', 'che': 'ч', 'hardsign': 'ъ',
+                    'yu': 'ю', 'io': 'ё',
+                    # Uppercase
+                    'A': 'А', 'BE': 'Б', 'TSE': 'Ц', 'DE': 'Д',
+                    'IE': 'Е', 'EF': 'Ф', 'GHE': 'Г', 'HA': 'Х',
+                    'I': 'И', 'SHORTI': 'Й', 'KA': 'К', 'EL': 'Л',
+                    'EM': 'М', 'EN': 'Н', 'O': 'О', 'PE': 'П',
+                    'YA': 'Я', 'ER': 'Р', 'ES': 'С', 'TE': 'Т',
+                    'U': 'У', 'ZHE': 'Ж', 'VE': 'В', 'SOFTSIGN': 'Ь',
+                    'YERU': 'Ы', 'ZE': 'З', 'SHA': 'Ш', 'E': 'Э',
+                    'SHCHA': 'Щ', 'CHE': 'Ч', 'HARDSIGN': 'Ъ',
+                    'YU': 'Ю', 'IO': 'Ё',
                 }
                 key = keysym_name[9:]
                 return cyrillic_map.get(key, '')

@@ -5,7 +5,7 @@ import pytest
 from evdev import ecodes
 
 import lswitch as ls_mod
-from lswitch import LSwitch
+from lswitch.core import LSwitch
 
 
 class MockX11:
@@ -71,8 +71,10 @@ def make_lswitch(mock_x11, monkeypatch):
     # prevent creating a real uinput device
     monkeypatch.setattr('evdev.UInput', DummyUInput)
 
-    # patch adapter at module level
+    # patch adapter at module level (both lswitch and lswitch.core for text_processor)
     monkeypatch.setattr(ls_mod, 'x11_adapter', mock_x11)
+    import lswitch.core as _core_mod
+    monkeypatch.setattr(_core_mod, 'x11_adapter', mock_x11)
 
     # instantiate
     ls = LSwitch(config_path='config.json')

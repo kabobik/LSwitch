@@ -5,13 +5,7 @@ import subprocess
 
 import pytest
 
-import importlib.util
-import os
-
-# Import module directly from file to avoid top-level 'lswitch.py' shadowing package dir
-spec = importlib.util.spec_from_file_location("lswitch_xkb", os.path.join(os.path.dirname(__file__), '..', 'lswitch', 'xkb.py'))
-xkb = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(xkb)
+import lswitch.xkb as xkb
 
 
 def test_get_layouts_from_runtime_file(tmp_path, monkeypatch):

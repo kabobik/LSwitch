@@ -1,25 +1,16 @@
 [Unit]
 Description=LSwitch - Layout Switcher (evdev)
-Documentation=https://github.com/yourusername/lswitch
-After=network.target multi-user.target
+Documentation=https://github.com/kabobik/lswitch
+After=graphical-session.target
 
 [Service]
 Type=simple
-# Prefer running the package as a module and ensure the installed
-# package dir is available via PYTHONPATH so imports resolve correctly.
-ExecStart=/usr/local/bin/lswitch-run
-# NOTE: `lswitch-run` will ensure the installed package dir is available on PYTHONPATH and
-# avoid name-shadowing issues that can occur when a script shares the package name.
+ExecStart=/usr/local/bin/lswitch
 Restart=on-failure
 RestartSec=5s
-WorkingDirectory=/etc/lswitch
 Environment="PYTHONUNBUFFERED=1"
 Environment="DISPLAY=:0"
-Environment="XAUTHORITY=/home/anton/.Xauthority"
-
-# Безопасность
-# NoNewPrivileges=true
-# PrivateTmp=true
+Environment="XAUTHORITY=%h/.Xauthority"
 
 # Логирование
 StandardOutput=journal
@@ -27,4 +18,4 @@ StandardError=journal
 SyslogIdentifier=lswitch
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

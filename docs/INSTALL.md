@@ -1,178 +1,112 @@
-# Руководство по установке и настройке LSwitch
+# Установка LSwitch
 
-## 🚀 Быстрая установка
-
-### 1. Установка в систему
+## Быстрая установка
 
 ```bash
-# Из директории проекта
-sudo ./install.sh
+git clone https://github.com/kirill-2l/LSwitch.git
+cd LSwitch
+bash scripts/install.sh
 ```
 
 Скрипт автоматически:
-- Установит python3-evdev
-- Скопирует lswitch в /usr/local/bin/
-- Создаст конфигурацию в /etc/lswitch/
-- Установит systemd сервис
+- Установит системные зависимости (`xclip`, `xdotool`)
+- Установит пакет через `pip install -e .`
+- Скопирует systemd unit, udev-правила, .desktop файл
+- Добавит пользователя в группу `input`
 - Предложит включить автозапуск
 
-### 2. Включение автозапуска
+## Ручная установка
 
 ```bash
-# By default LSwitch uses per-user config: `~/.config/lswitch/config.json`.
-# Installer will create a user config for the detected X user during installation.
-# Configuration is user-scoped (`~/.config/lswitch/config.json`). The application will create a default config if none exists.
-# If present, the `allow_user_overrides` flag in `/etc/lswitch/config.json` controls whether
-# users can override system settings with their local config (default: true).
+# Зависимости
+sudo apt install python3-dev xclip xdotool
 
-sudo systemctl enable lswitch
-sudo systemctl start lswitch
+# Установка пакета
+sudo pip3 install --break-system-packages -e .
+
+# Права доступа к клавиатуре
+sudo usermod -a -G input $USER
+# Перелогиниться!
+
+# Запуск
+systemctl --user enable --now lswitch
 ```
 
-Или просто выберите "y" при установке.
-
-## 📋 Структура установки
-
-После установки файлы будут размещены:
-
-```
-/usr/local/bin/lswitch              - исполняемый файл
-/etc/lswitch/config.json            - конфигурация
-/etc/systemd/system/lswitch.service - systemd unit
-```
-
-## 🎛️ Управление сервисом
-
-### Через systemctl:
+## Управление сервисом
 
 ```bash
-sudo systemctl start lswitch       # Запустить
-sudo systemctl stop lswitch        # Остановить
-sudo systemctl restart lswitch     # Перезапустить
-sudo systemctl status lswitch      # Статус
-sudo systemctl enable lswitch      # Включить автозапуск
-sudo systemctl disable lswitch     # Отключить автозапуск
+systemctl --user start lswitch      # Запустить
+systemctl --user stop lswitch       # Остановить
+systemctl --user restart lswitch    # Перезапустить
+systemctl --user status lswitch     # Статус
+systemctl --user enable lswitch     # Автозапуск ON
+systemctl --user disable lswitch    # Автозапуск OFF
 ```
 
-### Через Makefile (из директории проекта):
+Или через Makefile:
 
 ```bash
-make start       # Запустить
-make stop        # Остановить
-make restart     # Перезапустить
-make status      # Статус
-make enable      # Включить автозапуск
-make disable     # Отключить автозапуск
-make logs        # Логи в реальном времени
+make start / stop / restart / status / enable / disable / logs
 ```
 
-## 📝 Логи
-
-Просмотр логов:
+## Логи
 
 ```bash
-# В реальном времени
-sudo journalctl -u lswitch -f
-
-# Последние 100 строк
-sudo journalctl -u lswitch -n 100
-
-# С определённого времени
-sudo journalctl -u lswitch --since "1 hour ago"
+journalctl --user-unit=lswitch -f          # В реальном времени
+journalctl --user-unit=lswitch -n 100      # Последние 100 строк
+# Или
+make logs
 ```
 
-## ⚙️ Настройка
+## Настройка
 
-Файл конфигурации: `/etc/lswitch/config.json`
+Конфигурация: `~/.config/lswitch/config.json` (создаётся автоматически).
+
+Основные параметры:
 
 ```json
 {
   "double_click_timeout": 0.3,
   "debug": false,
   "switch_layout_after_convert": true,
-  "layout_switch_key": "Alt_L+Shift_L"
+  "auto_switch": false,
+  "auto_switch_threshold": 10
 }
 ```
 
-После изменения конфигурации:
+Изменения вступают в силу после `systemctl --user restart lswitch`.
+
+Также можно менять настройки через GUI: `lswitch-control`.
+
+## Проверка
+
+1. Откройте текстовый редактор
+2. Наберите: `ghbdtn`
+3. Быстро нажмите Shift дважды
+4. Должно получиться: `привет`
+
+## Удаление
 
 ```bash
-sudo systemctl restart lswitch
-```
-
-## 🧪 Тестирование
-
-Проверьте, что сервис работает:
-
-```bash
-# Статус
-sudo systemctl status lswitch
-
-# Должен показать: Active: active (running)
-```
-
-Попробуйте в любом текстовом редакторе:
-1. Введите: `ghbdtn`
-2. Быстро нажмите Shift дважды
-3. Должно получиться: `привет` (и раскладка переключится)
-
-## 🗑️ Удаление
-
-```bash
-sudo ./uninstall.sh
+bash scripts/uninstall.sh
 # Или
 make uninstall
 ```
 
-## ❓ Устранение проблем
-
-### Сервис не запускается
-
-```bash
-# Проверьте логи
-sudo journalctl -u lswitch -n 50
-
-# Проверьте права
-ls -l /usr/local/bin/lswitch
-
-# Попробуйте запустить вручную
-sudo /usr/local/bin/lswitch
-```
-
-### Не работает конвертация
-
-1. Проверьте, что сервис запущен:
-   ```bash
-   sudo systemctl status lswitch
-   ```
-
-2. Проверьте логи на ошибки:
-   ```bash
-   sudo journalctl -u lswitch -f
-   ```
-
-3. Попробуйте увеличить `double_click_timeout` в конфигурации
-
-### Конфликты с другими программами
-
-Если у вас установлены другие программы для работы с раскладкой клавиатуры, они могут конфликтовать. Остановите их или настройте другие горячие клавиши.
-
-## 🔧 Разработка
-
-Для тестирования без установки:
+## Разработка
 
 ```bash
 # Запуск из исходников
-sudo python3 lswitch.py
+lswitch --debug
 
-# Запуск тестов
-python3 -m pytest test_lswitch.py
+# Тесты
+python3 -m pytest tests/ -v
+# Или
+make test
 ```
 
-## 📦 Сборка пакета
+## См. также
 
-Для создания deb-пакета (будущее):
-
-```bash
-# TODO: добавить создание deb-пакета
-```
+- [QUICKSTART.md](QUICKSTART.md) — краткий старт
+- [PERMISSIONS.md](PERMISSIONS.md) — права доступа
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — устранение проблем
