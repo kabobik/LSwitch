@@ -220,38 +220,6 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.menu.addAction(title_action)
         self.menu.addSeparator()
 
-        # Вложенное меню управления службой (для всех DE)
-        service_menu = self.menu.addMenu(t('service_management'))
-        service_menu.setIcon(QIcon.fromTheme("preferences-system"))
-        service_menu.setFont(menu_font)  # Применяем тот же шрифт
-
-        self.start_action = QAction("Запустить", service_menu)
-        self.start_action.setIcon(QIcon.fromTheme("media-playback-start"))
-        self.start_action.triggered.connect(self.start_service)
-        service_menu.addAction(self.start_action)
-
-        self.stop_action = QAction("Остановить", service_menu)
-        self.stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
-        self.stop_action.triggered.connect(self.stop_service)
-        service_menu.addAction(self.stop_action)
-
-        self.restart_action = QAction("Перезапустить", service_menu)
-        self.restart_action.setIcon(QIcon.fromTheme("view-refresh"))
-        self.restart_action.triggered.connect(self.restart_service)
-        service_menu.addAction(self.restart_action)
-
-        service_menu.addSeparator()
-
-        # Автозапуск службы в подменю (checkable action)
-        self.autostart_action = QAction("Автозапуск службы", service_menu)
-        self.autostart_action.setCheckable(True)
-        self.autostart_checked = self.is_service_enabled()
-        self.autostart_action.setChecked(self.autostart_checked)
-        self.autostart_action.triggered.connect(self.toggle_autostart)
-        service_menu.addAction(self.autostart_action)
-
-        self.menu.addSeparator()
-
         # Автопереключение (настоящий checkable action)
         self.auto_switch_action = QAction(t('auto_switch'), self)
         self.auto_switch_action.setCheckable(True)
@@ -266,8 +234,6 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.user_dict_action.triggered.connect(self.toggle_user_dict)
         self.menu.addAction(self.user_dict_action)
 
-        # Упрощённое пользовательское меню — без административных опций        
-        
         # Автозапуск панели (локальный автозапуск GUI)
         self.gui_autostart_action = QAction("Автозапуск панели", self)
         self.gui_autostart_action.setCheckable(True)
@@ -396,33 +362,8 @@ class LSwitchControlPanel(QSystemTrayIcon):
         return 'inactive'
     
     def update_service_status(self):
-        """Обновляет отображение статуса службы в меню"""
-        status = self.get_service_status()
-        status_map = {
-            'active': t('status_running'),
-            'inactive': t('status_stopped'),
-            'failed': t('status_error'),
-            'unknown': t('status_unknown')
-        }
-        status_text = status_map.get(status, status)
-        self.status_action.setText(f"{t('status')}: {status_text}")
-        
-        # Управление доступностью кнопок в зависимости от статуса
-        if status == 'active':
-            # Служба запущена - можно только остановить или перезапустить
-            self.start_action.setEnabled(False)
-            self.stop_action.setEnabled(True)
-            self.restart_action.setEnabled(True)
-        elif status in ['inactive', 'failed']:
-            # Служба остановлена - можно только запустить
-            self.start_action.setEnabled(True)
-            self.stop_action.setEnabled(False)
-            self.restart_action.setEnabled(False)
-        else:
-            # Статус неизвестен - все кнопки доступны
-            self.start_action.setEnabled(True)
-            self.stop_action.setEnabled(True)
-            self.restart_action.setEnabled(True)
+        """Обновляет отображение статуса службы в меню (делегирует в update_status)"""
+        self.update_status()
     
     def is_service_enabled(self):
         """Проверяет, включен ли автозапуск"""
@@ -633,8 +574,21 @@ class LSwitchControlPanel(QSystemTrayIcon):
             print(f"Ошибка проверки раскладок: {e}", file=sys.stderr, flush=True)
     
     def update_status(self):
-        """Обновляет состояние кнопок в зависимости от статуса службы"""
+        """Обновляет состояние кнопок и статус в зависимости от статуса службы"""
         status = self.get_service_status()
+        
+        # Обновляем текст статуса в меню
+        status_map = {
+            'active': t('status_running'),
+            'inactive': t('status_stopped'),
+            'failed': t('status_error'),
+            'unknown': t('status_unknown')
+        }
+        status_text = status_map.get(status, status)
+        try:
+            self.status_action.setText(f"{t('status')}: {status_text}")
+        except Exception:
+            pass
         
         if status == 'active':
             self.start_action.setEnabled(False)
@@ -877,11 +831,11 @@ Comment=Control panel for LSwitch
         try:
             system.Popen([
                 'x-terminal-emulator', '-e',
-                'journalctl', '-u', 'lswitch', '-f'
+                'journalctl', '--user', '-u', 'lswitch', '-f'
             ])
         except Exception:
             try:
-                system.Popen(['xterm', '-e', 'journalctl', '-u', 'lswitch', '-f'])
+                system.Popen(['xterm', '-e', 'journalctl', '--user', '-u', 'lswitch', '-f'])
             except Exception as e:
                 self.showMessage(
                     "Ошибка",
