@@ -263,18 +263,19 @@ class InputHandler:
                         self.ls.chars_in_buffer -= 1
                         if self.ls.text_buffer:
                             self.ls.text_buffer.pop()
-                elif event.value == 2:  # repeat
-                    if event.code == getattr(ecodes, 'KEY_BACKSPACE', None):
-                        self.ls.consecutive_backspace_repeats += 1
-                        if self.ls.consecutive_backspace_repeats >= 3:
-                            if not self.ls.backspace_hold_detected:
-                                self.ls.backspace_hold_detected = True
-                                if self.ls.config.get('debug'):
-                                    print(f"⚠️ Backspace hold detected")
-                    else:
-                        self.ls.consecutive_backspace_repeats = 0
+            elif event.value == 2:  # repeat (key held down)
+                if event.code == getattr(ecodes, 'KEY_BACKSPACE', None):
+                    self.ls.consecutive_backspace_repeats += 1
+                    if self.ls.consecutive_backspace_repeats >= 3:
+                        if not self.ls.backspace_hold_detected:
+                            self.ls.backspace_hold_detected = True
+                            self.ls.backspace_hold_detected_at = time.time()
+                            if self.ls.config.get('debug'):
+                                print(f"⚠️ Backspace hold detected")
+                else:
+                    self.ls.consecutive_backspace_repeats = 0
 
-            if event.value == 0 and event.code not in (getattr(ecodes, 'KEY_LEFTSHIFT', None), getattr(ecodes, 'KEY_RIGHTSHIFT', None), getattr(ecodes, 'KEY_BACKSPACE', None)):
+            if event.value == 0 and event.code not in (getattr(ecodes, 'KEY_LEFTSHIFT', None), getattr(ecodes, 'KEY_RIGHTSHIFT', None), getattr(ecodes, 'KEY_BACKSPACE', None), getattr(ecodes, 'KEY_SPACE', None)):
                 self.ls.chars_in_buffer += 1
                 if self.ls.config.get('debug'):
                     print(f"🔍 DEBUG normal key: last_manual_convert={self.ls.last_manual_convert is not None}")

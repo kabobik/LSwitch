@@ -206,12 +206,32 @@ def check_and_auto_convert(ls):
         # Get user_dict if available
         user_dict = getattr(ls, 'user_dict', None)
         
-        # Check if we should auto-convert
-        should_convert, best_text, reason = ngrams.should_convert(
-            word, 
-            threshold=ls.config.get('auto_switch_threshold', 10),
-            user_dict=user_dict
-        )
+        # Приоритет 0: user_dict решает автоконвертацию по весу
+        if user_dict:
+            has_cyrillic = any(('А' <= c <= 'Я') or ('а' <= c <= 'я') or c in 'ЁёЪъЬь' for c in word)
+            from_lang = 'ru' if has_cyrillic else 'en'
+            to_lang = 'en' if from_lang == 'ru' else 'ru'
+            if user_dict.should_auto_convert(word, from_lang, to_lang):
+                if debug:
+                    print(f"🤖 user_dict says auto-convert: '{word}' ({from_lang}→{to_lang})")
+                # Конвертируем текст для best_text
+                best_text = user_dict._convert_text(word, from_lang, to_lang)
+                should_convert = True
+                reason = f"user_dict_auto_convert ({from_lang}→{to_lang})"
+            else:
+                # Если user_dict не знает — проверяем через ngrams
+                should_convert, best_text, reason = ngrams.should_convert(
+                    word,
+                    threshold=ls.config.get('auto_switch_threshold', 10),
+                    user_dict=user_dict
+                )
+        else:
+            # Check if we should auto-convert
+            should_convert, best_text, reason = ngrams.should_convert(
+                word, 
+                threshold=ls.config.get('auto_switch_threshold', 10),
+                user_dict=user_dict
+            )
         
         if debug:
             print(f"🤖 Auto-convert check: '{word}' → should_convert={should_convert}, best='{best_text}', reason='{reason}'")

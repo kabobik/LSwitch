@@ -1379,13 +1379,12 @@ class LSwitch:
             elif event.value == 2:  # Repeat (удержание)
                 if event.code == ecodes.KEY_BACKSPACE:
                     # ПРОСТОЙ детектор: 3+ повтора = удержание
-                    print('DEBUG: repeat branch entered, before=', self.consecutive_backspace_repeats)
                     self.consecutive_backspace_repeats += 1
-                    print('DEBUG: repeat branch after=', self.consecutive_backspace_repeats)
                     
                     if self.consecutive_backspace_repeats >= 3:
                         if not self.backspace_hold_detected:
                             self.backspace_hold_detected = True
+                            self.backspace_hold_detected_at = time.time()
                             if self.config.get('debug'):
                                 print(f"⚠️ Удержание Backspace обнаружено")
                     

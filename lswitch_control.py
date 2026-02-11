@@ -246,55 +246,41 @@ class LSwitchControlPanel(QSystemTrayIcon):
         
         self.menu.addSeparator()
         
-        # Подменю "Управление службой"
-        from PyQt5.QtWidgets import QMenu as QtMenu
-        self.service_menu = QtMenu("Управление службой")  # Сохраняем ссылку как атрибут класса
-        self.service_menu.setIcon(QIcon.fromTheme("preferences-system"))
+        # --- Управление службой (плоское меню) ---
         
         # Статус службы
-        self.status_action = QAction("Статус: " + self.get_service_status(), self.service_menu)
+        self.status_action = QAction("Статус: " + self.get_service_status(), self)
         self.status_action.setEnabled(False)
-        self.service_menu.addAction(self.status_action)
+        self.menu.addAction(self.status_action)
         
-        self.service_menu.addSeparator()
-        
-        # Запустить (сохраняем как атрибут класса)
-        self.start_action = QAction("Запустить", self.service_menu)
+        # Запустить
+        self.start_action = QAction("Запустить", self)
         self.start_action.setIcon(QIcon.fromTheme("media-playback-start"))
         self.start_action.triggered.connect(self.start_service)
-        self.service_menu.addAction(self.start_action)
+        self.menu.addAction(self.start_action)
         
-        # Остановить (сохраняем как атрибут класса)
-        self.stop_action = QAction("Остановить", self.service_menu)
+        # Остановить
+        self.stop_action = QAction("Остановить", self)
         self.stop_action.setIcon(QIcon.fromTheme("media-playback-stop"))
         self.stop_action.triggered.connect(self.stop_service)
-        self.service_menu.addAction(self.stop_action)
+        self.menu.addAction(self.stop_action)
         
-        # Перезапустить (сохраняем как атрибут класса)
-        self.restart_action = QAction("Перезапустить", self.service_menu)
+        # Перезапустить
+        self.restart_action = QAction("Перезапустить", self)
         self.restart_action.setIcon(QIcon.fromTheme("view-refresh"))
         self.restart_action.triggered.connect(self.restart_service)
-        self.service_menu.addAction(self.restart_action)
-        
-        self.service_menu.addSeparator()
+        self.menu.addAction(self.restart_action)
         
         # Автозапуск службы
-        self.autostart_action = QAction("Автозапуск службы", self.service_menu)
+        self.autostart_action = QAction("Автозапуск службы", self)
         self.autostart_action.setCheckable(True)
         self.autostart_checked = self.is_service_enabled()
         self.autostart_action.setChecked(self.autostart_checked)
         self.autostart_action.triggered.connect(self.toggle_autostart)
-        self.service_menu.addAction(self.autostart_action)
+        self.menu.addAction(self.autostart_action)
 
-        # Опция: разрешить управление службой из GUI (по умолчанию включено)
-        self.allow_manage_action = QAction("Разрешить управление службой (GUI)", self.service_menu)
-        self.allow_manage_action.setCheckable(True)
-        self.allow_manage_action.setChecked(self.config.get('gui_manage_service', True))
-        self.allow_manage_action.triggered.connect(self.toggle_service_management)
-        self.service_menu.addAction(self.allow_manage_action)
-
-        # Добавляем подменю в главное меню
-        self.menu.addMenu(self.service_menu)
+        # Добавляем разделитель после блока службы
+        self.menu.addSeparator()
         
         self.menu.addSeparator()
         
@@ -381,14 +367,6 @@ class LSwitchControlPanel(QSystemTrayIcon):
     def run_systemctl(self, action):
         """Выполняет команду systemctl с защитой от дублей"""
         # Respect config toggle: allow GUI to manage service
-        if not self.config.get('gui_manage_service', True):
-            # Inform the user that GUI control is disabled
-            try:
-                self.showMessage("LSwitch", "Управление службой отключено в настройках GUI", QSystemTrayIcon.Information, 3000)
-            except Exception:
-                pass
-            return False
-
         # Дополнительная защита для 'start': проверяем, не запущен ли уже демон
         if action == 'start':
             try:
@@ -646,19 +624,6 @@ class LSwitchControlPanel(QSystemTrayIcon):
             )
             # Если системный конфиг есть, но мы не записали туда изменения — предупредим пользователя
 
-    def toggle_service_management(self):
-        """Toggle whether GUI is allowed to manage the user service"""
-        enabled = not self.config.get('gui_manage_service', True)
-        self.config['gui_manage_service'] = enabled
-        self.allow_manage_action.setChecked(enabled)
-        if self.save_config():
-            msg = "Управление службой разрешено из GUI" if enabled else "Управление службой отключено из GUI"
-            try:
-                self.showMessage("LSwitch", msg, QSystemTrayIcon.Information, 2000)
-            except Exception:
-                pass
-
-    
     def toggle_user_dict(self):
         """Переключает самообучающийся словарь"""
         self.user_dict_checked = not self.user_dict_checked

@@ -379,13 +379,42 @@ class UserDictionary:
     
     def is_protected(self, word, lang):
         """
-        Заглушка для обратной совместимости
-        Теперь защита определяется автоматически через вес
+        Проверяет защищено ли слово от автоконвертации.
+        
+        Слово считается защищённым если:
+        1. Вес направлен ПРОТИВ конвертации (пользователь хочет оставить текущий язык)
+        2. Есть активный маркер protected_until (недавняя коррекция)
+        
+        Args:
+            word: Слово для проверки (lowercase)
+            lang: Текущий язык слова ('ru' или 'en')
         
         Returns:
-            (False, 0): всегда, защиты больше нет
+            (bool, int): (защищено, вес)
         """
-        return (False, 0)
+        canonical = self._canonicalize(word, lang)
+        if canonical not in self.data['conversions']:
+            return (False, 0)
+        
+        entry = self.data['conversions'][canonical]
+        weight = entry.get('weight', 0)
+        now = time.time()
+        
+        # Проверяем временную защиту (после коррекции)
+        inmem = self._recent_protections.get(canonical)
+        persisted = entry.get('protected_until')
+        if (inmem and now < inmem) or (persisted and now < persisted):
+            return (True, weight)
+        
+        # Проверяем по весу: вес направлен ПРОТИВ конвертации
+        # lang='ru', weight < 0 → пользователь хочет оставить RU
+        # lang='en', weight > 0 → пользователь хочет оставить EN
+        if lang == 'ru' and weight < 0:
+            return (True, weight)
+        if lang == 'en' and weight > 0:
+            return (True, weight)
+        
+        return (False, weight)
     
     def get_stats(self):
         """Возвращает статистику"""
