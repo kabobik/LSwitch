@@ -5,11 +5,12 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/lswitch
+# Используем sh -c для поиска lswitch в PATH
+ExecStart=/bin/sh -c 'exec $(command -v lswitch || echo /usr/local/bin/lswitch)'
 Restart=on-failure
 RestartSec=5s
 Environment="PYTHONUNBUFFERED=1"
-Environment="DISPLAY=:0"
+# DISPLAY наследуется из user session
 Environment="XAUTHORITY=%h/.Xauthority"
 
 # Логирование

@@ -5,6 +5,7 @@
 ## Установка / удаление
 - `install.sh` — установка LSwitch (pip + systemd + права)
 - `uninstall.sh` — полное удаление из системы
+- `check_dependencies.py` — проверка всех зависимостей
 
 ## Утилиты
 - `release_virtual_kb.py` — поиск и завершение процессов, удерживающих `/dev/uinput`

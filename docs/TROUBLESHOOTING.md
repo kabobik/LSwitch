@@ -34,11 +34,56 @@ systemctl --user enable --now lswitch
 PermissionError: [Errno 13] Permission denied: '/dev/input/event0'
 ```
 
-**Решение:**
+**Причина:** Пользователь не в группе `input`
+
+**Проверка:**
 ```bash
-# Добавить пользователя в группу input
+# Проверить группы пользователя
+groups | grep input
+
+# Если output пустой - вас нет в группе input
+```
+
+**Решение:**
+
+1. Добавить пользователя в группу input:
+```bash
 sudo usermod -a -G input $USER
-# Перелогиниться для применения
+```
+
+2. **Обязательно перелогиниться!** (выйти и войти заново)
+   - Изменения групп применяются только после перелогина
+   - `su - $USER` не поможет — нужен полный logout
+
+3. Проверить снова:
+```bash
+groups | grep input
+# Должно показать "input" в списке групп
+```
+
+4. Проверить доступ к устройствам:
+```bash
+ls -l /dev/input/event* | head -3
+# Вывод должен содержать: crw-rw---- 1 root input
+```
+
+5. Запустить демон:
+```bash
+systemctl --user restart lswitch
+```
+
+**Если не помогло:**
+
+- Проверьте udev правила:
+```bash
+cat /etc/udev/rules.d/99-lswitch.rules
+# Должно быть: KERNEL=="event*", SUBSYSTEM=="input", MODE="0660", GROUP="input"
+```
+
+- Перезагрузите udev:
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
 ```
 
 ### 3. Нет python3-evdev

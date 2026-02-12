@@ -28,11 +28,16 @@ setup(
     packages=find_packages(exclude=['tests', 'docs']),
     python_requires='>=3.8',
     install_requires=[
-        'evdev',
-        'python-xlib',
+        'evdev',         # Чтение событий клавиатуры из /dev/input
+        'python-xlib',   # Определение раскладки и работа с X11
     ],
     extras_require={
-        'gui': ['PyQt5'],
+        'gui': ['PyQt5'],  # GUI панель управления (lswitch-control)
+        'dev': [
+            'pytest>=7.0',
+            'pytest-cov',
+            'pytest-timeout',
+        ],
     },
     entry_points={
         'console_scripts': [
@@ -62,6 +67,9 @@ setup(
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
         'Operating System :: POSIX :: Linux',
+        'Environment :: X11 Applications',
+        'Topic :: Desktop Environment',
     ],
 )
