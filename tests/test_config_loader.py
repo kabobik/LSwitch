@@ -16,20 +16,21 @@ def test_load_config_merges_user_override(tmp_path, monkeypatch):
     sys_cfg = tmp_path / 'etc' / 'lswitch'
     sys_cfg.mkdir(parents=True)
     s = sys_cfg / 'config.json'
-    s.write_text(json.dumps({'auto_switch': False, 'double_click_timeout': 0.4}), encoding='utf-8')
+    s.write_text(json.dumps({'auto_switch': False, 'double_click_timeout': 0.4, 'auto_switch_threshold': 12}), encoding='utf-8')
 
     # user config
     home = tmp_path / 'home' / 'user'
     user_cfg_dir = home / '.config' / 'lswitch'
     user_cfg_dir.mkdir(parents=True)
     u = user_cfg_dir / 'config.json'
-    u.write_text(json.dumps({'auto_switch': True}), encoding='utf-8')
+    u.write_text(json.dumps({'auto_switch': True, 'auto_switch_threshold': 8}), encoding='utf-8')
 
     monkeypatch.setenv('HOME', str(home))
 
     out = cfg.load_config(str(s), debug=True)
     assert out['auto_switch'] is True
     assert out['double_click_timeout'] == 0.4
+    assert out['auto_switch_threshold'] == 8
     assert out['_config_path'] == str(s)
     assert out['_user_config_path'] is not None
 
@@ -56,3 +57,5 @@ def test_validate_config_rejects_bad_values():
         cfg.validate_config({'debug': 'yes'})
     with pytest.raises(ValueError):
         cfg.validate_config({'user_dict_min_weight': -1})
+    with pytest.raises(ValueError):
+        cfg.validate_config({'auto_switch_threshold': -1})

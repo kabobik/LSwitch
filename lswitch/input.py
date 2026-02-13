@@ -8,6 +8,7 @@ services (conversion, selection, user_dict, etc.).
 from __future__ import annotations
 
 import time
+import subprocess
 from . import system as system
 import collections
 import threading
@@ -159,6 +160,9 @@ class InputHandler:
                 self.ls.clear_buffer()
             except Exception:
                 pass
+            if self.ls.backspace_hold_detected:
+                self.ls.backspace_hold_detected = False
+                self.ls.backspace_hold_detected_at = 0.0
             if self.ls.config.get('debug'):
                 print("Buffer cleared (navigation)")
             return
@@ -263,6 +267,10 @@ class InputHandler:
                         self.ls.chars_in_buffer -= 1
                         if self.ls.text_buffer:
                             self.ls.text_buffer.pop()
+                else:
+                    if self.ls.backspace_hold_detected:
+                        self.ls.backspace_hold_detected = False
+                        self.ls.backspace_hold_detected_at = 0.0
             elif event.value == 2:  # repeat (key held down)
                 if event.code == getattr(ecodes, 'KEY_BACKSPACE', None):
                     self.ls.consecutive_backspace_repeats += 1
@@ -328,6 +336,9 @@ class InputHandler:
         else:
             if event.value == 0:
                 self.ls.clear_buffer()
+                if self.ls.backspace_hold_detected:
+                    self.ls.backspace_hold_detected = False
+                    self.ls.backspace_hold_detected_at = 0.0
                 if self.ls.config.get('debug'):
                     print("Buffer cleared")
             return True

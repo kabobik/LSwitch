@@ -19,6 +19,7 @@ DEFAULT_CONFIG = {
     'switch_layout_after_convert': True,
     'layout_switch_key': 'Alt_L+Shift_L',
     'auto_switch': False,
+    'auto_switch_threshold': 10,
     'user_dict_enabled': False,
     'user_dict_min_weight': 2,
 }
@@ -77,6 +78,16 @@ def validate_config(conf: dict) -> dict:
     if not isinstance(autos, bool):
         raise ValueError("Invalid 'auto_switch': must be boolean")
     out['auto_switch'] = autos
+
+    # auto_switch_threshold
+    ast = conf.get('auto_switch_threshold', defaults['auto_switch_threshold'])
+    try:
+        ast_i = int(ast)
+        if ast_i < 0:
+            raise ValueError('auto_switch_threshold must be >= 0')
+        out['auto_switch_threshold'] = ast_i
+    except Exception:
+        raise ValueError(f"Invalid 'auto_switch_threshold': {ast}")
 
     # user_dict_enabled
     ude = conf.get('user_dict_enabled', defaults['user_dict_enabled'])

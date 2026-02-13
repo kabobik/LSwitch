@@ -107,6 +107,10 @@ class CustomMenuItem(QWidget):
             self.update()
         elif self.icon_label:
             self.icon_label.clear()
+
+    def setText(self, text):
+        """Обновляет текст элемента"""
+        self.label.setText(text)
     
     def setEnabled(self, enabled):
         self._enabled = enabled
@@ -325,13 +329,13 @@ class QMenuWrapper:
             
             # Синхронизируем изменения QAction с CustomMenuItem
             def sync_state():
+                item.setText(action.text())
                 if checkable:
                     item.setChecked(action.isChecked())
-                elif not action.icon().isNull():
+                if not action.icon().isNull() and item.icon_label:
                     pixmap = action.icon().pixmap(QSize(24, 24))
-                    if item.icon_label:
-                        item.icon_label.setPixmap(pixmap)
-                        item.icon_label.repaint()
+                    item.icon_label.setPixmap(pixmap)
+                    item.icon_label.repaint()
             
             def sync_enabled(enabled):
                 item.setEnabled(enabled)

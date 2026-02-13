@@ -40,6 +40,9 @@ class I18n:
                 # Menu items
                 'lswitch_control': 'LSwitch Control',
                 'auto_switch': 'Auto-switch',
+                'auto_switch_threshold': 'N-gram sensitivity',
+                'auto_switch_threshold_title': 'Auto-switch sensitivity',
+                'auto_switch_threshold_prompt': 'Threshold (higher = fewer auto-switches)',
                 'self_learning_dict': 'Self-learning Dictionary',
                 'service_management': 'Service Management',
                 'status': 'Status',
@@ -98,6 +101,9 @@ class I18n:
                 # Пункты меню
                 'lswitch_control': 'Управление LSwitch',
                 'auto_switch': 'Автопереключение',
+                'auto_switch_threshold': 'Чувствительность n-грамм',
+                'auto_switch_threshold_title': 'Чувствительность автопереключения',
+                'auto_switch_threshold_prompt': 'Порог (выше = меньше автопереключений)',
                 'self_learning_dict': 'Самообучающийся словарь',
                 'service_management': 'Управление службой',
                 'status': 'Статус',

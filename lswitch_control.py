@@ -12,6 +12,7 @@ import time
 import signal
 import shutil
 import importlib
+import subprocess
 
 from __version__ import __version__
 
@@ -31,7 +32,8 @@ def get_system():
     return getattr(_system_mod, 'SYSTEM', _system_mod)
 
 from PyQt5.QtWidgets import (QApplication, QSystemTrayIcon, QAction,
-                             QMessageBox, QLabel)
+                             QMessageBox, QLabel, QWidgetAction, QSpinBox,
+                             QHBoxLayout, QWidget, QInputDialog)
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPalette, QCursor, QFont
 from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint, QSize
 
@@ -41,7 +43,6 @@ from lswitch.i18n import t, get_lang
 # Импортируем адаптеры
 from lswitch.adapters import get_adapter
 from lswitch.utils.desktop import detect_desktop_environment, detect_display_server
-import shutil
 
 
 def get_system_scale_factor():
@@ -172,6 +173,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
         # Состояние чекбоксов
         self.auto_switch_checked = self.config.get('auto_switch', True)
         self.user_dict_checked = self.config.get('user_dict_enabled', False)
+        self.auto_switch_threshold = int(self.config.get('auto_switch_threshold', 10))
         self.autostart_checked = False  # Будет обновлено в create_tray_menu
         # Создаём меню через адаптер
         self.create_tray_menu()
@@ -233,6 +235,31 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.user_dict_action.setChecked(self.user_dict_checked)
         self.user_dict_action.triggered.connect(self.toggle_user_dict)
         self.menu.addAction(self.user_dict_action)
+
+        # Чувствительность n-gram (порог автопереключения)
+        if self.adapter.supports_native_menu():
+            threshold_widget = QWidget()
+            threshold_layout = QHBoxLayout(threshold_widget)
+            threshold_layout.setContentsMargins(8, 2, 8, 2)
+            threshold_label = QLabel(t('auto_switch_threshold'))
+            self.auto_switch_threshold_spin = QSpinBox()
+            self.auto_switch_threshold_spin.setRange(0, 100)
+            self.auto_switch_threshold_spin.setSingleStep(1)
+            self.auto_switch_threshold_spin.setValue(self.auto_switch_threshold)
+            self.auto_switch_threshold_spin.valueChanged.connect(self.set_auto_switch_threshold)
+            threshold_layout.addWidget(threshold_label)
+            threshold_layout.addStretch()
+            threshold_layout.addWidget(self.auto_switch_threshold_spin)
+            threshold_action = QWidgetAction(self.menu)
+            threshold_action.setDefaultWidget(threshold_widget)
+            self.menu.addAction(threshold_action)
+        else:
+            self.auto_switch_threshold_action = QAction(
+                f"{t('auto_switch_threshold')}: {self.auto_switch_threshold}",
+                self
+            )
+            self.auto_switch_threshold_action.triggered.connect(self.prompt_auto_switch_threshold)
+            self.menu.addAction(self.auto_switch_threshold_action)
 
         # Автозапуск панели (локальный автозапуск GUI)
         self.gui_autostart_action = QAction("Автозапуск панели", self)
@@ -436,16 +463,21 @@ class LSwitchControlPanel(QSystemTrayIcon):
                 return False
 
             if layouts:
-                # Пишем в runtime файл
+                # Пишем в runtime файл (атомарно)
                 runtime_dir = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
                 layouts_file = f'{runtime_dir}/lswitch_layouts.json'
+                tmp_file = f'{layouts_file}.tmp.{os.getpid()}'
 
                 import time
-                with open(layouts_file, 'w') as f:
+                os.makedirs(runtime_dir, exist_ok=True)
+                with open(tmp_file, 'w', encoding='utf-8') as f:
                     json.dump({
-                        'layouts': layouts, 
+                        'layouts': layouts,
                         'timestamp': int(time.time())
                     }, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_file, layouts_file)
 
                 self.last_published_layouts = layouts
                 return True
@@ -486,13 +518,13 @@ class LSwitchControlPanel(QSystemTrayIcon):
         lsc_bin = shutil.which('lswitch-control') or 'lswitch-control'
         cmd = ['sudo', '-u', username, 'env'] + env_parts + [lsc_bin]
         try:
-            system.Popen(cmd)
+            get_system().Popen(cmd)
             return True
         except Exception:
             # fallback to su -c
             try:
                 cmd2 = ['su', '-', username, '-c', f'{lsc_bin} &']
-                system.Popen(cmd2)
+                get_system().Popen(cmd2)
                 return True
             except Exception:
                 return False
@@ -509,7 +541,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
             ]
             
             # Читаем текущие раскладки
-            result = system.setxkbmap_query(timeout=2)
+            result = get_system().setxkbmap_query(timeout=2)
             
             current_layouts = []
             for line in result.stdout.split('\n'):
@@ -530,7 +562,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
                 time.sleep(0.5)
                 
                 # Повторная проверка
-                result2 = system.setxkbmap_query(timeout=2)
+                result2 = get_system().setxkbmap_query(timeout=2)
                 
                 current_layouts2 = []
                 for line in result2.stdout.split('\n'):
@@ -757,12 +789,12 @@ Comment=Control panel for LSwitch
         """Перезагружает конфигурацию службы без перезапуска"""
         try:
             # Сначала пробуем через systemctl (корректно целит unit для user/system служб)
-            system.run(['systemctl', '--user', 'kill', '--signal=HUP', 'lswitch'], check=True, timeout=5)
+            get_system().run(['systemctl', '--user', 'kill', '--signal=HUP', 'lswitch'], check=True, timeout=5)
             return
         except Exception:
             # Фолбэк: pkill по имени (подходит для /usr/local/bin/lswitch и других инсталляций)
             try:
-                system.run(['pkill', '-HUP', '-f', 'lswitch'], timeout=2)
+                get_system().run(['pkill', '-HUP', '-f', 'lswitch'], timeout=2)
             except Exception as e:
                 print(f"Не удалось отправить сигнал: {e}", file=sys.stderr, flush=True)
     
@@ -794,13 +826,13 @@ Comment=Control panel for LSwitch
     def show_logs(self):
         """Показывает логи в терминале"""
         try:
-            system.Popen([
+            get_system().Popen([
                 'x-terminal-emulator', '-e',
                 'journalctl', '--user', '-u', 'lswitch', '-f'
             ])
         except Exception:
             try:
-                system.Popen(['xterm', '-e', 'journalctl', '--user', '-u', 'lswitch', '-f'])
+                get_system().Popen(['xterm', '-e', 'journalctl', '--user', '-u', 'lswitch', '-f'])
             except Exception as e:
                 self.showMessage(
                     "Ошибка",
@@ -836,6 +868,38 @@ Comment=Control panel for LSwitch
     def quit_application(self):
         """Выход из панели управления (служба продолжит работать)"""
         QApplication.instance().quit()
+
+    def set_auto_switch_threshold(self, value):
+        """Обновляет порог n-gram автопереключения и сохраняет конфиг."""
+        try:
+            value_int = int(value)
+        except Exception:
+            return
+        self.auto_switch_threshold = value_int
+        self.config['auto_switch_threshold'] = value_int
+        if self.save_config():
+            self.reload_service_config()
+        if hasattr(self, 'auto_switch_threshold_action'):
+            try:
+                self.auto_switch_threshold_action.setText(
+                    f"{t('auto_switch_threshold')}: {self.auto_switch_threshold}"
+                )
+            except Exception:
+                pass
+
+    def prompt_auto_switch_threshold(self):
+        """Запрашивает порог n-gram через диалог ввода."""
+        value, ok = QInputDialog.getInt(
+            None,
+            t('auto_switch_threshold_title'),
+            t('auto_switch_threshold_prompt'),
+            self.auto_switch_threshold,
+            0,
+            100,
+            1
+        )
+        if ok:
+            self.set_auto_switch_threshold(value)
 
 
 def create_simple_icon(color):

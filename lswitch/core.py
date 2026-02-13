@@ -16,6 +16,7 @@ import signal
 import threading
 import ctypes
 import ctypes.util
+import subprocess
 
 try:
     import evdev
@@ -240,7 +241,8 @@ class LSwitch:
         """Перезагружает конфигурацию без перезапуска"""
         print("🔄 Перезагрузка конфигурации...", flush=True)
         old_config = self.config.copy()
-        self.config = self.load_config(self.config.get('_config_path', '/etc/lswitch/config.json'))
+        config_path = self._select_primary_config_path()
+        self.config = self.load_config(config_path)
         
         # Обновляем параметры
         self.double_click_timeout = self.config.get('double_click_timeout', 0.3)
@@ -249,6 +251,7 @@ class LSwitch:
         # Diagnostic/logging: show effective values after reload
         print(f"✓ Конфигурация перезагружена: auto_switch={self.auto_switch_enabled}, debug={self.config.get('debug')}, user_cfg={self.config.get('_user_config_path')}")
         print(f"✓ DICT_AVAILABLE={DICT_AVAILABLE}, USER_DICT_AVAILABLE={USER_DICT_AVAILABLE}, user_dict_loaded={bool(self.user_dict)}")
+        self._refresh_config_mtimes()
 
     def __init__(self, config_path=None, start_threads=True, system=None, input_handler=None, layout_monitor=None):
         """Initialise LSwitch.
@@ -271,7 +274,7 @@ class LSwitch:
             if os.path.exists('/etc/lswitch/config.json'):
                 config_path = '/etc/lswitch/config.json'
             else:
-                config_path = 'config.json'
+                config_path = os.path.expanduser('~/.config/lswitch/config.json')
         
         # Dependency-injectable system wrapper (default to module SYSTEM)
         if system is None:
@@ -296,19 +299,10 @@ class LSwitch:
         self.text_processor = TextProcessor(None, self.config)  # system passed later
         self.buffer_manager = BufferManager(self.config, debug=self.config.get('debug', False))
         
-        # Track mtime safely — file may not exist in test environments
-        cfg_path = self.config.get('_config_path')
-        if cfg_path is None:
-            cfg_path = self.config.get('_user_config_path')
-        if cfg_path is None:
-            cfg_path = '/etc/lswitch/config.json'
-        try:
-            if isinstance(cfg_path, str):
-                self.config_mtime = os.path.getmtime(cfg_path)
-            else:
-                self.config_mtime = None
-        except (OSError, FileNotFoundError, TypeError):
-            self.config_mtime = None
+        # Track config mtime across possible config paths (system + user)
+        self.config_watch_paths = []
+        self.config_mtimes = {}
+        self._refresh_config_mtimes()
 
         self.last_shift_press = 0
         self.double_click_timeout = self.config.get('double_click_timeout', 0.3)
@@ -459,6 +453,8 @@ class LSwitch:
         # Отслеживание реального выделения
         self.last_known_selection = ''  # Последняя известная PRIMARY selection
         self.selection_timestamp = 0  # Время последнего изменения выделения
+        self.cursor_moved_at = 0.0
+        self.selection_freshness_window = 0.7
         
         # Флаг: последний введённый символ был пробелом
         self.last_was_space = False
@@ -894,15 +890,59 @@ class LSwitch:
         try:
             result = self.system.xclip_get(selection='primary', timeout=0.3)
             current_selection = result.stdout
-            
-            # Есть выделение только если:
-            # 1. PRIMARY не пустая
-            # 2. PRIMARY изменилась с последнего раза (свежее выделение!)
-            if current_selection and current_selection != self.last_known_selection:
+
+            if not current_selection:
+                return False
+
+            now = time.time()
+            fresh_by_change = current_selection != self.last_known_selection
+            recent_cursor_move = (
+                getattr(self, 'cursor_moved_at', 0.0)
+                and (now - self.cursor_moved_at) < self.selection_freshness_window
+            )
+
+            if fresh_by_change or recent_cursor_move:
+                self.last_known_selection = current_selection
+                self.selection_timestamp = now
                 return True
             return False
         except Exception:
             return False
+
+    def _get_config_watch_paths(self):
+        paths = []
+        primary = self.config.get('_config_path')
+        if primary:
+            paths.append(primary)
+        user_cfg = self.config.get('_user_config_path')
+        if user_cfg:
+            paths.append(user_cfg)
+        else:
+            paths.append(os.path.expanduser('~/.config/lswitch/config.json'))
+        sys_cfg = '/etc/lswitch/config.json'
+        if sys_cfg not in paths:
+            paths.append(sys_cfg)
+        return [p for p in paths if p]
+
+    def _refresh_config_mtimes(self):
+        self.config_watch_paths = self._get_config_watch_paths()
+        self.config_mtimes = {}
+        for path in self.config_watch_paths:
+            try:
+                self.config_mtimes[path] = os.path.getmtime(path)
+            except (OSError, FileNotFoundError, TypeError):
+                self.config_mtimes[path] = None
+
+    def _select_primary_config_path(self):
+        cfg_path = self.config.get('_config_path')
+        if cfg_path and os.path.exists(cfg_path):
+            return cfg_path
+        user_cfg = os.path.expanduser('~/.config/lswitch/config.json')
+        if os.path.exists(user_cfg):
+            return user_cfg
+        if cfg_path:
+            return cfg_path
+        return user_cfg
     
     def update_selection_snapshot(self):
         """Обновляет снимок текущей PRIMARY selection"""
@@ -1183,7 +1223,7 @@ class LSwitch:
                                     print("⚠️ adapter.ctrl_shift_left failed (non-fatal)")
                         else:
                             try:
-                                get_system().xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
+                                self.system.xdotool_key('ctrl+shift+Left', timeout=0.3, stderr=subprocess.DEVNULL)
                             except Exception:
                                 if self.config.get('debug'):
                                     print("⚠️ system xdotool ctrl+shift+Left failed (non-fatal)")
@@ -1550,18 +1590,19 @@ class LSwitch:
                 current_time = time.time()
                 if current_time - self.last_config_check >= 1.0:
                     self.last_config_check = current_time
-                    config_path = self.config.get('_config_path') or self.config.get('_user_config_path')
-                    if config_path is None:
-                        config_path = '/etc/lswitch/config.json'
-                    try:
-                        if isinstance(config_path, str):
+                    config_paths = self.config_watch_paths or self._get_config_watch_paths()
+                    for config_path in config_paths:
+                        try:
                             current_mtime = os.path.getmtime(config_path)
-                            if current_mtime != self.config_mtime:
-                                self.config_mtime = current_mtime
-                                print(f"📝 Обнаружено изменение {config_path}", flush=True)
-                                self.reload_config()
-                    except (OSError, TypeError):
-                        pass  # Файл не существует или недоступен
+                        except (OSError, TypeError):
+                            current_mtime = None
+
+                        last_mtime = self.config_mtimes.get(config_path)
+                        if current_mtime != last_mtime:
+                            self.config_mtimes[config_path] = current_mtime
+                            print(f"📝 Обнаружено изменение {config_path}", flush=True)
+                            self.reload_config()
+                            break
                 
                 # Проверяем флаг перезагрузки конфигурации (для SIGHUP)
                 if self.config_reload_requested:
@@ -1598,6 +1639,7 @@ class LSwitch:
                                 self.clear_buffer()
                                 if self.config.get('debug'):
                                     print("Буфер очищен (клик мыши)")
+                            self.cursor_moved_at = time.time()
                         
                         # Сохраняем ссылку на устройство для проверки модификаторов
                         self.current_device = device
