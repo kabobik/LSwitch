@@ -174,49 +174,27 @@ def expand_selection_to_space(max_steps: int = 100, stable_timeout: float = 0.5)
 def safe_replace_selection(converted: str, selected_text: str = None, debug: bool = False) -> str:
     """Safely replace current PRIMARY selection with converted text.
 
-    Strategy:
-    - Set PRIMARY selection to converted text using xclip
-    - Set CLIPBOARD to converted text
-    - Paste using Ctrl+V to insert the converted text
-    - Return the resulting PRIMARY selection
+    Simple 4-step algorithm:
+    1. Save old clipboard
+    2. Set clipboard to converted text
+    3. Paste (Ctrl+V automatically replaces selection)
+    4. Restore old clipboard
 
-    Returns the resulting PRIMARY selection (converted text).
+    Returns the converted text.
     """
+    if debug:
+        print(f"🔍 safe_replace: converted={converted!r}", flush=True)
+
+    old_clip = get_clipboard()
     try:
-        current_primary = get_primary_selection()
-        if debug:
-            print(f"🔍 safe_replace: current_primary={current_primary!r}, converted_to_insert={converted!r}", flush=True)
-        
-        # Save old clipboard to restore later
-        old_clip = get_clipboard()
-        
-        try:
-            # Set PRIMARY selection directly to converted text
-            get_system().xclip_set(converted, selection='primary', timeout=0.5)
-            time.sleep(0.02)
-            
-            # Also set CLIPBOARD to converted so Ctrl+V will work
-            set_clipboard(converted)
-            time.sleep(0.02)
-            
-            # Paste to insert converted text
-            paste_clipboard()
-            time.sleep(0.05)
-            
-            result = get_primary_selection()
-        except Exception as e:
-            if debug:
-                print(f"⚠️ xclip_set/paste failed: {e}", flush=True)
-            result = converted
-        finally:
-            # Restore old clipboard
-            if old_clip:
-                set_clipboard(old_clip)
-        
-        if debug:
-            print(f"🔍 safe_replace EXIT: returning {result!r}", flush=True)
-        return result
-    except Exception as e:
-        if debug:
-            print(f"⚠️ safe_replace_selection failed: {e}", flush=True)
-        return ''
+        set_clipboard(converted)
+        time.sleep(0.02)
+        paste_clipboard()
+        time.sleep(0.05)
+    finally:
+        if old_clip:
+            set_clipboard(old_clip)
+
+    if debug:
+        print(f"🔍 safe_replace EXIT: returning {converted!r}", flush=True)
+    return converted

@@ -11,18 +11,13 @@ class RetryAdapter:
     def get_primary_selection(self):
         return self.primary
 
-    def delete_selection(self):
-        # simulate deletion clearing primary
-        self.primary = ''
-
     def set_clipboard(self, text):
         self.clipboard = text
 
     def paste_clipboard(self):
-        # succeed only on 2nd paste call
+        # Simplified: paste always replaces selection
         self.paste_calls += 1
-        if self.paste_calls >= 2:
-            self.primary = self.clipboard
+        self.primary = self.clipboard
 
 
 def test_paste_succeeds_on_retry():
@@ -36,7 +31,9 @@ def test_paste_succeeds_on_retry():
 
     assert orig == 'word'
     assert conv == 'drow'
+    # Simplified: paste works on first try
     assert adapter.get_primary_selection() == 'drow'
+    assert adapter.paste_calls == 1
 
 
 class CutThenPasteAdapter:
@@ -44,25 +41,17 @@ class CutThenPasteAdapter:
         self.primary = primary
         self.clipboard = ''
         self.paste_calls = 0
-        self.cut_called = False
 
     def get_primary_selection(self):
         return self.primary
-
-    def cut_selection(self):
-        # simulate a cut that succeeds in moving text to clipboard
-        self.cut_called = True
-        self.clipboard = self.primary
-        self.primary = ''
 
     def set_clipboard(self, text):
         self.clipboard = text
 
     def paste_clipboard(self):
-        # succeed only after cut was called and second paste
+        # Simplified: paste replaces selection with clipboard
         self.paste_calls += 1
-        if self.paste_calls >= 2 and self.cut_called:
-            self.primary = self.clipboard
+        self.primary = self.clipboard
 
 
 def test_cut_then_paste_with_retry():
@@ -76,4 +65,6 @@ def test_cut_then_paste_with_retry():
 
     assert orig == 'hello'
     assert conv == 'HELLO'
+    # Simplified: paste works on first try
     assert adapter.get_primary_selection() == 'HELLO'
+    assert adapter.paste_calls == 1

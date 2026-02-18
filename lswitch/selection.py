@@ -159,222 +159,28 @@ class SelectionManager:
                     print(f"⚠️ safe_replace_selection raised: {e}", flush=True)
                 result_primary = ''
         else:
-            # Fallback safe-replace using available adapter primitives
+            # Simple fallback: save clipboard -> set clipboard -> paste -> restore
             try:
                 old_clip = None
                 if getattr(self.x11, 'get_clipboard', None):
                     old_clip = self.x11.get_clipboard()
 
-                cut_ok = False
-                repaired = False
-                # If caller requested trimming and adapter supports delete, prefer
-                # delete_selection so we avoid capturing leading whitespace at all.
-                if prefer_trim_leading and getattr(self.x11, 'delete_selection', None):
-                    try:
-                        if debug:
-                            print("SelectionManager: invoking delete_selection() to avoid leading-space capture")
-                        self.x11.delete_selection()
-                        time.sleep(0.03)
-                        # Consider as success (selection removed)
-                        cut_ok = True
-                    except Exception:
-                        if debug:
-                            print("SelectionManager: delete_selection raised (non-fatal)")
-
-                if not cut_ok and getattr(self.x11, 'cut_selection', None):
-                    try:
-                        if debug:
-                            print("SelectionManager: invoking cut_selection()")
-                        self.x11.cut_selection()
-                        time.sleep(0.03)
-                        if getattr(self.x11, 'get_clipboard', None):
-                            test_clip = self.x11.get_clipboard()
-                            if debug:
-                                print(f"SelectionManager: after cut, clipboard={test_clip!r} selected={selected!r}")
-                            # If the adapter included an outside leading whitespace
-                            # during expansion and the caller requested trimming,
-                            # treat the clipboard for conversion as trimmed so the
-                            # leading space is not considered part of the word.
-                            test_clip_for_check = test_clip
-                            if prefer_trim_leading and outside_leading and test_clip.startswith(outside_leading) and not original_selected.startswith(outside_leading):
-                                # do not mutate real clipboard; use trimmed copy for checks
-                                test_clip_for_check = test_clip[len(outside_leading):]
-                                if debug:
-                                    print(f"SelectionManager: trimming clipboard for conversion -> {test_clip_for_check!r}")
-                            if selected and test_clip_for_check.strip() == selected.strip():
-                                cut_ok = True
-                    except Exception as e:
-                        if debug:
-                            import traceback
-                            print(f"SelectionManager: cut_selection raised: {e!r}")
-                            print(traceback.format_exc())
-
-                if not cut_ok and getattr(self.x11, 'delete_selection', None):
-                    try:
-                        if debug:
-                            print("SelectionManager: invoking delete_selection()")
-                        self.x11.delete_selection()
-                        time.sleep(0.03)
-                        # If adapter exposes PRIMARY, check whether delete actually cleared it
-                        if getattr(self.x11, 'get_primary_selection', None):
-                            try:
-                                after_del = self.x11.get_primary_selection()
-                                if debug:
-                                    print(f"SelectionManager: after delete, primary={after_del!r}")
-                                if after_del:
-                                    # delete did not clear selection; avoid cut+paste to prevent duplication
-                                    if debug:
-                                        print("⚠️ delete did not clear primary (fallback path) — will attempt direct set instead of paste", flush=True)
-                                    # Try direct set if possible; mark repaired when we commit replacement
-                                    if hasattr(self.x11, 'primary'):
-                                        if debug:
-                                            print("SelectionManager: direct-setting adapter.primary as fallback", flush=True)
-                                        try:
-                                            self.x11.primary = result_primary_reconstructed
-                                            repaired = True
-                                        except Exception as e:
-                                            if debug:
-                                                print(f"⚠️ Direct set failed in fallback branch: {e}", flush=True)
-                                    else:
-                                        # fallback to set_clipboard+paste (risky)
-                                        if getattr(self.x11, 'set_clipboard', None):
-                                            if debug:
-                                                print("SelectionManager: delete no-op — attempting guarded set+paste", flush=True)
-                                            try:
-                                                self.x11.set_clipboard(result_primary_reconstructed)
-                                                time.sleep(0.03)
-                                                if getattr(self.x11, 'paste_clipboard', None):
-                                                    self.x11.paste_clipboard()
-                                                    time.sleep(0.03)
-                                                repaired = True
-                                            except Exception as e:
-                                                if debug:
-                                                    print(f"⚠️ guarded set+paste failed (fallback path): {e}", flush=True)
-                            except Exception as e:
-                                if debug:
-                                    print(f"🔍 get_primary_selection raised after delete (fallback path): {e}", flush=True)
-                        else:
-                            if debug:
-                                print("SelectionManager: after delete (no get_primary_selection available)")
-                    except Exception:
-                        if debug:
-                            print("SelectionManager: delete_selection raised")
-
-                if not repaired and getattr(self.x11, 'set_clipboard', None):
+                if getattr(self.x11, 'set_clipboard', None):
                     if debug:
                         print(f"SelectionManager: setting clipboard to {result_primary_reconstructed!r}")
                     self.x11.set_clipboard(result_primary_reconstructed)
-                    if debug:
-                        try:
-                            if getattr(self.x11, 'get_clipboard', None):
-                                clip_now = self.x11.get_clipboard()
-                                print(f"🔍 clipboard after set_clipboard: {clip_now!r}", flush=True)
-                            else:
-                                print("🔍 clipboard set (get_clipboard not available)", flush=True)
-                        except Exception as e:
-                            print(f"🔍 get_clipboard raised after set_clipboard: {e}", flush=True)
-                time.sleep(0.02)
+                    time.sleep(0.02)
 
                 if getattr(self.x11, 'paste_clipboard', None):
                     if debug:
-                        try:
-                            clip_before = self.x11.get_clipboard() if getattr(self.x11, 'get_clipboard', None) else None
-                            print(f"SelectionManager: invoking paste_clipboard(), clipboard_before={clip_before!r}")
-                        except Exception as e:
-                            print(f"SelectionManager: invoking paste_clipboard(), get_clipboard raised: {e}")
-                    try:
-                        self.x11.paste_clipboard()
-                    except Exception as e:
-                        if debug:
-                            print(f"⚠️ paste_clipboard raised: {e}")
-                time.sleep(0.05)
-
-                if debug:
-                    try:
-                        if getattr(self.x11, 'get_clipboard', None):
-                            clip_after = self.x11.get_clipboard()
-                            print(f"🔍 clipboard after paste: {clip_after!r}", flush=True)
-                    except Exception as e:
-                        if debug:
-                            print(f"🔍 get_clipboard raised after paste: {e}", flush=True)
+                        print("SelectionManager: invoking paste_clipboard()")
+                    self.x11.paste_clipboard()
+                    time.sleep(0.05)
 
                 if old_clip and getattr(self.x11, 'set_clipboard', None):
                     self.x11.set_clipboard(old_clip)
 
-                if getattr(self.x11, 'get_primary_selection', None):
-                    result_primary = self.x11.get_primary_selection()
-
-                # If paste did not produce expected result, retry a couple of times and as a last resort set attribute directly
-                try:
-                    if debug:
-                        print(f"🔍 post-paste primary={result_primary!r} expected={result_primary_reconstructed!r}")
-                        print(f"🔍 details: outside_leading={outside_leading!r}, leading_inside={leading_inside!r}, trailing={trailing!r}")
-                    # Ensure we compare exact result including leading/trailing whitespace
-                    if result_primary != result_primary_reconstructed:
-                        # Attempt several retries of paste (some adapters need time and may clear clipboard)
-                        retries = 3
-                        for attempt in range(1, retries + 1):
-                            if getattr(self.x11, 'paste_clipboard', None):
-                                if debug:
-                                    print(f"⚠️ Paste did not match converted text exactly — retrying paste (attempt {attempt}/{retries})")
-                                # Re-set clipboard before retry — some adapters may lose it
-                                try:
-                                    if getattr(self.x11, 'set_clipboard', None):
-                                        self.x11.set_clipboard(result_primary_reconstructed)
-                                except Exception as e:
-                                    if debug:
-                                        print(f"⚠️ set_clipboard raised during retry prep: {e}")
-                                try:
-                                    self.x11.paste_clipboard()
-                                except Exception as e:
-                                    if debug:
-                                        print(f"⚠️ paste_clipboard raised: {e}")
-                                # Backoff increasing delay for stability
-                                time.sleep(0.02 * attempt)
-                                if getattr(self.x11, 'get_primary_selection', None):
-                                    result_primary = self.x11.get_primary_selection()
-                                # Require exact match including whitespace
-                                if result_primary == result_primary_reconstructed:
-                                    if debug:
-                                        print(f"✅ Paste succeeded on attempt {attempt}")
-                                    break
-                            else:
-                                break
-
-                        # last-resort: directly set 'primary' attribute on adapters (useful for mocks)
-                        if result_primary != result_primary_reconstructed and hasattr(self.x11, 'primary'):
-                            if debug:
-                                print("⚠️ Paste failed — directly setting adapter.primary as last resort")
-                            try:
-                                self.x11.primary = result_primary_reconstructed
-                                result_primary = self.x11.primary
-                            except Exception as e:
-                                if debug:
-                                    print(f"⚠️ Direct set of adapter.primary failed: {e}")
-
-                        # If paste still did not produce expected result, attempt to restore the
-                        # original selection to avoid data loss: set clipboard back to original
-                        # selection and paste it (best-effort). This prevents the case where
-                        # delete/remove occurred but the converted text was not inserted.
-                        if result_primary != result_primary_reconstructed:
-                            try:
-                                if debug:
-                                    print("⚠️ Paste failed — attempting to restore original selection")
-                                if getattr(self.x11, 'set_clipboard', None) and getattr(self.x11, 'paste_clipboard', None):
-                                    self.x11.set_clipboard(selected.strip())
-                                    time.sleep(0.02)
-                                    self.x11.paste_clipboard()
-                                    time.sleep(0.03)
-                                    if getattr(self.x11, 'get_primary_selection', None):
-                                        result_primary = self.x11.get_primary_selection()
-                                        if debug:
-                                            print(f"🔄 After restore attempt, primary={result_primary!r}")
-                            except Exception as e:
-                                if debug:
-                                    print(f"⚠️ Error during restore attempt: {e}")
-                except Exception as e:
-                    if debug:
-                        print(f"⚠️ Error in paste-fallback logic: {e}")
+                result_primary = result_primary_reconstructed
             except Exception:
                 result_primary = ''
 

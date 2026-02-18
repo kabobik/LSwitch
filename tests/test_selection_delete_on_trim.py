@@ -38,12 +38,11 @@ def test_delete_selection_prevents_leading_space_capture(monkeypatch):
 
     orig, conv = sm.convert_selection(lambda s: s.upper(), debug=True, prefer_trim_leading=True)
 
-    assert adapter.delete_called is True
-    # even though adapter originally had leading space, clipboard used for conversion
-    # should not include it (we don't call cut), and conversion should succeed
+    # Simplified algorithm: no delete_selection anymore, paste replaces selection
+    assert adapter.paste_called is True
     assert conv == 'WORD'
-    # final pasted value should preserve visual leading space if desired
-    # (adapter.paste_clipboard would set primary to whatever we set)
+    # Clipboard should include leading space for proper replacement
+    assert adapter.primary == ' WORD'
 
 
 if __name__ == '__main__':

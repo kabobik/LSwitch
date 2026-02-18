@@ -48,7 +48,16 @@ if command -v lswitch &>/dev/null; then
     # Останавливаем демон перед обновлением
     if [ "$LSWITCH_RUNNING" = true ]; then
         echo -e "${YELLOW}⏸  Останавливаю демон для обновления...${NC}"
-        systemctl --user stop lswitch || true
+        systemctl --user stop lswitch 2>/dev/null || true
+    fi
+    
+    # Убиваем все процессы lswitch (включая запущенные вручную через lswitch --debug)
+    if pgrep -f "lswitch" >/dev/null 2>&1; then
+        echo -e "${YELLOW}⏸  Останавливаю процессы lswitch...${NC}"
+        pkill -f "python.*lswitch" 2>/dev/null || true
+        pkill -f "lswitch --" 2>/dev/null || true
+        # Даём процессам время завершиться
+        sleep 1
     fi
     echo
 fi
@@ -273,8 +282,17 @@ echo
 if [ "$LSWITCH_RUNNING" = true ]; then
     # Это переустановка - перезапускаем сервис
     echo -e "${YELLOW}🔄 Перезапускаю демон...${NC}"
-    systemctl --user restart lswitch
-    echo -e "${GREEN}✅ Демон перезапущен!${NC}"
+    if systemctl --user restart lswitch 2>/dev/null; then
+        sleep 1
+        if systemctl --user is-active lswitch &>/dev/null; then
+            echo -e "${GREEN}✅ Демон перезапущен!${NC}"
+        else
+            echo -e "${YELLOW}⚠  Демон запущен, но статус неизвестен${NC}"
+        fi
+    else
+        echo -e "${RED}❌ Не удалось перезапустить демон${NC}"
+        echo -e "   Попробуйте вручную: ${CYAN}systemctl --user restart lswitch${NC}"
+    fi
 elif [ "$EXISTING_INSTALL" = true ]; then
     # Было установлено, но не запущено - предлагаем запустить
     if systemctl --user is-enabled lswitch &>/dev/null; then

@@ -134,7 +134,7 @@ def test_selection_triggered_by_backspace_hold(monkeypatch):
     ls.handle_event(ev_shift)
 
     # After double shift with backspace hold, selection flow should be used
-    assert mock.cut_called or mock.delete_called
+    # Simplified algorithm: just paste (Ctrl+V replaces selection automatically)
     assert mock.paste_called
 
 

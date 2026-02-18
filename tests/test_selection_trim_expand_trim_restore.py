@@ -42,10 +42,10 @@ def test_trim_expand_restore_leading_space(monkeypatch):
 
     # conversion should be the uppercase word
     assert conv == 'WORD'
-    # after delete_selection + paste we should have leading space restored
-    assert adapter.primary == (' ' + conv)
-    assert adapter.deleted is True
-    assert adapter.paste_calls >= 1
+    # Simplified: paste replaces selection, includes leading space
+    assert adapter.primary == ' WORD'
+    # No delete_selection anymore in simplified algorithm
+    assert adapter.paste_calls == 1
 
 
 if __name__ == '__main__':
