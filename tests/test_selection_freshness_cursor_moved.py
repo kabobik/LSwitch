@@ -62,8 +62,13 @@ def test_mouse_click_makes_selection_fresh(monkeypatch):
     assert ls.has_selection() is False
 
 
-def test_arrow_navigation_does_not_make_selection_fresh(monkeypatch):
-    """Test that arrow navigation does NOT make selection fresh."""
+def test_arrow_navigation_makes_selection_fresh(monkeypatch):
+    """Test that arrow navigation DOES make selection fresh (after fix).
+    
+    This is the corrected behavior - navigation should update cursor_moved_at
+    so that subsequent selection checks consider the selection as fresh.
+    See: .github/research_layout_switching.md section 3.2
+    """
     ls = make_lswitch_no_threads(monkeypatch)
     
     class MockResult:
@@ -82,7 +87,7 @@ def test_arrow_navigation_does_not_make_selection_fresh(monkeypatch):
     # Second check: stale
     assert ls.has_selection() is False
     
-    # Simulate arrow navigation (should NOT set cursor_moved_at)
+    # Simulate arrow navigation (should NOW set cursor_moved_at)
     ev_arrow = SimpleNamespace(
         type=ecodes.EV_KEY,
         code=ecodes.KEY_LEFT,
@@ -90,6 +95,5 @@ def test_arrow_navigation_does_not_make_selection_fresh(monkeypatch):
     )
     ls.input_handler.handle_event(ev_arrow)
     
-    # cursor_moved_at should NOT be set by navigation
-    # Third check: should still be stale
-    assert ls.has_selection() is False
+    # cursor_moved_at should be set by navigation - selection should be fresh
+    assert ls.has_selection() is True

@@ -47,6 +47,10 @@ def test_navigation_resets_backspace_and_allows_retype(monkeypatch):
     called = {'retype': False, 'selection': False}
     monkeypatch.setattr(ls, 'convert_and_retype', lambda *a, **k: called.__setitem__('retype', True))
     monkeypatch.setattr(ls, 'convert_selection', lambda *a, **k: called.__setitem__('selection', True))
+    
+    # Mock has_selection to return False (no actual clipboard selection)
+    # This ensures the test focuses on retype path based on buffer content
+    monkeypatch.setattr(ls, 'has_selection', lambda: False)
 
     # Simulate double shift
     ev_shift_rel = SimpleNamespace(type=ecodes.EV_KEY, code=ecodes.KEY_LEFTSHIFT, value=0)

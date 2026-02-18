@@ -1152,12 +1152,14 @@ class LSwitch:
                 except Exception:
                     pass
 
+                # IMPORTANT: Set post-replay suppression window BEFORE clearing
+                # suppress_shift_detection to avoid race condition where a shift
+                # release could be processed between the two assignments.
+                self._post_replay_suppress_until = time.time() + max(0.1, self.double_click_timeout)
                 self.suppress_shift_detection = False
                 if self.config.get('debug'):
                     print(f"{time.time():.6f} ▸ suppress_shift_detection=False (replay complete)", flush=True)
-                # Reset marker to avoid immediate re-detection and establish a
-                # short post-replay suppression window to handle delayed delivery
-                # of synthetic events.
+                # Reset marker to avoid immediate re-detection.
                 self.last_shift_press = 0
                 # Also reset InputHandler's shift-pressed flag if present
                 try:
@@ -1166,7 +1168,6 @@ class LSwitch:
                         self.input_handler._shift_last_press_time = 0.0
                 except Exception:
                     pass
-                self._post_replay_suppress_until = time.time() + max(0.1, self.double_click_timeout)
             
             if self.config.get('debug'):
                 print("✓ Конвертация завершена")

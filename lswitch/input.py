@@ -163,8 +163,11 @@ class InputHandler:
             if self.ls.backspace_hold_detected:
                 self.ls.backspace_hold_detected = False
                 self.ls.backspace_hold_detected_at = 0.0
+            # Update cursor_moved_at on navigation - this affects selection freshness
+            # detection and prevents stale selection data from being used.
+            self.ls.cursor_moved_at = time.time()
             if self.ls.config.get('debug'):
-                print("Buffer cleared (navigation)")
+                print("Buffer cleared (navigation), cursor_moved_at updated")
             return
 
         # Shift handling
@@ -273,6 +276,15 @@ class InputHandler:
                         self.ls.backspace_hold_detected_at = 0.0
             elif event.value == 2:  # repeat (key held down)
                 if event.code == getattr(ecodes, 'KEY_BACKSPACE', None):
+                    # On first repeat, clear the buffer - it's unreliable during holds
+                    # because repeat events don't decrement the counter accurately.
+                    if self.ls.consecutive_backspace_repeats == 0:
+                        try:
+                            self.ls.clear_buffer()
+                            if self.ls.config.get('debug'):
+                                print("Buffer cleared (backspace repeat started)")
+                        except Exception:
+                            pass
                     self.ls.consecutive_backspace_repeats += 1
                     if self.ls.consecutive_backspace_repeats >= 3:
                         if not self.ls.backspace_hold_detected:

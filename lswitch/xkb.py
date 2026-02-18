@@ -209,3 +209,62 @@ def keycode_to_char(keycode: int, layout: str, layouts: list, shift: bool = Fals
         if debug:
             print(f"⚠️ keycode_to_char failed for {keycode} {layout}")
         return ''
+
+
+def switch_to_layout(target_name: str, layouts: list, debug: bool = False) -> bool:
+    """Switch to a specific layout by name.
+    
+    Uses XkbLockGroup to switch to the target layout identified by its
+    name in the layouts list.
+    
+    Args:
+        target_name: Target layout name ('ru', 'en', 'es', etc.)
+        layouts: List of available layouts (e.g., ['en', 'ru'])
+        debug: Enable debug output
+        
+    Returns:
+        True if switch was successful, False otherwise
+        
+    Example:
+        >>> switch_to_layout('ru', ['en', 'ru'], debug=False)
+        True
+    """
+    if not XKB_AVAILABLE or not libX11:
+        if debug:
+            print("⚠️ XKB not available for switch_to_layout")
+        return False
+    
+    # Normalize layout name (us -> en)
+    normalized = 'en' if target_name.lower() in ('us', 'en') else target_name.lower()
+    
+    # Find target index in layouts list
+    target_index = None
+    for i, layout in enumerate(layouts):
+        if layout.lower() == normalized:
+            target_index = i
+            break
+    
+    if target_index is None:
+        if debug:
+            print(f"⚠️ Layout '{target_name}' not found in {layouts}")
+        return False
+    
+    try:
+        display_ptr = libX11.XOpenDisplay(None)
+        if not display_ptr:
+            if debug:
+                print("⚠️ Failed to open X display")
+            return False
+        try:
+            # XkbUseCoreKbd = 0x100
+            ret = libX11.XkbLockGroup(display_ptr, 0x100, target_index)
+            libX11.XFlush(display_ptr)
+            if debug:
+                print(f"✓ Switched to layout '{target_name}' (index {target_index}), result: {ret}")
+            return ret == True or ret == 1
+        finally:
+            libX11.XCloseDisplay(display_ptr)
+    except Exception as e:
+        if debug:
+            print(f"⚠️ switch_to_layout failed: {e}")
+        return False
