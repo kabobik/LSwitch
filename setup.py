@@ -46,13 +46,12 @@ setup(
         ],
     },
     data_files=[
-        # systemd user service
+        # systemd user service (for all users)
         ('/etc/systemd/user', ['config/lswitch.service']),
         # udev rules for input device access
         ('/etc/udev/rules.d', ['config/99-lswitch.rules']),
-        # Desktop entry for GUI (menu + autostart)
+        # Desktop entry for GUI (user autostart is set up by install.sh)
         ('/usr/share/applications', ['config/lswitch-control.desktop']),
-        ('/etc/xdg/autostart', ['config/lswitch-control.desktop']),
         # Icon
         ('/usr/share/pixmaps', ['assets/lswitch.png']),
     ],

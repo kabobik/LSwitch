@@ -31,6 +31,7 @@ sudo pip3 uninstall -y lswitch 2>/dev/null || true
 echo -e "${YELLOW}Очистка системных файлов...${NC}"
 sudo rm -f /usr/share/applications/lswitch-control.desktop
 sudo rm -f /etc/xdg/autostart/lswitch-control.desktop
+rm -f "$HOME/.config/autostart/lswitch-control.desktop"
 sudo rm -f /usr/share/pixmaps/lswitch.png
 sudo rm -f /etc/udev/rules.d/99-lswitch.rules
 sudo rm -f /etc/systemd/user/lswitch.service

@@ -82,6 +82,7 @@ class I18n:
                 'autostart_disabled': 'Autostart disabled',
                 'failed_to_change_autostart': 'Failed to change autostart',
                 'autostart_managed_by_system': 'Autostart is managed by the system ({path}) and cannot be disabled here',
+                'config_save_error': 'Failed to save settings',
                 
                 # About dialog
                 'about_title': 'LSwitch v{version}',
@@ -143,6 +144,7 @@ class I18n:
                 'autostart_disabled': 'Автозапуск выключен',
                 'failed_to_change_autostart': 'Не удалось изменить автозапуск',
                 'autostart_managed_by_system': 'Автозапуск управляется системой ({path}) и не может быть отключён здесь',
+                'config_save_error': 'Не удалось сохранить настройки',
                 
                 # Диалог О программе
                 'about_title': 'LSwitch v{version}',

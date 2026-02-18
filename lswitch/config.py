@@ -148,16 +148,19 @@ def load_config(config_path: str, debug: bool = False) -> dict:
     """
     default_config = dict(DEFAULT_CONFIG)
 
-    # Try explicit path
+    # If explicit path provided, use only that (for testing)
     if config_path:
         _read_and_merge(config_path, default_config, debug=debug)
+        default_config['_config_path'] = config_path
+        default_config['_user_config_path'] = None
+        return default_config
 
-    # user config override
+    # Otherwise use user config
     user_cfg = os.path.expanduser('~/.config/lswitch/config.json')
     if os.path.exists(user_cfg):
         _read_and_merge(user_cfg, default_config, debug=debug)
 
-    default_config['_config_path'] = config_path
+    default_config['_config_path'] = user_cfg
     default_config['_user_config_path'] = user_cfg if os.path.exists(user_cfg) else None
     return default_config
 
@@ -178,16 +181,13 @@ class ConfigManager:
         self._load_config()
     
     def _detect_config_path(self) -> str:
-        """Auto-detect configuration file path with priority order."""
-        user_config = os.path.expanduser('~/.config/lswitch/config.json')
-        system_config = '/etc/lswitch/config.json'
+        """Auto-detect configuration file path.
         
-        if os.path.exists(system_config):
-            return system_config
-        elif os.path.exists(user_config):
-            return user_config
-        else:
-            return user_config  # Will be created when saving
+        Always uses user config (~/.config/lswitch/config.json).
+        Global /etc/lswitch/ is no longer supported.
+        """
+        user_config = os.path.expanduser('~/.config/lswitch/config.json')
+        return user_config  # Will be created when saving if not exists
     
     def _load_config(self) -> None:
         """Load and merge configuration from file and user paths."""

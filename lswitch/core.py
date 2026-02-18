@@ -190,12 +190,12 @@ class LSwitch:
         """Delegate to `lswitch.config.load_config` (non-verbose by default).
 
         If `config_path` is None, use the test override `LSWITCH_TEST_SYSTEM_CONFIG`
-        environment variable or the system default. Ensure a user config file
+        environment variable or the user config path. Ensure a user config file
         in `~/.config/lswitch/config.json` exists (tests expect it to be created
         when missing).
         """
         if config_path is None:
-            config_path = os.environ.get('LSWITCH_TEST_SYSTEM_CONFIG') or '/etc/lswitch/config.json'
+            config_path = os.environ.get('LSWITCH_TEST_SYSTEM_CONFIG') or os.path.expanduser('~/.config/lswitch/config.json')
 
         try:
             from . import config as _cfg
@@ -269,12 +269,9 @@ class LSwitch:
         if os.environ.get('LSWITCH_TEST_DISABLE_MONITORS') == '1':
             start_threads = False
 
-        # Автоматически определяем путь к конфигурации
+        # Используем только пользовательский конфиг (глобальный /etc/lswitch/ не поддерживается)
         if config_path is None:
-            if os.path.exists('/etc/lswitch/config.json'):
-                config_path = '/etc/lswitch/config.json'
-            else:
-                config_path = os.path.expanduser('~/.config/lswitch/config.json')
+            config_path = os.path.expanduser('~/.config/lswitch/config.json')
         
         # Dependency-injectable system wrapper (default to module SYSTEM)
         if system is None:
@@ -919,9 +916,7 @@ class LSwitch:
             paths.append(user_cfg)
         else:
             paths.append(os.path.expanduser('~/.config/lswitch/config.json'))
-        sys_cfg = '/etc/lswitch/config.json'
-        if sys_cfg not in paths:
-            paths.append(sys_cfg)
+        # Note: global /etc/lswitch/ is no longer supported
         return [p for p in paths if p]
 
     def _refresh_config_mtimes(self):

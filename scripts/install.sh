@@ -160,8 +160,16 @@ sudo mkdir -p /etc/systemd/user
 sudo cp -v "$SCRIPT_DIR/config/lswitch.service" /etc/systemd/user/lswitch.service
 sudo cp -v "$SCRIPT_DIR/config/99-lswitch.rules" /etc/udev/rules.d/99-lswitch.rules
 sudo cp -v "$SCRIPT_DIR/config/lswitch-control.desktop" /usr/share/applications/lswitch-control.desktop
-sudo mkdir -p /etc/xdg/autostart
-sudo cp -v "$SCRIPT_DIR/config/lswitch-control.desktop" /etc/xdg/autostart/lswitch-control.desktop
+
+# Автозапуск панели — в пользовательскую директорию (можно отключить через GUI)
+mkdir -p "$HOME/.config/autostart"
+cp -v "$SCRIPT_DIR/config/lswitch-control.desktop" "$HOME/.config/autostart/lswitch-control.desktop"
+
+# Удаляем старый системный autostart если есть (от предыдущих версий)
+if [ -f "/etc/xdg/autostart/lswitch-control.desktop" ]; then
+    echo -e "   ${YELLOW}⚠${NC} Удаляю системный /etc/xdg/autostart/lswitch-control.desktop"
+    sudo rm -f /etc/xdg/autostart/lswitch-control.desktop
+fi
 
 # Удаляем старый user-level override если есть (приоритет выше /etc)
 if [ -f "$HOME/.config/systemd/user/lswitch.service" ]; then

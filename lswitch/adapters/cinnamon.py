@@ -56,11 +56,10 @@ class CustomMenuItem(QWidget):
                     content: "✓";
                 }}
             """)
-            # Allow the checkbox to receive clicks and forward them to the item
-            try:
-                self.checkbox.clicked.connect(lambda checked=None: self.clicked.emit())
-            except Exception:
-                pass
+            # Отключаем обработку кликов самим checkbox — вся логика в CustomMenuItem
+            # Иначе клик на checkbox переключит его ДО вызова on_item_clicked,
+            # и on_item_clicked инвертирует уже инвертированное значение
+            self.checkbox.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             self.checkbox.setFocusPolicy(Qt.NoFocus)
             layout.addWidget(self.checkbox)
             self.icon_label = None
@@ -319,11 +318,14 @@ class QMenuWrapper:
             # Связываем triggered с clicked
             def on_item_clicked():
                 if checkable:
-                    # Для checkable переключаем состояние
+                    # Для checkable: устанавливаем состояние и эмитим сигнал
+                    # НЕ используем trigger() — он делает toggle и всё ломает!
                     new_state = not action.isChecked()
                     action.setChecked(new_state)
                     item.setChecked(new_state)
-                action.trigger()
+                    action.triggered.emit()  # Просто эмитим сигнал, без toggle
+                else:
+                    action.trigger()
             
             item.clicked.connect(on_item_clicked)
             

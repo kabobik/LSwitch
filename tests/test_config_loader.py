@@ -11,13 +11,8 @@ cfg = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cfg)
 
 
-def test_load_config_merges_user_override(tmp_path, monkeypatch):
-    # system config
-    sys_cfg = tmp_path / 'etc' / 'lswitch'
-    sys_cfg.mkdir(parents=True)
-    s = sys_cfg / 'config.json'
-    s.write_text(json.dumps({'auto_switch': False, 'double_click_timeout': 0.4, 'auto_switch_threshold': 12}), encoding='utf-8')
-
+def test_load_config_uses_user_config(tmp_path, monkeypatch):
+    """Test that load_config uses user config from ~/.config/lswitch/"""
     # user config
     home = tmp_path / 'home' / 'user'
     user_cfg_dir = home / '.config' / 'lswitch'
@@ -27,12 +22,11 @@ def test_load_config_merges_user_override(tmp_path, monkeypatch):
 
     monkeypatch.setenv('HOME', str(home))
 
-    out = cfg.load_config(str(s), debug=True)
+    # Load with no explicit path — should use user config
+    out = cfg.load_config(None, debug=True)
     assert out['auto_switch'] is True
-    assert out['double_click_timeout'] == 0.4
     assert out['auto_switch_threshold'] == 8
-    assert out['_config_path'] == str(s)
-    assert out['_user_config_path'] is not None
+    assert out['_config_path'] == str(u)
 
 
 def test_sanitize_and_trailing_commas(tmp_path):

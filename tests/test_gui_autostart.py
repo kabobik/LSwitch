@@ -21,7 +21,7 @@ def test_gui_autostart_toggle(monkeypatch, tmp_path):
         os.remove(autostart_path)
 
     # Ensure system-level autostart is not present for this test
-    monkeypatch.setattr(panel, '_system_autostart_present', lambda: False)
+    monkeypatch.setattr(panel, '_system_autostart_present', lambda: None)
 
     # Simulate clicking to enable
     panel.gui_autostart_action.setChecked(True)
@@ -29,22 +29,10 @@ def test_gui_autostart_toggle(monkeypatch, tmp_path):
     assert os.path.exists(autostart_path)
     assert panel.gui_autostart_action.isChecked()
 
-    # Now toggle off (no system-level autostart present)
+    # Now toggle off
     panel.gui_autostart_action.setChecked(False)
     panel.toggle_gui_autostart()
     assert not os.path.exists(autostart_path)
     assert not panel.gui_autostart_action.isChecked()
-
-    # Create a local autostart file and simulate a system-managed autostart — disabling should be blocked
-    os.makedirs(os.path.dirname(autostart_path), exist_ok=True)
-    with open(autostart_path, 'w') as f:
-        f.write('[Desktop Entry]\n')
-    monkeypatch.setattr(panel, '_system_autostart_present', lambda: True)
-
-    # Try to disable — should remain enabled and local file preserved
-    panel.gui_autostart_action.setChecked(False)
-    panel.toggle_gui_autostart()
-    assert os.path.exists(autostart_path)
-    assert panel.gui_autostart_action.isChecked()
 
     app.quit()

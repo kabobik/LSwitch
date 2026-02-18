@@ -171,7 +171,7 @@ class LSwitchControlPanel(QSystemTrayIcon):
         self.config = self.config_manager.get_all()
 
         # Состояние чекбоксов
-        self.auto_switch_checked = self.config.get('auto_switch', True)
+        self.auto_switch_checked = self.config.get('auto_switch', False)
         self.user_dict_checked = self.config.get('user_dict_enabled', False)
         self.auto_switch_threshold = int(self.config.get('auto_switch_threshold', 10))
         self.autostart_checked = False  # Будет обновлено в create_tray_menu
@@ -640,38 +640,34 @@ class LSwitchControlPanel(QSystemTrayIcon):
     
     def toggle_auto_switch(self):
         """Переключает режим автопереключения"""
-        self.auto_switch_checked = not self.auto_switch_checked
-        self.config['auto_switch'] = self.auto_switch_checked
-        self.auto_switch_action.setChecked(self.auto_switch_checked)
-        if self.save_config():
-            # Отправляем сигнал службе для перезагрузки конфига
-            self.reload_service_config()
-            
-            status_msg = t('auto_switch_enabled') if self.auto_switch_checked else t('auto_switch_disabled')
-            self.showMessage(
-                "LSwitch",
-                status_msg,
-                QSystemTrayIcon.Information,
-                2000
-            )
-            # Если системный конфиг есть, но мы не записали туда изменения — предупредим пользователя
+        try:
+            checked = self.auto_switch_action.isChecked()
+            self.config['auto_switch'] = checked
+            if self.save_config():
+                self.reload_service_config()
+                status_msg = t('auto_switch_enabled') if checked else t('auto_switch_disabled')
+                self.showMessage("LSwitch", status_msg, QSystemTrayIcon.Information, 2000)
+            else:
+                # Откатываем состояние чекбокса при ошибке сохранения
+                self.auto_switch_action.setChecked(not checked)
+                self.showMessage(t('error'), t('config_save_error'), QSystemTrayIcon.Critical, 3000)
+        except Exception as e:
+            print(f"Ошибка toggle_auto_switch: {e}", file=sys.stderr, flush=True)
+            self.auto_switch_action.setChecked(not self.auto_switch_action.isChecked())
+            self.showMessage(t('error'), str(e), QSystemTrayIcon.Critical, 3000)
 
     def toggle_user_dict(self):
         """Переключает самообучающийся словарь"""
-        self.user_dict_checked = not self.user_dict_checked
-        self.config['user_dict_enabled'] = self.user_dict_checked
-        self.user_dict_action.setChecked(self.user_dict_checked)
+        checked = self.user_dict_action.isChecked()
+        self.config['user_dict_enabled'] = checked
         if self.save_config():
-            # Отправляем сигнал службе для перезагрузки конфига
             self.reload_service_config()
-            
-            status_msg = t('dict_enabled') if self.user_dict_checked else t('dict_disabled')
-            self.showMessage(
-                "LSwitch",
-                status_msg,
-                QSystemTrayIcon.Information,
-                3000
-            )
+            status_msg = t('dict_enabled') if checked else t('dict_disabled')
+            self.showMessage("LSwitch", status_msg, QSystemTrayIcon.Information, 3000)
+        else:
+            # Откатываем состояние чекбокса при ошибке сохранения
+            self.user_dict_action.setChecked(not checked)
+            self.showMessage(t('error'), t('config_save_error'), QSystemTrayIcon.Critical, 3000)
 
 
 
@@ -750,21 +746,7 @@ Comment=Control panel for LSwitch
                 else:
                     self.showMessage("LSwitch", t('autostart_disabled'), QSystemTrayIcon.Information, 2000)
             else:
-                # Block disabling up-front to avoid brief flicker when the checkbox is unchecked.
-                sys_path = self._system_autostart_present()
-                print(f"toggle_gui_autostart: disabling requested, local_exists={os.path.exists(autostart_file)}, system_path={sys_path}", flush=True)
-                if sys_path:
-                    try:
-                        self.gui_autostart_action.setChecked(True)
-                    except Exception:
-                        pass
-                    msg = t('autostart_managed_by_system', path=sys_path)
-                    # Ensure system path is visible in message even if translation lookup failed
-                    if sys_path and sys_path not in (msg or ''):
-                        msg = f"Autostart is managed by the system ({sys_path}) and cannot be disabled here"
-                    self.showMessage("LSwitch", msg, QSystemTrayIcon.Information, 4000)
-                    return
-
+                # Отключение автозапуска
                 try:
                     os.remove(autostart_file)
                 except FileNotFoundError:
@@ -800,28 +782,15 @@ Comment=Control panel for LSwitch
     
     def toggle_autostart(self):
         """Включает/выключает автозапуск службы"""
-        self.autostart_checked = not self.autostart_checked
-        action = 'enable' if self.autostart_checked else 'disable'
+        checked = self.autostart_action.isChecked()
+        action = 'enable' if checked else 'disable'
         if self.run_systemctl(action):
-            status_msg = t('autostart_enabled') if self.autostart_checked else t('autostart_disabled')
-            self.showMessage(
-                "LSwitch",
-                status_msg,
-                QSystemTrayIcon.Information,
-                2000
-            )
-            # Обновляем состояние чекбокса
-            self.autostart_action.setChecked(self.autostart_checked)
+            status_msg = t('autostart_enabled') if checked else t('autostart_disabled')
+            self.showMessage("LSwitch", status_msg, QSystemTrayIcon.Information, 2000)
         else:
-            # Откатываем изменение
-            self.autostart_checked = not self.autostart_checked
-            self.autostart_action.setChecked(self.autostart_checked)
-            self.showMessage(
-                t('error'),
-                t('failed_to_change_autostart'),
-                QSystemTrayIcon.Critical,
-                3000
-            )
+            # Откатываем состояние чекбокса при ошибке
+            self.autostart_action.setChecked(not checked)
+            self.showMessage(t('error'), t('failed_to_change_autostart'), QSystemTrayIcon.Critical, 3000)
     
     def show_logs(self):
         """Показывает логи в терминале"""
