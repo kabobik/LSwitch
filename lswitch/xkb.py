@@ -268,3 +268,20 @@ def switch_to_layout(target_name: str, layouts: list, debug: bool = False) -> bo
         if debug:
             print(f"⚠️ switch_to_layout failed: {e}")
         return False
+
+
+def get_selection_owner_id() -> int:
+    """Возвращает Window ID владельца PRIMARY selection, или 0 если нет владельца.
+    
+    Используется для определения было ли создано новое выделение.
+    PRIMARY clipboard в X11 никогда не очищается, но owner меняется при новом выделении.
+    """
+    try:
+        from Xlib import X, display, Xatom
+        d = display.Display()
+        owner = d.get_selection_owner(Xatom.PRIMARY)
+        owner_id = owner.id if owner != X.NONE else 0
+        d.close()
+        return owner_id
+    except Exception:
+        return 0

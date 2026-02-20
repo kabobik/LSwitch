@@ -26,6 +26,8 @@ except ImportError:
     print("   sudo apt install python3-evdev")
     exit(1)
 
+from .device_manager import DeviceManager
+
 # Глобальный реестр экземпляров LSwitch (для тестовой/аварийной очистки)
 LS_INSTANCES = []
 
@@ -145,46 +147,37 @@ class LSwitch:
         """
         import time
         print("🚀 LSwitch run loop (compat) starting...", flush=True)
-        device_selector = selectors.DefaultSelector()
-        devices = []
-        for path in evdev.list_devices():
-            try:
-                device = evdev.InputDevice(path)
-                if device.name == self.fake_kb_name:
-                    continue
-                caps = device.capabilities()
-                if ecodes.EV_KEY not in caps:
-                    continue
-                keys = caps.get(ecodes.EV_KEY, [])
-                if not keys:
-                    continue
-                is_keyboard = ecodes.KEY_A in keys
-                is_mouse = ecodes.BTN_LEFT in keys or ecodes.BTN_RIGHT in keys
-                if not (is_keyboard or is_mouse):
-                    continue
-                device_selector.register(device, selectors.EVENT_READ)
-                devices.append(device)
-                if self.config.get('debug'):
-                    device_type = "клавиатура" if is_keyboard else "мышь"
-                    print(f"   Подключено: {device.name} ({device_type})", flush=True)
-            except (OSError, PermissionError) as e:
-                if self.config.get('debug'):
-                    print(f"   Пропущено {path}: {e}", flush=True)
-        if not devices:
+        
+        debug = self.config.get('debug', False)
+        device_manager = DeviceManager(
+            debug=debug,
+            on_device_added=lambda d: print(f"+ {d.name}") if debug else None,
+            on_device_removed=lambda d: print(f"- {d.name}") if debug else None
+        )
+        device_manager.set_virtual_kb_name(self.fake_kb_name)
+        count = device_manager.scan_devices()
+        device_manager.start_udev_monitor()
+        
+        if count == 0:
             print("⚠️ Нет устройств ввода — запущено в режиме ожидания", flush=True)
+        else:
+            print(f"✓ Мониторинг {count} устройств", flush=True)
+        
         try:
             while self.running:
-                events = device_selector.select(timeout=1)
-                for key, mask in events:
-                    device = key.fileobj
-                    for event in device.read():
-                        try:
-                            self.handle_event(event)
-                        except Exception:
-                            pass
+                for device, event in device_manager.get_events(timeout=0.1):
+                    try:
+                        self.handle_event(event)
+                    except Exception:
+                        pass
                 time.sleep(0.01)
         except KeyboardInterrupt:
             self.running = False
+        finally:
+            # Сохраняем пользовательский словарь
+            if hasattr(self, 'user_dict') and self.user_dict:
+                self.user_dict.flush()
+            device_manager.close()
 
     def load_config(self, config_path=None):
         """Delegate to `lswitch.config.load_config` (non-verbose by default).
@@ -1211,6 +1204,11 @@ class LSwitch:
                 # Try to expand/select last word only if we don't already have a fresh selection
                 try:
                     if not has_sel:
+                        # Сохраняем PRIMARY и owner ДО попытки выделения
+                        primary_before = self.last_known_selection
+                        from lswitch.xkb import get_selection_owner_id
+                        owner_before = get_selection_owner_id()
+                        
                         if adapter:
                             try:
                                 adapter.ctrl_shift_left()
@@ -1225,6 +1223,23 @@ class LSwitch:
                                     print("⚠️ system xdotool ctrl+shift+Left failed (non-fatal)")
                         # small delay for selection to settle
                         time.sleep(0.03)
+                        
+                        # Проверяем создалось ли новое выделение после ctrl_shift_left
+                        try:
+                            owner_after = get_selection_owner_id()
+                            result = self.system.xclip_get(selection='primary', timeout=0.3)
+                            primary_after = result.stdout if result else ""
+                            
+                            # Новое выделение: owner изменился ИЛИ текст изменился
+                            has_new_selection = (owner_after != owner_before) or (primary_after != primary_before)
+                            if not has_new_selection:
+                                # Выделение не произошло — пустое поле
+                                if self.config.get('debug'):
+                                    print("⚠️ ctrl_shift_left did not create new selection — skipping conversion")
+                                self.last_shift_press = 0
+                                return
+                        except Exception:
+                            pass
 
                     # Now try to convert the selection; if it fails, fallback to retype
                     try:
@@ -1527,49 +1542,23 @@ class LSwitch:
         print("💡 Нажмите ESC для выхода")
         print("-" * 50)
         
-        # Создаём селектор для мониторинга всех устройств ввода
-        device_selector = selectors.DefaultSelector()
+        # Создаём DeviceManager для управления устройствами ввода
+        debug = self.config.get('debug', False)
+        device_manager = DeviceManager(
+            debug=debug,
+            on_device_added=lambda d: print(f"+ {d.name}") if debug else None,
+            on_device_removed=lambda d: print(f"- {d.name}") if debug else None
+        )
+        device_manager.set_virtual_kb_name(self.fake_kb_name)
+        count = device_manager.scan_devices()
+        device_manager.start_udev_monitor()
         
-        # Регистрируем все устройства ввода, кроме нашей виртуальной клавиатуры
-        devices = []
-        for path in evdev.list_devices():
-            try:
-                device = evdev.InputDevice(path)
-                # КРИТИЧНО: пропускаем нашу виртуальную клавиатуру!
-                if device.name == self.fake_kb_name:
-                    continue
-                
-                # Проверяем что это клавиатура или мышь (имеет KEY события)
-                caps = device.capabilities()
-                if ecodes.EV_KEY not in caps:
-                    continue
-                
-                keys = caps.get(ecodes.EV_KEY, [])
-                if not keys:
-                    continue
-                
-                # Проверяем что это клавиатура (есть KEY_A) ИЛИ мышь (есть BTN_LEFT)
-                is_keyboard = ecodes.KEY_A in keys
-                is_mouse = ecodes.BTN_LEFT in keys or ecodes.BTN_RIGHT in keys
-                
-                if not (is_keyboard or is_mouse):
-                    continue
-                
-                device_selector.register(device, selectors.EVENT_READ)
-                devices.append(device)
-                if self.config.get('debug'):
-                    device_type = "клавиатура" if is_keyboard else "мышь"
-                    print(f"   Подключено: {device.name} ({device_type})")
-            except (OSError, PermissionError) as e:
-                # Пропускаем устройства к которым нет доступа
-                if self.config.get('debug'):
-                    print(f"   Пропущено {path}: {e}")
-        
-        if not devices:
+        if count == 0:
             print("❌ Не найдено устройств ввода")
+            device_manager.close()
             return
         
-        print(f"✓ Мониторинг {len(devices)} устройств")
+        print(f"✓ Мониторинг {count} устройств")
         print("-" * 50)
         
         # КРИТИЧНО: очищаем буфер и обновляем снимок выделения при старте
@@ -1578,9 +1567,6 @@ class LSwitch:
         
         # Основной цикл обработки событий
         try:
-            if False:  # Debug logging disabled
-                print(f"🔄 Начало основного цикла обработки событий", flush=True)
-            
             while True:
                 # Проверяем изменение файла конфигурации раз в секунду
                 current_time = time.time()
@@ -1604,47 +1590,36 @@ class LSwitch:
                 if self.config_reload_requested:
                     self.reload_config()
                 
-                for key, mask in device_selector.select(timeout=0.1):
-                    device = key.fileobj
-                    event_count = 0
-                    try:
-                        events = list(device.read())
-                    except (OSError, IOError) as e:
-                        # Device disconnected
-                        if self.config.get('debug'):
-                            print(f"⚠️ Не могу прочитать события с {device.name}: {e}", flush=True)
-                        continue
-                    
-                    for event in events:
-                        event_count += 1
-                        # Don't print every event - too noisy. Only print important ones in debug mode
-                        # if self.config.get('debug'):
-                        #     print(f"📍 [{device.name}] Event #{event_count}: type={event.type}({ecodes.EV_KEY if event.type==1 else event.type}) code={event.code} value={event.value}", flush=True)
-                        
-                        # Log space events only when debug is enabled and relevant (avoid noisy logs)
-                        if event.code == ecodes.KEY_SPACE and self.config.get('debug'):
-                            # Only print when there's content in buffer or a conversion in progress
-                            if self.is_converting or self.chars_in_buffer > 0:
-                                print(f"🔍 ПРОБЕЛ В ЦИКЛЕ: value={event.value}, device={device.name}")
+                for device, event in device_manager.get_events(timeout=0.1):
+                    # Log space events only when debug is enabled and relevant
+                    if event.code == ecodes.KEY_SPACE and self.config.get('debug'):
+                        if self.is_converting or self.chars_in_buffer > 0:
+                            print(f"🔍 ПРОБЕЛ В ЦИКЛЕ: value={event.value}, device={device.name}")
 
-                        # Клик мыши очищает буфер (новый контекст)
-                        if event.type == ecodes.EV_KEY and event.code in (
-                            ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE
-                        ) and event.value == 1:
-                            if self.chars_in_buffer > 0:
-                                self.clear_buffer()
-                                if self.config.get('debug'):
-                                    print("Буфер очищен (клик мыши)")
-                            self.cursor_moved_at = time.time()
-                        
-                        # Сохраняем ссылку на устройство для проверки модификаторов
-                        self.current_device = device
-                        
-                        if self.handle_event(event) is False:
-                            return
+                    # Клик мыши очищает буфер (новый контекст)
+                    if event.type == ecodes.EV_KEY and event.code in (
+                        ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE
+                    ) and event.value == 1:
+                        if self.chars_in_buffer > 0:
+                            self.clear_buffer()
+                            if self.config.get('debug'):
+                                print("Буфер очищен (клик мыши)")
+                        self.cursor_moved_at = 0  # Сбросить, т.к. клик не создаёт выделение
+                        # Обновляем снимок selection чтобы не конвертировать старый текст
+                        self.update_selection_snapshot()
+                    
+                    # Сохраняем ссылку на устройство для проверки модификаторов
+                    self.current_device = device
+                    
+                    if self.handle_event(event) is False:
+                        return
         except KeyboardInterrupt:
             print("\nВыход по Ctrl+C...")
         finally:
+            # Сохраняем пользовательский словарь
+            if hasattr(self, 'user_dict') and self.user_dict:
+                self.user_dict.flush()
+            device_manager.close()
             # Закрываем виртуальную клавиатуру и убираем из реестра
             try:
                 if self in LS_INSTANCES:

@@ -71,6 +71,11 @@ class InputHandler:
                     adapter = getattr(_pkg, 'x11_adapter', None)
                     try:
                         if not has_sel:
+                            # Сохраняем PRIMARY и owner ДО попытки выделения
+                            primary_before = self.ls.last_known_selection
+                            from lswitch.xkb import get_selection_owner_id
+                            owner_before = get_selection_owner_id()
+                            
                             if adapter:
                                 try:
                                     adapter.ctrl_shift_left()
@@ -84,6 +89,23 @@ class InputHandler:
                                     if self.ls.config.get('debug'):
                                         print("⚠️ system xdotool ctrl+shift+Left failed (non-fatal)")
                             time.sleep(0.03)
+                            
+                            # Проверяем создалось ли новое выделение после ctrl_shift_left
+                            try:
+                                owner_after = get_selection_owner_id()
+                                result = self.ls.system.xclip_get(selection='primary', timeout=0.3)
+                                primary_after = result.stdout if result else ""
+                                
+                                # Новое выделение: owner изменился ИЛИ текст изменился
+                                has_new_selection = (owner_after != owner_before) or (primary_after != primary_before)
+                                if not has_new_selection:
+                                    # Выделение не произошло — пустое поле
+                                    if self.ls.config.get('debug'):
+                                        print("⚠️ ctrl_shift_left did not create new selection — skipping conversion")
+                                    self.ls.last_shift_press = 0
+                                    return
+                            except Exception:
+                                pass
 
                         try:
                             if self.ls.config.get('debug'):
@@ -163,11 +185,14 @@ class InputHandler:
             if self.ls.backspace_hold_detected:
                 self.ls.backspace_hold_detected = False
                 self.ls.backspace_hold_detected_at = 0.0
-            # Update cursor_moved_at on navigation - this affects selection freshness
-            # detection and prevents stale selection data from being used.
-            self.ls.cursor_moved_at = time.time()
+            # Update cursor_moved_at on navigation - only if Shift is held (selection is being created)
+            # Navigation WITHOUT Shift clears selection, so we reset cursor_moved_at to 0
+            if self._shift_pressed:
+                self.ls.cursor_moved_at = time.time()  # Selection is being created/extended
+            else:
+                self.ls.cursor_moved_at = 0  # Selection cleared by navigation
             if self.ls.config.get('debug'):
-                print("Buffer cleared (navigation), cursor_moved_at updated")
+                print(f"Buffer cleared (navigation), cursor_moved_at={'set' if self._shift_pressed else 'reset'}")
             return
 
         # Shift handling

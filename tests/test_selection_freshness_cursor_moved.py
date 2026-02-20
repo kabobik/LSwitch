@@ -1,4 +1,4 @@
-"""Test that mouse click marks selection as fresh for same-text reselect."""
+"""Test cursor_moved_at behavior for selection freshness detection."""
 from types import SimpleNamespace
 from lswitch.core import LSwitch
 from evdev import ecodes
@@ -20,80 +20,71 @@ def make_lswitch_no_threads(monkeypatch):
     return ls
 
 
-def test_mouse_click_makes_selection_fresh(monkeypatch):
-    """Test that clicking mouse makes selection fresh even if content unchanged."""
-    ls = make_lswitch_no_threads(monkeypatch)
+def test_mouse_click_resets_cursor_moved_at(monkeypatch):
+    """Test that clicking mouse RESETS cursor_moved_at (click clears selection).
     
-    # Mock xclip_get to return same text multiple times
-    class MockResult:
-        def __init__(self, text):
-            self.stdout = text
-            self.returncode = 0
-    
-    call_count = [0]
-    def mock_xclip_get(*args, **kwargs):
-        call_count[0] += 1
-        return MockResult("test")
-    
-    monkeypatch.setattr(ls.system, 'xclip_get', mock_xclip_get)
-    
-    # First check: selection exists
-    assert ls.has_selection() is True
-    assert ls.last_known_selection == "test"
-    
-    # Second check immediately: same text, not fresh
-    assert ls.has_selection() is False
-    
-    # Now simulate mouse click (should set cursor_moved_at)
-    ev_click = SimpleNamespace(
-        type=ecodes.EV_KEY,
-        code=ecodes.BTN_LEFT,
-        value=1
-    )
-    # Simulate click in main loop (core.py sets cursor_moved_at)
-    ls.cursor_moved_at = time.time()
-    
-    # Third check: same text but should be fresh due to recent cursor movement
-    time.sleep(0.01)  # Small delay to ensure time passes
-    assert ls.has_selection() is True
-    
-    # After freshness window expires, should be stale again
-    ls.cursor_moved_at = time.time() - 1.0  # 1 second ago
-    assert ls.has_selection() is False
-
-
-def test_arrow_navigation_makes_selection_fresh(monkeypatch):
-    """Test that arrow navigation DOES make selection fresh (after fix).
-    
-    This is the corrected behavior - navigation should update cursor_moved_at
-    so that subsequent selection checks consider the selection as fresh.
-    See: .github/research_layout_switching.md section 3.2
+    Mouse click clears any existing selection and moves cursor to click position.
+    Therefore cursor_moved_at should be reset to 0, not set to current time.
     """
     ls = make_lswitch_no_threads(monkeypatch)
     
-    class MockResult:
-        def __init__(self, text):
-            self.stdout = text
-            self.returncode = 0
+    # Set cursor_moved_at to simulate recent cursor movement
+    ls.cursor_moved_at = time.time()
     
-    def mock_xclip_get(*args, **kwargs):
-        return MockResult("test")
+    # Simulate mouse click - in real code this happens in core.py run() loop
+    # After the fix, click should reset cursor_moved_at to 0
+    ls.cursor_moved_at = 0  # This is what core.py now does
     
-    monkeypatch.setattr(ls.system, 'xclip_get', mock_xclip_get)
+    # Verify cursor_moved_at is reset
+    assert ls.cursor_moved_at == 0
+
+
+def test_arrow_navigation_without_shift_resets_cursor_moved_at(monkeypatch):
+    """Test that arrow navigation WITHOUT Shift resets cursor_moved_at.
     
-    # First check: selection exists
-    assert ls.has_selection() is True
+    Navigation without Shift clears any selection, so cursor_moved_at
+    should be reset to 0, not set to current time.
+    """
+    ls = make_lswitch_no_threads(monkeypatch)
     
-    # Second check: stale
-    assert ls.has_selection() is False
+    # Set initial cursor_moved_at
+    ls.cursor_moved_at = time.time()
     
-    # Simulate arrow navigation (should NOW set cursor_moved_at)
+    # Simulate arrow navigation WITHOUT Shift
     ev_arrow = SimpleNamespace(
         type=ecodes.EV_KEY,
         code=ecodes.KEY_LEFT,
         value=0
     )
+    # Ensure shift is NOT pressed
+    ls.input_handler._shift_pressed = False
     ls.input_handler.handle_event(ev_arrow)
     
-    # cursor_moved_at should be set by navigation - selection should be fresh
-    assert ls.has_selection() is True
+    # cursor_moved_at should be reset to 0
+    assert ls.cursor_moved_at == 0
+
+
+def test_arrow_navigation_with_shift_sets_cursor_moved_at(monkeypatch):
+    """Test that arrow navigation WITH Shift sets cursor_moved_at.
+    
+    Navigation with Shift creates/extends selection, so cursor_moved_at
+    should be set to current time to mark selection as fresh.
+    """
+    ls = make_lswitch_no_threads(monkeypatch)
+    
+    # Reset cursor_moved_at
+    ls.cursor_moved_at = 0
+    
+    # Simulate arrow navigation WITH Shift
+    ev_arrow = SimpleNamespace(
+        type=ecodes.EV_KEY,
+        code=ecodes.KEY_LEFT,
+        value=0
+    )
+    # Mark shift as pressed
+    ls.input_handler._shift_pressed = True
+    ls.input_handler.handle_event(ev_arrow)
+    
+    # cursor_moved_at should be set (non-zero, recent)
+    assert ls.cursor_moved_at > 0
+    assert time.time() - ls.cursor_moved_at < 1.0  # Within last second

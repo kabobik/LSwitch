@@ -1,3 +1,4 @@
 # LSwitch dependencies
 evdev
 python-xlib
+pyudev>=0.24

@@ -30,6 +30,7 @@ setup(
     install_requires=[
         'evdev',         # Чтение событий клавиатуры из /dev/input
         'python-xlib',   # Определение раскладки и работа с X11
+        'pyudev>=0.24',  # Мониторинг hot-plug устройств ввода
     ],
     extras_require={
         'gui': ['PyQt5'],  # GUI панель управления (lswitch-control)

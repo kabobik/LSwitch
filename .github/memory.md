@@ -6,6 +6,31 @@
 
 ## Последние исследования
 
+### 2026-02-20: Определение активного выделения (XGetSelectionOwner)
+
+**Проблема:** PRIMARY selection никогда не очищается — всегда хранит последний текст. Невозможно отличить "нет выделения" от "выделен старый текст".
+
+**Решение:** Использовать `XGetSelectionOwner(Xatom.PRIMARY)` из python-xlib.
+
+**Ключевой инсайт:** Когда делается НОВОЕ выделение, owner (Window ID) МЕНЯЕТСЯ. Даже при повторном выделении того же текста!
+
+**Алгоритм:**
+```python
+owner_before = get_selection_owner_id()
+# ctrl+shift+Left
+owner_after = get_selection_owner_id()
+
+has_new_selection = (owner_after != owner_before) or (text_after != text_before)
+if not has_new_selection:
+    # Пустое поле, пропускаем конвертацию
+```
+
+**Полный отчёт:** [research_selection_owner.md](research_selection_owner.md)
+
+**Статус:** ✅ Решение найдено, готово к интеграции
+
+---
+
 ### 2026-02-18: Selection conversion переусложнён
 
 **Проблема:** Режим конвертации выделения делает 10-15 избыточных операций вместо 4 необходимых.

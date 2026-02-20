@@ -10,6 +10,7 @@
 
 import json
 import os
+import threading
 import time
 from datetime import datetime
 
@@ -28,6 +29,9 @@ class UserDictionary:
             dict_file = os.path.join(config_dir, 'user_dict.json')
         
         self.dict_file = dict_file
+        
+        # Lock для потокобезопасности (должен быть создан первым!)
+        self._lock = threading.Lock()
         
         # Таблица конвертации RU↔EN
         self.ru_to_en = str.maketrans(
@@ -51,6 +55,11 @@ class UserDictionary:
     
     def _load(self):
         """Загружает словарь из файла"""
+        with self._lock:
+            return self._load_unlocked()
+    
+    def _load_unlocked(self):
+        """Загружает словарь из файла (без блокировки)"""
         if os.path.exists(self.dict_file):
             try:
                 with open(self.dict_file, 'r', encoding='utf-8') as f:
@@ -137,18 +146,18 @@ class UserDictionary:
         return new_data
     
     def _save(self):
-        """Отложенное сохранение"""
+        """Отложенное сохранение (вызывается под lock)"""
         current_time = time.time()
         
         if current_time - self.last_save_time >= self.save_interval:
-            self._do_save()
+            self._do_save_unlocked()
             self.last_save_time = current_time
             self.pending_save = False
         else:
             self.pending_save = True
     
-    def _do_save(self):
-        """Реальное сохранение в файл"""
+    def _do_save_unlocked(self):
+        """Реальное сохранение в файл (без блокировки)"""
         try:
             with open(self.dict_file, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
@@ -157,9 +166,10 @@ class UserDictionary:
     
     def flush(self):
         """Принудительное сохранение"""
-        if self.pending_save:
-            self._do_save()
-            self.pending_save = False
+        with self._lock:
+            if self.pending_save:
+                self._do_save_unlocked()
+                self.pending_save = False
     
     def _detect_lang(self, text):
         """Определяет язык текста по содержимому"""
@@ -197,26 +207,27 @@ class UserDictionary:
         Returns:
             bool: True если нужна автоконвертация
         """
-        if threshold is None:
-            threshold = self.data['settings']['auto_convert_threshold']
-        
-        # Канонизируем текст
-        canonical = self._canonicalize(text, from_lang)
-        
-        if canonical not in self.data['conversions']:
+        with self._lock:
+            if threshold is None:
+                threshold = self.data['settings']['auto_convert_threshold']
+            
+            # Канонизируем текст
+            canonical = self._canonicalize(text, from_lang)
+            
+            if canonical not in self.data['conversions']:
+                return False
+            
+            weight = self.data['conversions'][canonical]['weight']
+            
+            # Логика автоконвертации:
+            # from_lang='ru', weight > 0 → конвертировать еуые→test
+            # from_lang='en', weight < 0 → конвертировать test→еуые
+            if from_lang == 'ru' and weight >= threshold:
+                return True
+            if from_lang == 'en' and weight <= -threshold:
+                return True
+            
             return False
-        
-        weight = self.data['conversions'][canonical]['weight']
-        
-        # Логика автоконвертации:
-        # from_lang='ru', weight > 0 → конвертировать еуые→test
-        # from_lang='en', weight < 0 → конвертировать test→еуые
-        if from_lang == 'ru' and weight >= threshold:
-            return True
-        if from_lang == 'en' and weight <= -threshold:
-            return True
-        
-        return False
     
     def add_conversion(self, word, from_lang, to_lang, debug=False):
         """
@@ -228,6 +239,11 @@ class UserDictionary:
             to_lang: Целевой язык
             debug: Вывод отладки
         """
+        with self._lock:
+            self._add_conversion_unlocked(word, from_lang, to_lang, debug)
+    
+    def _add_conversion_unlocked(self, word, from_lang, to_lang, debug=False):
+        """Добавляет конвертацию (без блокировки)"""
         canonical = self._canonicalize(word, from_lang)
         learning_step = self.data['settings']['learning_step']
         # Диагностический лог: фиксируем попытку добавления конверсии
@@ -287,6 +303,11 @@ class UserDictionary:
             lang: Язык исходного слова
             debug: Отладка
         """
+        with self._lock:
+            self._add_correction_unlocked(word, lang, debug)
+    
+    def _add_correction_unlocked(self, word, lang, debug=False):
+        """Коррекция автоконвертации (без блокировки)"""
         canonical = self._canonicalize(word, lang)
         penalty = self.data['settings']['correction_penalty']
         # Диагностический лог: фиксируем коррекцию
@@ -364,18 +385,19 @@ class UserDictionary:
         Returns:
             int: абсолютное значение веса
         """
-        canonical = self._canonicalize(word, from_lang)
-        
-        if canonical not in self.data['conversions']:
-            return 0
-        
-        weight = self.data['conversions'][canonical]['weight']
-        
-        # Возвращаем абсолютное значение для проверки порога
-        if from_lang == 'ru':
-            return weight if weight > 0 else 0
-        else:
-            return abs(weight) if weight < 0 else 0
+        with self._lock:
+            canonical = self._canonicalize(word, from_lang)
+            
+            if canonical not in self.data['conversions']:
+                return 0
+            
+            weight = self.data['conversions'][canonical]['weight']
+            
+            # Возвращаем абсолютное значение для проверки порога
+            if from_lang == 'ru':
+                return weight if weight > 0 else 0
+            else:
+                return abs(weight) if weight < 0 else 0
     
     def is_protected(self, word, lang):
         """
@@ -392,35 +414,37 @@ class UserDictionary:
         Returns:
             (bool, int): (защищено, вес)
         """
-        canonical = self._canonicalize(word, lang)
-        if canonical not in self.data['conversions']:
-            return (False, 0)
-        
-        entry = self.data['conversions'][canonical]
-        weight = entry.get('weight', 0)
-        now = time.time()
-        
-        # Проверяем временную защиту (после коррекции)
-        inmem = self._recent_protections.get(canonical)
-        persisted = entry.get('protected_until')
-        if (inmem and now < inmem) or (persisted and now < persisted):
-            return (True, weight)
-        
-        # Проверяем по весу: вес направлен ПРОТИВ конвертации
-        # lang='ru', weight < 0 → пользователь хочет оставить RU
-        # lang='en', weight > 0 → пользователь хочет оставить EN
-        if lang == 'ru' and weight < 0:
-            return (True, weight)
-        if lang == 'en' and weight > 0:
-            return (True, weight)
-        
-        return (False, weight)
+        with self._lock:
+            canonical = self._canonicalize(word, lang)
+            if canonical not in self.data['conversions']:
+                return (False, 0)
+            
+            entry = self.data['conversions'][canonical]
+            weight = entry.get('weight', 0)
+            now = time.time()
+            
+            # Проверяем временную защиту (после коррекции)
+            inmem = self._recent_protections.get(canonical)
+            persisted = entry.get('protected_until')
+            if (inmem and now < inmem) or (persisted and now < persisted):
+                return (True, weight)
+            
+            # Проверяем по весу: вес направлен ПРОТИВ конвертации
+            # lang='ru', weight < 0 → пользователь хочет оставить RU
+            # lang='en', weight > 0 → пользователь хочет оставить EN
+            if lang == 'ru' and weight < 0:
+                return (True, weight)
+            if lang == 'en' and weight > 0:
+                return (True, weight)
+            
+            return (False, weight)
     
     def get_stats(self):
         """Возвращает статистику"""
-        return {
-            'total_words': len(self.data['conversions']),
-            'total_conversions': self.data['stats']['total_conversions'],
-            'total_corrections': self.data['stats']['total_corrections'],
-            'avg_weight': sum(abs(v['weight']) for v in self.data['conversions'].values()) / len(self.data['conversions']) if self.data['conversions'] else 0
-        }
+        with self._lock:
+            return {
+                'total_words': len(self.data['conversions']),
+                'total_conversions': self.data['stats']['total_conversions'],
+                'total_corrections': self.data['stats']['total_corrections'],
+                'avg_weight': sum(abs(v['weight']) for v in self.data['conversions'].values()) / len(self.data['conversions']) if self.data['conversions'] else 0
+            }

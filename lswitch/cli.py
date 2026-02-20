@@ -65,6 +65,9 @@ def main() -> int:
         
         # Handle signals gracefully
         def signal_handler(signum: int, frame) -> None:
+            # Сохраняем пользовательский словарь перед выходом
+            if ls and hasattr(ls, 'user_dict') and ls.user_dict:
+                ls.user_dict.flush()
             print("\n👋 LSwitch закрыт")
             sys.exit(0)
         
