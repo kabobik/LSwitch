@@ -48,7 +48,8 @@ def test_on_double_shift_calls_convert_and_retype(monkeypatch):
     assert called['retype'] is True
 
 
-def test_handle_event_esc_returns_false():
+def test_handle_event_esc_does_not_exit():
+    """ESC no longer terminates service - only signals SIGTERM/SIGINT do."""
     dummy_ls = types.SimpleNamespace()
     dummy_ls.config = {'debug': False}
     dummy_ls.user_dict = None
@@ -72,4 +73,5 @@ def test_handle_event_esc_returns_false():
     ev = mk_event(getattr(types.SimpleNamespace(KEY_ESC=1, EV_KEY=1), 'KEY_ESC'), 0, getattr(types.SimpleNamespace(KEY_ESC=1, EV_KEY=1), 'EV_KEY'))
     ih = InputHandler(dummy_ls)
     res = ih.handle_event(ev)
-    assert res is False
+    # ESC should NOT terminate - returns True to continue
+    assert res is True

@@ -17,6 +17,7 @@ import threading
 import ctypes
 import ctypes.util
 import subprocess
+import logging
 
 try:
     import evdev
@@ -27,6 +28,9 @@ except ImportError:
     exit(1)
 
 from .device_manager import DeviceManager
+
+# Get logger instance if it's been setup (imported from cli)
+logger = logging.getLogger('lswitch')
 
 # Глобальный реестр экземпляров LSwitch (для тестовой/аварийной очистки)
 LS_INSTANCES = []
@@ -1361,13 +1365,8 @@ class LSwitch:
                     self.last_shift_press = current_time
             return
         
-        # ESC - выход
-        if event.code == ecodes.KEY_ESC and event.value == 0:
-            print("Выход...")
-            # Сохраняем словарь перед выходом
-            if self.user_dict:
-                self.user_dict.flush()
-            return False
+        # ESC - НЕ завершает службу (только сигналы SIGTERM/SIGINT)
+        # Для завершения используйте: systemctl --user stop lswitch
         
         # Enter - сбрасываем буфер полностью (конец ввода)
         if event.code == ecodes.KEY_ENTER and event.value == 0:

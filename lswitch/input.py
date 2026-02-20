@@ -158,7 +158,7 @@ class InputHandler:
                 print(f"⚠️ on_double_shift error: {e}")
 
     def handle_event(self, event):
-        """Main event handler. Returns False to indicate exit (ESC)."""
+        """Main event handler. Always returns True (service terminates only via signals)."""
         # For debugging: only log blocked space events when debug is enabled
         if event.type == getattr(ecodes, 'EV_KEY', None) and getattr(event, 'code', None) == getattr(ecodes, 'KEY_SPACE', None):
             if self.ls.is_converting and self.ls.config.get('debug'):
@@ -243,14 +243,8 @@ class InputHandler:
                     self.ls.last_shift_press = current_time
             return True
 
-        # ESC - exit
-        if getattr(event, 'code', None) == getattr(ecodes, 'KEY_ESC', None) and event.value == 0:
-            if self.ls.user_dict:
-                try:
-                    self.ls.user_dict.flush()
-                except Exception:
-                    pass
-            return False
+        # ESC - НЕ завершает службу (только сигналы SIGTERM/SIGINT)
+        # Для завершения используйте: systemctl --user stop lswitch
 
         # Enter - clear buffer
         if getattr(event, 'code', None) == getattr(ecodes, 'KEY_ENTER', None) and event.value == 0:
