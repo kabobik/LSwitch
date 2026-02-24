@@ -32,20 +32,20 @@
 
 > Требует X11. Разработка на живой системе, мок-адаптеры для тестов уже в `conftest.py`.
 
-- [ ] **2.1** Реализовать `XKBAdapter` (конкретная реализация интерфейса)
+- [x] **2.1** Реализовать `XKBAdapter` (конкретная реализация интерфейса)
   - Файл: `lswitch/platform/xkb_adapter.py` → класс `X11XKBAdapter(IXKBAdapter)`
   - Источник: `archive/lswitch/xkb.py` + XKB-блок из `archive/lswitch/core.py`
   - Методы: `get_layouts()`, `get_current_layout()`, `switch_layout()`, `keycode_to_char()`
   - Написать тест с `MockXKBAdapter` из conftest: `tests/test_xkb_adapter.py`
 
-- [ ] **2.2** Реализовать `X11SelectionAdapter(ISelectionAdapter)`
+- [x] **2.2** Реализовать `X11SelectionAdapter(ISelectionAdapter)`
   - Файл: `lswitch/platform/selection_adapter.py`
   - Источник: `archive/lswitch/selection.py`
   - Ключевое исправление: использовать `owner_id + text + timestamp` (баг v1)
   - Написать тест: `tests/test_selection_adapter.py`
     - `has_fresh_selection()` возвращает `True` при повторном выделении того же текста
 
-- [ ] **2.3** Написать тест `SubprocessSystemAdapter`
+- [x] **2.3** Написать тест `SubprocessSystemAdapter`
   - Файл: `tests/test_system_adapter.py`
   - Проверить `run_command` с таймаутом, `get_clipboard` падает gracefully
 
