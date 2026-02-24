@@ -250,10 +250,32 @@ else
     echo -e "   ${GREEN}✓${NC} Пользователь уже в группе input"
 fi
 
-# udev правила (устанавливаются через data_files в setup.py)
+# udev правила
+# Убеждаемся, что модуль uinput загружен
+if ! lsmod | grep -q "^uinput"; then
+    echo -e "   Загрузка модуля uinput..."
+    sudo modprobe uinput 2>/dev/null || true
+fi
+
 sudo udevadm control --reload-rules 2>/dev/null || true
 sudo udevadm trigger 2>/dev/null || true
+# Применяем правило именно к uinput
+sudo udevadm trigger --name-match=uinput 2>/dev/null || true
 echo -e "   ${GREEN}✓${NC} udev правила обновлены"
+
+# Проверяем, что /dev/uinput теперь доступен группе input
+if [ -e /dev/uinput ]; then
+    UINPUT_GROUP=$(stat -c '%G' /dev/uinput)
+    UINPUT_PERMS=$(stat -c '%a' /dev/uinput)
+    if [ "$UINPUT_GROUP" = "input" ] && [[ "$UINPUT_PERMS" == *6* ]]; then
+        echo -e "   ${GREEN}✓${NC} /dev/uinput доступен группе input ($UINPUT_PERMS $UINPUT_GROUP)"
+    else
+        echo -e "   ${YELLOW}⚠${NC} /dev/uinput: права $UINPUT_PERMS, группа $UINPUT_GROUP"
+        echo -e "      Попробуйте перезагрузить систему для применения udev правил"
+    fi
+else
+    echo -e "   ${YELLOW}⚠${NC} /dev/uinput не найден (модуль uinput может не загрузиться до перезагрузки)"
+fi
 
 # ── systemd сервис ───────────────────────
 echo -e "${YELLOW}⚙️  Настройка systemd...${NC}"
