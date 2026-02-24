@@ -55,19 +55,19 @@
 
 > Требует evdev. Мокаем evdev в тестах.
 
-- [ ] **3.1** Перенести `DeviceManager`
+- [x] **3.1** Перенести `DeviceManager`
   - Файл: `lswitch/input/device_manager.py`
   - Источник: `archive/lswitch/device_manager.py` (помечен как "хороший")
   - Адаптировать: убрать зависимость от `LSwitch`-инстанса, принимать callback
-  - Написать тест: `tests/test_device_manager.py`
+  - Написать тест: `tests/test_device_manager.py` — 19 тестов
 
-- [ ] **3.2** Реализовать `UdevMonitor`
+- [x] **3.2** Реализовать `UdevMonitor`
   - Файл: `lswitch/input/udev_monitor.py`
   - Источник: udev-монитор из `archive/lswitch/device_manager.py`
-  - Написать тест с моком udev
+  - Написать тест: `tests/test_udev_monitor.py` — 10 тестов
 
-- [ ] **3.3** Протестировать `VirtualKeyboard`
-  - Файл: `tests/test_virtual_keyboard.py`
+- [x] **3.3** Протестировать `VirtualKeyboard`
+  - Файл: `tests/test_virtual_keyboard.py` — 10 тестов
   - Мок `evdev.UInput`, проверить что `tap_key` пишет press+release
   - Проверить что `replay_events` не падает на пустом списке
 
