@@ -1,6 +1,9 @@
 # udev rules для LSwitch
 # Даёт группе input доступ к устройствам ввода
 
+# uinput — виртуальная клавиатура (требуется для LSwitch)
+KERNEL=="uinput", MODE="0660", GROUP="input"
+
 # Все устройства ввода доступны группе input
 KERNEL=="event*", SUBSYSTEM=="input", MODE="0660", GROUP="input"
 
