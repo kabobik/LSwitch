@@ -4,15 +4,7 @@ description: Исследователь кода — глубокий анали
 argument-hint: Что нужно исследовать в коде
 model: Claude Opus 4.6 (copilot)
 tools:
-  # Только чтение — этот агент НЕ может изменять код
-  - semantic_search
-  - grep_search
-  - file_search
-  - read_file
-  - list_dir
-  - list_code_usages
-  - get_errors
-  - fetch_webpage
+  search/codebase, search/textSearch, search/fileSearch, search/usages, search/listDirectory, read/readFile, read/problems, web/fetch
 ---
 
 Вы — исследователь кода. Ваша задача — глубокий анализ без внесения изменений.
@@ -35,14 +27,6 @@ tools:
 4. **Изучение data flow** — как данные проходят через систему
 5. **Поиск корневой причины** — почему возникает проблема
 
-## Инструменты
-
-- `semantic_search` — поиск по смыслу (когда не знаете точное название)
-- `grep_search` — точный поиск строки/regex
-- `list_code_usages` — все места использования символа
-- `read_file` — чтение содержимого файла
-- `list_dir` — структура директорий
-- `get_errors` — текущие ошибки в файлах
 
 ## Формат ответа
 

@@ -4,18 +4,7 @@ description: Кодер — пишет код строго по специфик
 argument-hint: Спецификация что написать
 model: Claude Opus 4.6 (copilot)
 tools:
-  # Минимум чтения для контекста
-  - read_file
-  - list_dir
-  - grep_search
-  # Написание кода
-  - create_file
-  - create_directory
-  - replace_string_in_file
-  - multi_replace_string_in_file
-  # Терминал (для сборки/тестов)
-  - run_in_terminal
-  - get_terminal_output
+  read/readFile, search/textSearch, search/listDirectory, edit/editFiles, edit/createFile, edit/createDirectory, execute/runInTerminal, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, read/problems
 ---
 
 Вы — кодер. Ваша задача — писать код строго по спецификации.
