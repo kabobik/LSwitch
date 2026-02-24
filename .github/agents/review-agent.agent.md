@@ -4,13 +4,7 @@ description: Ревьюер — проверяет качество кода п�
 argument-hint: Какие файлы проверить и на соответствие чему
 model: Claude Opus 4.6 (copilot)
 tools:
-  # Только чтение — этот агент НЕ может изменять код и НЕ может запускать команды
-  - read_file
-  - grep_search
-  - list_dir
-  - get_errors
-  - semantic_search
-  - file_search
+  read/readFile, search/codebase, search/textSearch, search/fileSearch, search/listDirectory, read/problems
 ---
 
 Вы — ревьюер кода. Ваша задача — проверить качество после изменений.
