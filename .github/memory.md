@@ -3,7 +3,7 @@
 ## Текущий статус
 
 - **Ветка:** `v2-rewrite`
-- **Тесты:** 249 passed
+- **Тесты:** 303 passed
 - **Python:** 3.12.3, pytest 7.4.4
 
 ## Завершённые этапы
@@ -45,13 +45,21 @@
 - 50 новых тестов (25 app + 21 config + 4 cli)
 - Minor tech-debt: text_buffer в StateContext не заполняется, _sanitize_json URL risk
 
+### Этап 6: UI Layer ✅
+- TrayIcon: QSystemTrayIcon, adaptive icon, EventBus подписка (LAYOUT_CHANGED, CONFIG_CHANGED), cleanup() для отписки
+- ContextMenu: QMenu с toggle auto_switch/user_dict, service control через systemctl, About, Quit → APP_QUIT
+- ConfigDialog: QDialog с QCheckBox/QSpinBox/QDoubleSpinBox, OK → save + CONFIG_CHANGED, Reset defaults
+- CinnamonAdapter: CustomMenu + CustomMenuItem + QMenuWrapper (порт из архива), supports_native_menu=False
+- KDEAdapter: нативный QMenu с Breeze Dark палитрой, supports_native_menu=True
+- detect_desktop_environment() + get_adapter() фабрика по XDG_CURRENT_DESKTOP
+- Исправлены: утечка EventBus подписок, sync subprocess блокировка GUI, checked state sync
+- threading.Thread(daemon=True) для subprocess вызовов
+- 54 новых теста (35 + 19 fix), все с полной PyQt5 mock-изоляцией через sys.modules
+- Minor tech-debt: get_theme_colors хардкод (нет парсинга GTK CSS/kdeglobals), cross-thread EventBus→Qt
+
 ## Следующий этап
 
-### Этап 6: UI Layer (tray + config)
-- 6.1 TrayIcon
-- 6.2 ContextMenu
-- 6.3 ConfigDialog
-- 6.4 CinnamonAdapter
+### Этап 7: Перенос данных (i18n + integration test)
 
 ## Архитектурные решения
 

@@ -125,20 +125,19 @@
 
 > Последний этап, зависит от Qt.
 
-- [ ] **6.1** Реализовать `TrayIcon`
-  - `lswitch/ui/tray_icon.py`
-  - Источник: `archive/lswitch_control.py`
-  - Показывать текущую раскладку, статус auto_switch
+- [x] **6.1** Реализовать `TrayIcon`
+  - `lswitch/ui/tray_icon.py` — QSystemTrayIcon, adaptive icon, EventBus subscription (LAYOUT_CHANGED, CONFIG_CHANGED)
+  - cleanup() для отписки, TODO для cross-thread safety
 
-- [ ] **6.2** Реализовать `ContextMenu`
-  - Toggle auto_switch, открыть ConfigDialog, Quit
+- [x] **6.2** Реализовать `ContextMenu`
+  - Toggle auto_switch/user_dict, service control (systemctl), About, Quit → APP_QUIT
+  - threading.Thread для subprocess (не блокирует GUI)
 
-- [ ] **6.3** Реализовать `ConfigDialog`
-  - Все настройки из config.json видны и редактируемы
-  - Изменения применяются через EventBus немедленно
+- [x] **6.3** Реализовать `ConfigDialog`
+  - QDialog: QCheckBox/QSpinBox/QDoubleSpinBox для всех настроек, OK → save + CONFIG_CHANGED, Reset defaults
 
-- [ ] **6.4** Реализовать `CinnamonAdapter`
-  - Источник: кастомное меню из `archive/lswitch_control.py`
+- [x] **6.4** Реализовать `CinnamonAdapter` + `KDEAdapter`
+  - CustomMenu + QMenuWrapper (порт из архива), detect_desktop_environment, get_adapter фабрика
 
 ---
 
@@ -164,7 +163,7 @@
 ## Текущее состояние (baseline)
 
 ```
-25 tests passed  ✓  (event_bus, state_manager, text_converter, persistence, user_dictionary)
+303 tests passed  ✓  (all stages 1-6)
 ```
 
 Готовые модули (реализованы, тесты зелёные):
