@@ -3,7 +3,7 @@
 ## Текущий статус
 
 - **Ветка:** `v2-rewrite`
-- **Тесты:** 189 passed
+- **Тесты:** 249 passed
 - **Python:** 3.12.3, pytest 7.4.4
 
 ## Завершённые этапы
@@ -37,12 +37,21 @@
 - Исправлен баг: backspace_hold_active флаг доживает до choose_mode()
 - 43 новых теста (11+5+9+9+8+доп), интеграционные E2E сценарии
 
+### Этап 5: Application ✅
+- LSwitchApp: lazy _init_platform, _wire_event_bus, event loop, graceful stop()
+- ConfigManager: DEFAULT_CONFIG, validate_config, sanitize JSON comments, save/reload/reset
+- CLI: --headless, --debug, --version
+- Исправлен баг: backspace_repeats не сбрасывался между сессиями
+- 50 новых тестов (25 app + 21 config + 4 cli)
+- Minor tech-debt: text_buffer в StateContext не заполняется, _sanitize_json URL risk
+
 ## Следующий этап
 
-### Этап 5: Application (точка входа)
-- 5.1 LSwitchApp.run()
-- 5.2 Config
-- 5.3 CLI
+### Этап 6: UI Layer (tray + config)
+- 6.1 TrayIcon
+- 6.2 ContextMenu
+- 6.3 ConfigDialog
+- 6.4 CinnamonAdapter
 
 ## Архитектурные решения
 

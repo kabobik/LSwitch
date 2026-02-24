@@ -108,18 +108,16 @@
 
 ## Этап 5: Application (точка входа)
 
-- [ ] **5.1** Реализовать `LSwitchApp.run()`
-  - Файл: `lswitch/app.py`
-  - `headless=True`: event loop без UI
-  - `headless=False`: event loop + tray icon в отдельном потоке
+- [x] **5.1** Реализовать `LSwitchApp.run()`
+  - Файл: `lswitch/app.py` — _init_platform, _wire_event_bus, event callbacks, run(), stop()
+  - Тест: `tests/test_app.py` — 25 тестов (init, wiring, callbacks, conversion, stop)
 
-- [ ] **5.2** Настроить конфиг
-  - Файл: `lswitch/config.py` (новый, на основе `archive/lswitch/config.py`)
-  - Единый путь: `~/.config/lswitch/config.json`
-  - Использовать `persistence.save_json` для записи
+- [x] **5.2** Настроить конфиг
+  - Файл: `lswitch/config.py` — ConfigManager, validate_config, load_config, save
+  - Тест: `tests/test_config.py` — 21 тест (validate, sanitize, roundtrip)
 
-- [ ] **5.3** Протестировать CLI
-  - `tests/test_cli.py`: `--headless`, `--debug`, `--version`
+- [x] **5.3** Протестировать CLI
+  - `tests/test_cli.py` — 4 теста: `--headless`, `--debug`, `--version`, defaults
 
 ---
 
