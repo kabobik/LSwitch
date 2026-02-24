@@ -302,7 +302,8 @@ class TestTrayIcon:
     def test_set_layout_empty(self):
         tray = TrayIcon()
         tray.set_layout("")
-        assert tray._tooltip == "LSwitch"
+        from lswitch.i18n import t
+        assert tray._tooltip == t('lswitch_control')
 
     def test_event_bus_layout_changed(self, event_bus_ui):
         tray = TrayIcon(event_bus=event_bus_ui)

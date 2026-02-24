@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import QMenu, QAction
 from PyQt5.QtGui import QIcon
 
 from lswitch.core.events import Event, EventType
+from lswitch.i18n import t
 
 
 class ContextMenu:
@@ -34,13 +35,13 @@ class ContextMenu:
         self._menu = menu
 
         # Title (disabled)
-        title_action = QAction("LSwitch", menu)
+        title_action = QAction(t('lswitch_control'), menu)
         title_action.setEnabled(False)
         menu.addAction(title_action)
         menu.addSeparator()
 
         # Auto-switch toggle
-        self._auto_switch_action = QAction("Auto switch", menu)
+        self._auto_switch_action = QAction(t('auto_switch'), menu)
         self._auto_switch_action.setCheckable(True)
         auto_val = self.config.get("auto_switch", False) if self.config else False
         self._auto_switch_action.setChecked(auto_val)
@@ -48,7 +49,7 @@ class ContextMenu:
         menu.addAction(self._auto_switch_action)
 
         # User dictionary toggle
-        self._user_dict_action = QAction("User dictionary", menu)
+        self._user_dict_action = QAction(t('self_learning_dict'), menu)
         self._user_dict_action.setCheckable(True)
         ud_val = self.config.get("user_dict_enabled", False) if self.config else False
         self._user_dict_action.setChecked(ud_val)
@@ -58,32 +59,32 @@ class ContextMenu:
         menu.addSeparator()
 
         # Service status (disabled, informational)
-        self._status_action = QAction("Service: unknown", menu)
+        self._status_action = QAction(f"{t('status')}: {t('status_unknown')}", menu)
         self._status_action.setEnabled(False)
         menu.addAction(self._status_action)
 
         # Service control actions
-        start_action = QAction("Start service", menu)
+        start_action = QAction(t('start'), menu)
         start_action.triggered.connect(lambda: threading.Thread(target=self._systemctl, args=("start",), daemon=True).start())
         menu.addAction(start_action)
 
-        stop_action = QAction("Stop service", menu)
+        stop_action = QAction(t('stop'), menu)
         stop_action.triggered.connect(lambda: threading.Thread(target=self._systemctl, args=("stop",), daemon=True).start())
         menu.addAction(stop_action)
 
-        restart_action = QAction("Restart service", menu)
+        restart_action = QAction(t('restart'), menu)
         restart_action.triggered.connect(lambda: threading.Thread(target=self._systemctl, args=("restart",), daemon=True).start())
         menu.addAction(restart_action)
 
         menu.addSeparator()
 
         # About
-        about_action = QAction("About", menu)
+        about_action = QAction(t('about'), menu)
         about_action.triggered.connect(self._show_about)
         menu.addAction(about_action)
 
         # Quit
-        quit_action = QAction("Quit", menu)
+        quit_action = QAction(t('quit_panel'), menu)
         quit_action.triggered.connect(self._quit)
         menu.addAction(quit_action)
 
@@ -97,7 +98,7 @@ class ContextMenu:
         if self._status_action is None:
             return
         status = self._get_service_status()
-        self._status_action.setText(f"Service: {status}")
+        self._status_action.setText(f"{t('status')}: {status}")
 
     def toggle_auto_switch(self) -> None:
         """Toggle auto_switch config, save, and SIGHUP daemon."""
@@ -141,7 +142,7 @@ class ContextMenu:
         def _worker():
             status = self._get_service_status()
             if self._status_action is not None:
-                self._status_action.setText(f"Service: {status}")
+                self._status_action.setText(f"{t('status')}: {status}")
         threading.Thread(target=_worker, daemon=True).start()
 
     @staticmethod
@@ -185,7 +186,8 @@ class ContextMenu:
     def _show_about() -> None:
         try:
             from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.about(None, "LSwitch", "LSwitch — intelligent keyboard layout switcher")
+            from lswitch import __version__
+            QMessageBox.about(None, t('about_title', version=__version__), t('about_description'))
         except Exception:
             pass
 

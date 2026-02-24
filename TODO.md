@@ -143,8 +143,8 @@
 
 ## Этап 7: Перенос данных (низкий приоритет)
 
-- [ ] **7.1** Перенести i18n из `archive/lswitch/i18n.py`
-- [ ] **7.2** Написать `tests/test_integration_full.py` — сквозной тест
+- [x] **7.1** Перенести i18n из `archive/lswitch/i18n.py`
+- [x] **7.2** Написать `tests/test_integration_full.py` — сквозной тест
 
 ---
 
@@ -163,7 +163,7 @@
 ## Текущее состояние (baseline)
 
 ```
-303 tests passed  ✓  (all stages 1-6)
+331 tests passed  ✓  (all stages 1-7 complete)
 ```
 
 Готовые модули (реализованы, тесты зелёные):

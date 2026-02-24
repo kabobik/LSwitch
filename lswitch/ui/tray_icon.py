@@ -7,6 +7,7 @@ from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor
 from PyQt5.QtCore import Qt
 
 from lswitch.core.events import Event, EventType
+from lswitch.i18n import t
 
 # TODO: EventBus handlers are called synchronously from the publisher thread.
 # If EventBus.publish() is called from a non-GUI thread, Qt widgets must be
@@ -86,7 +87,7 @@ class TrayIcon(QSystemTrayIcon):
             self.event_bus.subscribe(EventType.CONFIG_CHANGED, self._on_config_changed)
 
         # Set default tooltip
-        self.setToolTip("LSwitch")
+        self.setToolTip(t('lswitch_control'))
 
     # -- public API --------------------------------------------------------
 
@@ -102,7 +103,7 @@ class TrayIcon(QSystemTrayIcon):
         """Update tray icon to reflect current layout."""
         self._current_layout = layout_name
         label = layout_name.upper() if layout_name else ""
-        self.setToolTip(f"LSwitch — {label}" if label else "LSwitch")
+        self.setToolTip(f"{t('lswitch_control')} — {label}" if label else t('lswitch_control'))
         self.setIcon(create_adaptive_icon(layout_name))
 
     def set_context_menu(self, menu) -> None:

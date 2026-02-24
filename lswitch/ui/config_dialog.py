@@ -13,6 +13,7 @@ from PyQt5.QtCore import Qt
 
 from lswitch.config import DEFAULT_CONFIG
 from lswitch.core.events import Event, EventType
+from lswitch.i18n import t
 
 
 class ConfigDialog(QDialog):
@@ -26,7 +27,7 @@ class ConfigDialog(QDialog):
         self.config = config
         self.event_bus = event_bus
 
-        self.setWindowTitle("LSwitch Settings")
+        self.setWindowTitle(t('lswitch_control'))
         self.setMinimumWidth(360)
 
         self._build_ui()
@@ -41,31 +42,31 @@ class ConfigDialog(QDialog):
 
         # auto_switch
         self._auto_switch_cb = QCheckBox()
-        form.addRow("Auto switch:", self._auto_switch_cb)
+        form.addRow(f"{t('auto_switch')}:", self._auto_switch_cb)
 
         # auto_switch_threshold
         self._threshold_spin = QSpinBox()
         self._threshold_spin.setRange(0, 100)
         self._threshold_spin.setSingleStep(1)
-        form.addRow("Auto switch threshold:", self._threshold_spin)
+        form.addRow(f"{t('auto_switch_threshold')}:", self._threshold_spin)
 
         # user_dict_enabled
         self._user_dict_cb = QCheckBox()
-        form.addRow("User dictionary:", self._user_dict_cb)
+        form.addRow(f"{t('self_learning_dict')}:", self._user_dict_cb)
 
         # double_click_timeout
         self._dct_spin = QDoubleSpinBox()
         self._dct_spin.setRange(0.05, 10.0)
         self._dct_spin.setSingleStep(0.05)
         self._dct_spin.setDecimals(2)
-        form.addRow("Double click timeout:", self._dct_spin)
+        form.addRow(f"{t('double_click_timeout')}:", self._dct_spin)
 
         layout.addLayout(form)
 
         # Buttons
         btn_layout = QHBoxLayout()
 
-        reset_btn = QPushButton("Reset defaults")
+        reset_btn = QPushButton(t('reset_defaults'))
         reset_btn.clicked.connect(self._reset_defaults)
         btn_layout.addWidget(reset_btn)
 

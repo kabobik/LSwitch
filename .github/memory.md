@@ -3,7 +3,7 @@
 ## Текущий статус
 
 - **Ветка:** `v2-rewrite`
-- **Тесты:** 303 passed
+- **Тесты:** 331 passed
 - **Python:** 3.12.3, pytest 7.4.4
 
 ## Завершённые этапы
@@ -57,9 +57,16 @@
 - 54 новых теста (35 + 19 fix), все с полной PyQt5 mock-изоляцией через sys.modules
 - Minor tech-debt: get_theme_colors хардкод (нет парсинга GTK CSS/kdeglobals), cross-thread EventBus→Qt
 
-## Следующий этап
+### Этап 7: Перенос данных ✅
+- i18n: класс I18n, 46 ключей перевода ru/en, глобальные t() / get_lang()
+- Все UI-строки заменены на t(...) в context_menu.py, config_dialog.py, tray_icon.py
+- Исправлено: locale.getdefaultlocale() → locale.getlocale() (нет DeprecationWarning)
+- Сквозной тест test_integration_full.py: 14 E2E тестов (EventBus → StateManager → ConversionEngine)
+- 28 новых тестов (14 i18n + 14 integration)
 
-### Этап 7: Перенос данных (i18n + integration test)
+## Все этапы завершены ✅
+
+### 331 тест — все зелёные
 
 ## Архитектурные решения
 
