@@ -13,11 +13,16 @@ logger = logging.getLogger(__name__)
 # evdev keycodes (avoid hard dependency on evdev at import time)
 KEY_LEFTSHIFT = 42
 KEY_RIGHTSHIFT = 54
+SHIFT_KEYS = {KEY_LEFTSHIFT, KEY_RIGHTSHIFT}
 KEY_BACKSPACE = 14
 KEY_SPACE = 57
 KEY_ENTER = 28
 
 NAVIGATION_KEYS = {103, 108, 105, 106, 102, 107, 104, 109, 15}  # arrows, home, end, pgup, pgdn, tab
+MOUSE_BUTTONS = {272, 273, 274}  # BTN_LEFT, BTN_RIGHT, BTN_MIDDLE
+
+# EV_KEY type constant (used when evdev is not importable)
+EV_KEY = 1
 
 
 class EventManager:
@@ -26,19 +31,30 @@ class EventManager:
     def __init__(self, event_bus: EventBus, debug: bool = False):
         self.bus = event_bus
         self.debug = debug
-
-    def handle_raw_event(self, event, device_name: str = "") -> None:
-        """Process a single evdev EV_KEY event."""
         try:
             from evdev import ecodes
-            if event.type != ecodes.EV_KEY:
-                return
+            self._ev_key = ecodes.EV_KEY
         except Exception:
-            if getattr(event, "type", None) != 1:  # EV_KEY = 1
-                return
+            self._ev_key = EV_KEY
+
+    def handle_raw_event(self, event, device_name: str = "") -> None:
+        """Process a single evdev input event.
+
+        Publishes KEY_PRESS / KEY_RELEASE / KEY_REPEAT for EV_KEY events and
+        MOUSE_CLICK for mouse button presses.
+        """
+        event_type = getattr(event, "type", None)
+        if event_type != self._ev_key:
+            return
 
         code = event.code
         value = event.value  # 0=release, 1=press, 2=repeat
+
+        # Mouse button → MOUSE_CLICK on press
+        if code in MOUSE_BUTTONS:
+            if value == 1:
+                self.bus.publish(Event(EventType.MOUSE_CLICK, KeyEventData(code=code, value=value, device_name=device_name), time.time()))
+            return
 
         data = KeyEventData(code=code, value=value, device_name=device_name)
         ts = time.time()

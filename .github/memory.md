@@ -3,7 +3,7 @@
 ## Текущий статус
 
 - **Ветка:** `v2-rewrite`
-- **Тесты:** 146 passed
+- **Тесты:** 189 passed
 - **Python:** 3.12.3, pytest 7.4.4
 
 ## Завершённые этапы
@@ -28,14 +28,21 @@
 - 39 новых тестов (19 + 10 + 10), все с полной мок-изоляцией evdev/pyudev
 - Minor tech-debt: VirtualKeyboard без context manager, key_mapper только EN
 
+### Этап 4: Core Layer ✅
+- RetypeMode: delete → switch → replay, conditional Shift release (только непарные)
+- SelectionMode: get_selection → convert_text → replace_selection → switch_layout
+- ConversionEngine: choose_mode по backspace_hold_active → fresh_selection → chars_in_buffer
+- EventManager: классификация EV_KEY, MOUSE_CLICK, кеш EV_KEY
+- Исправлен баг v1: Shift release в finally триггерил XKB toggle
+- Исправлен баг: backspace_hold_active флаг доживает до choose_mode()
+- 43 новых теста (11+5+9+9+8+доп), интеграционные E2E сценарии
+
 ## Следующий этап
 
-### Этап 4: Core Layer (бизнес-логика)
-- 4.1 RetypeMode
-- 4.2 SelectionMode
-- 4.3 ConversionEngine.convert()
-- 4.4 EventManager.handle_raw_event()
-- 4.5 Интеграция EventManager + StateManager + ConversionEngine
+### Этап 5: Application (точка входа)
+- 5.1 LSwitchApp.run()
+- 5.2 Config
+- 5.3 CLI
 
 ## Архитектурные решения
 

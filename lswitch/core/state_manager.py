@@ -57,18 +57,23 @@ class StateManager:
 
     def on_backspace_hold(self) -> None:
         self.context.backspace_hold_at = time.time()
+        self.context.backspace_hold_active = True
         self._transition("backspace_hold")
 
     def on_navigation(self) -> None:
+        self.context.backspace_hold_active = False
         self.context.reset()
         self._transition("navigation")
 
     def on_mouse_click(self) -> None:
+        self.context.backspace_hold_active = False
         self.context.reset()
         self._transition("mouse_click")
 
     def on_conversion_complete(self) -> None:
+        self.context.backspace_hold_active = False
         self._transition("complete")
 
     def on_conversion_cancelled(self) -> None:
+        self.context.backspace_hold_active = False
         self._transition("cancelled")

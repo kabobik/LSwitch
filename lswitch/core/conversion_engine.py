@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from lswitch.core.states import StateContext
     from lswitch.platform.xkb_adapter import IXKBAdapter
     from lswitch.platform.selection_adapter import ISelectionAdapter
+    from lswitch.platform.system_adapter import ISystemAdapter
     from lswitch.input.virtual_keyboard import VirtualKeyboard
     from lswitch.intelligence.dictionary_service import DictionaryService
     from lswitch.intelligence.user_dictionary import UserDictionary
@@ -25,6 +26,7 @@ class ConversionEngine:
         selection: "ISelectionAdapter",
         virtual_kb: "VirtualKeyboard",
         dictionary: "DictionaryService",
+        system: "ISystemAdapter",
         user_dict: "UserDictionary | None" = None,
         debug: bool = False,
     ):
@@ -32,13 +34,13 @@ class ConversionEngine:
         self.selection = selection
         self.virtual_kb = virtual_kb
         self.dictionary = dictionary
+        self.system = system
         self.user_dict = user_dict
         self.debug = debug
 
     def choose_mode(self, context: "StateContext") -> str:
         """Return 'selection' or 'retype' based on current state."""
-        from lswitch.core.states import State
-        if context.state.name == "BACKSPACE_HOLD":
+        if context.backspace_hold_active:
             return "selection"
         if self.selection.has_fresh_selection():
             return "selection"
@@ -48,15 +50,14 @@ class ConversionEngine:
 
     def convert(self, context: "StateContext") -> bool:
         """Perform conversion. Returns True on success."""
+        from lswitch.core.modes import RetypeMode, SelectionMode
+
         mode = self.choose_mode(context)
         if self.debug:
             logger.debug("Converting in mode: %s", mode)
         if mode == "retype":
-            return self._retype(context)
-        return self._selection(context)
-
-    def _retype(self, context: "StateContext") -> bool:
-        raise NotImplementedError
-
-    def _selection(self, context: "StateContext") -> bool:
-        raise NotImplementedError
+            retype = RetypeMode(self.virtual_kb, self.xkb, self.system, self.debug)
+            return retype.execute(context)
+        else:
+            sel_mode = SelectionMode(self.selection, self.xkb, self.system, self.debug)
+            return sel_mode.execute(context)

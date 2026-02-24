@@ -30,6 +30,7 @@ class StateContext:
     # Flags
     shift_pressed: bool = False
     backspace_repeats: int = 0
+    backspace_hold_active: bool = False
 
     # X11 selection state
     selection_owner_id: int = 0
@@ -47,3 +48,4 @@ class StateContext:
         self.last_shift_time = 0.0
         self.shift_pressed = False
         self.backspace_repeats = 0
+        self.backspace_hold_active = False

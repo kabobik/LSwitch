@@ -77,37 +77,32 @@
 
 > Чистый Python, хорошо тестируется. Самый важный этап.
 
-- [ ] **4.1** Реализовать `RetypeMode`
+- [x] **4.1** Реализовать `RetypeMode`
   - Файл: `lswitch/core/modes.py`
   - Логика: delete N chars → switch layout → replay events
-  - Ключевое исправление: Shift release отправлять **только если были Shift press** в буфере
-  - Написать тест: `tests/test_retype_mode.py`
+  - Ключевое исправление: Shift release отправляется **только для непарных** Shift press
+  - Тест: `tests/test_retype_mode.py` — 11 тестов (LShift, RShift, парный/непарный)
 
-- [ ] **4.2** Реализовать `SelectionMode`
+- [x] **4.2** Реализовать `SelectionMode`
   - Файл: `lswitch/core/modes.py`
-  - Логика: get_selection → convert → replace_selection
-  - Написать тест: `tests/test_selection_mode.py`
-    - Повторное выделение того же текста конвертируется корректно
+  - Логика: get_selection → convert_text → replace_selection → switch_layout
+  - Тест: `tests/test_selection_mode.py` — 5 тестов (включая roundtrip)
 
-- [ ] **4.3** Реализовать `ConversionEngine.convert()`
+- [x] **4.3** Реализовать `ConversionEngine.convert()`
   - Файл: `lswitch/core/conversion_engine.py`
-  - Логика выбора режима: backspace_hold / has_fresh_selection / chars_in_buffer
-  - Написать тест: `tests/test_conversion_engine.py`
-    - Сценарий retype: "ghbdtn" → "привет"
-    - Сценарий selection: выделенный текст конвертируется
-    - Сценарий auto-convert: словарь распознаёт и конвертирует
+  - choose_mode: backspace_hold_active → fresh_selection → chars_in_buffer
+  - Тест: `tests/test_conversion_engine.py` — 9 тестов (включая convert→False)
 
-- [ ] **4.4** Реализовать `EventManager.handle_raw_event()`
+- [x] **4.4** Реализовать `EventManager.handle_raw_event()`
   - Файл: `lswitch/core/event_manager.py`
-  - Источник: `archive/lswitch/input.py`
-  - Написать тест: `tests/test_event_manager.py`
-    - Shift press → KEY_PRESS событие в шину
-    - Навигационная клавиша → MOUSE_CLICK / navigation событие
+  - SHIFT_KEYS, MOUSE_BUTTONS, NAVIGATION_KEYS + кешированный EV_KEY
+  - Тест: `tests/test_event_manager.py` — 9 тестов
 
-- [ ] **4.5** Интеграция EventManager + StateManager + ConversionEngine
-  - Написать интеграционный тест: `tests/test_core_integration.py`
-  - Сценарий: двойной Shift → конвертация → IDLE
-  - Сценарий: двойной Shift во время is_converting → игнорируется
+- [x] **4.5** Интеграция EventManager + StateManager + ConversionEngine
+  - Тест: `tests/test_core_integration.py` — 8 тестов
+  - E2E: набор текста → double Shift → конвертация → IDLE
+  - E2E: backspace hold → double Shift → selection mode (проверка replace_selection)
+  - Shift во время CONVERTING → игнорируется
 
 ---
 
