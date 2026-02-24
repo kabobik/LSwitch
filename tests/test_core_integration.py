@@ -129,14 +129,18 @@ class _MiniSystem:
             self.event_mgr.handle_raw_event(_ev(kc, 0))  # release
 
     def quick_shift_tap(self):
-        """Simulate a quick Shift tap — triggers 'double shift' in the StateManager.
-
-        The StateManager design: a quick Shift press→release (delta < timeout)
-        from SHIFT_PRESSED state transitions to CONVERTING.  No literal double
-        press is needed; a single fast tap is the trigger.
-        """
+        """Simulate a single Shift press+release (first tap of a potential double-shift)."""
         self.event_mgr.handle_raw_event(_ev(KEY_LEFTSHIFT, 1))
         self.event_mgr.handle_raw_event(_ev(KEY_LEFTSHIFT, 0))
+
+    def double_shift_tap(self):
+        """Simulate two quick Shift taps — triggers conversion.
+
+        Design: first tap records last_shift_time, second tap detects
+        delta < timeout and fires shift_up_double → CONVERTING.
+        """
+        self.quick_shift_tap()  # first tap: shift_up_single, records last_shift_time
+        self.quick_shift_tap()  # second tap: delta < timeout → shift_up_double
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +156,8 @@ class TestTypeThenDoubleShiftConverts:
 
         assert sys.state_mgr.state == State.TYPING
 
-        # Double shift
-        sys.quick_shift_tap()
+        # Double shift (two taps)
+        sys.double_shift_tap()
 
         # Conversion should have been triggered
         assert sys.convert_called == 1
@@ -172,9 +176,12 @@ class TestTypeThenDoubleShiftConverts:
         sys.event_mgr.handle_raw_event(_ev(KEY_LEFTSHIFT, 1))
         assert sys.state_mgr.state == State.SHIFT_PRESSED
 
-        # Quick shift up → "double shift" (delta < timeout) → CONVERTING → complete → IDLE
-        # Design: a quick Shift tap (press+release within timeout) from SHIFT_PRESSED
-        # triggers conversion — no literal second tap needed.
+        # First Shift up → shift_up_single → back to TYPING (records last_shift_time)
+        sys.event_mgr.handle_raw_event(_ev(KEY_LEFTSHIFT, 0))
+        assert sys.state_mgr.state == State.TYPING
+
+        # Second Shift tap quickly → shift_up_double → CONVERTING → complete → IDLE
+        sys.event_mgr.handle_raw_event(_ev(KEY_LEFTSHIFT, 1))
         sys.event_mgr.handle_raw_event(_ev(KEY_LEFTSHIFT, 0))
 
         assert sys.state_mgr.state == State.IDLE  # conversion + complete → IDLE
@@ -201,7 +208,7 @@ class TestDoubleShiftDuringConversion:
 
         # Type and trigger first conversion
         sys.type_keys([34, 35])
-        sys.quick_shift_tap()
+        sys.double_shift_tap()
 
         assert sys.convert_called == 1
         assert sys.state_mgr.state == State.CONVERTING
@@ -263,7 +270,7 @@ class TestBackspaceHoldSelectionMode:
         assert sys.state_mgr.context.backspace_hold_active is True
 
         # Quick shift tap from BACKSPACE_HOLD → conversion
-        sys.quick_shift_tap()
+        sys.double_shift_tap()
 
         assert sys.convert_called == 1
         # Engine should have chosen "selection" mode for backspace_hold_active

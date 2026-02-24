@@ -9,6 +9,7 @@ from lswitch.core.states import State
 TRANSITIONS: dict[State, dict[str, State]] = {
     State.IDLE: {
         "key_press": State.TYPING,
+        "shift_down": State.SHIFT_PRESSED,  # allows SelectionMode trigger from IDLE
     },
     State.TYPING: {
         "shift_down": State.SHIFT_PRESSED,

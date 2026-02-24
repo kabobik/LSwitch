@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -60,46 +61,58 @@ class RetypeMode(BaseMode):
 
     def execute(self, context: "StateContext") -> bool:
         if context.chars_in_buffer <= 0:
+            logger.debug("RetypeMode: skip — chars_in_buffer=%d", context.chars_in_buffer)
             return False
 
         # Save events before context is cleared
         saved_events = list(context.event_buffer)
-
-        # 1. Delete typed characters
-        self.virtual_kb.tap_key(KEY_BACKSPACE, context.chars_in_buffer)
-
-        # 2. Switch layout
-        self.xkb.switch_layout()
-
-        # 3. Replay saved events
-        self.virtual_kb.replay_events(saved_events)
-
-        # 4. Release Shift ONLY for unpaired Shift presses (no matching
-        #    release already in the buffer).  This avoids sending a duplicate
-        #    release that would trigger the XKB Shift+Shift layout toggle.
-        shift_codes_pressed: set[int] = set()
-        for ev in saved_events:
-            _code = getattr(ev, "code", None)
-            _value = getattr(ev, "value", None)
-            if _code in SHIFT_KEYS:
-                if _value == 1:
-                    shift_codes_pressed.add(_code)
-                elif _value == 0:
-                    shift_codes_pressed.discard(_code)
-        if shift_codes_pressed:
-            release_events = [
-                _SyntheticEvent(code, 0) for code in sorted(shift_codes_pressed)
-            ]
-            self.virtual_kb.replay_events(release_events)
+        n_chars = context.chars_in_buffer
 
         if self.debug:
             logger.debug(
-                "RetypeMode: deleted %d chars, replayed %d events, shift_release=%s",
-                context.chars_in_buffer,
+                "RetypeMode: start — chars=%d, buffer_events=%d, event_codes=%s",
+                n_chars,
                 len(saved_events),
-                bool(shift_codes_pressed),
+                [getattr(e, 'code', '?') for e in saved_events],
             )
 
+        # 1. Delete typed characters
+        logger.debug("RetypeMode: sending %d backspaces", n_chars)
+        self.virtual_kb.tap_key(KEY_BACKSPACE, n_chars)
+
+        # 2. Switch layout BEFORE replay so events land in the correct layout.
+        # We switch here (not after) so the XKB group is set when UInput events
+        # are processed. The system Shift+Shift shortcut may fire afterwards
+        # (after replay) and switch back — that's a separate GNOME/KDE setting
+        # users should disable in keyboard preferences.
+        try:
+            new_layout = self.xkb.switch_layout()
+            logger.debug("RetypeMode: switched layout → %s", getattr(new_layout, 'name', new_layout))
+        except Exception as exc:
+            logger.error("RetypeMode: switch_layout failed: %s", exc)
+            return False
+
+        # 3. Brief pause so the application finishes processing the backspaces
+        # before receiving the replayed characters.
+        time.sleep(0.05)
+
+        # 4. Replay saved events.
+        # event_buffer contains KEY_PRESS events only (value=1).
+        # replay_events() automatically appends synthetic releases so that
+        # the kernel does not trigger infinite auto-repeat (value=2).
+        if self.debug:
+            logger.debug(
+                "RetypeMode: replaying %d events (codes=%s)",
+                len(saved_events),
+                [getattr(e, 'code', '?') for e in saved_events],
+            )
+        self.virtual_kb.replay_events(saved_events)
+
+        logger.debug(
+            "RetypeMode: done — deleted=%d, replayed=%d",
+            n_chars,
+            len(saved_events),
+        )
         return True
 
 
@@ -119,20 +132,34 @@ class SelectionMode(BaseMode):
         self.debug = debug
 
     def execute(self, context: "StateContext") -> bool:
-        from lswitch.core.text_converter import convert_text
+        from lswitch.core.text_converter import convert_text, detect_language
 
         sel = self.selection.get_selection()
         if not sel.text:
             return False
 
-        converted = convert_text(sel.text)
+        # Detect source language to determine conversion direction and
+        # which layout to switch to after replacing the selection.
+        source_lang = detect_language(sel.text)  # 'en' or 'ru'
+        target_lang = "ru" if source_lang == "en" else "en"
+        direction = "en_to_ru" if source_lang == "en" else "ru_to_en"
+
+        converted = convert_text(sel.text, direction=direction)
         self.selection.replace_selection(converted)
-        self.xkb.switch_layout()
+
+        # Switch to the layout that matches the converted text.
+        layouts = self.xkb.get_layouts()
+        target_layout = next(
+            (l for l in layouts if l.name == target_lang),
+            None,
+        )
+        self.xkb.switch_layout(target=target_layout)  # None = cycle, which is ok as fallback
 
         if self.debug:
             logger.debug(
-                "SelectionMode: '%s' → '%s'",
-                sel.text,
-                converted,
+                "SelectionMode: '%s' (%s) → '%s' (%s), switching to layout '%s'",
+                sel.text, source_lang,
+                converted, target_lang,
+                target_layout.name if target_layout else "next",
             )
         return True

@@ -20,6 +20,7 @@ class MockXKBAdapter(IXKBAdapter):
         names = layouts or ["en", "ru"]
         self._layouts = [LayoutInfo(n, i, "us" if n == "en" else n) for i, n in enumerate(names)]
         self._current = 0
+        self.switch_calls: list = []  # records target arg of each switch_layout() call
 
     def get_layouts(self) -> list[LayoutInfo]:
         return self._layouts
@@ -32,6 +33,7 @@ class MockXKBAdapter(IXKBAdapter):
             self._current = target.index
         else:
             self._current = (self._current + 1) % len(self._layouts)
+        self.switch_calls.append(target)
         return self._layouts[self._current]
 
     def keycode_to_char(self, keycode: int, layout: LayoutInfo, shift: bool = False) -> str:
@@ -44,6 +46,8 @@ class MockSelectionAdapter(ISelectionAdapter):
         self._selection = SelectionInfo(text="", owner_id=0, timestamp=0.0)
         self._owner_counter = 0
         self._freshness_threshold = 0.5
+        self.replace_selection_called: bool = False  # set True when replace_selection() runs
+        self.replace_selection_text: str = ""       # last text passed to replace_selection()
 
     def set_selection(self, text: str) -> None:
         import time
@@ -59,6 +63,8 @@ class MockSelectionAdapter(ISelectionAdapter):
 
     def replace_selection(self, new_text: str) -> bool:
         self.set_selection(new_text)
+        self.replace_selection_called = True
+        self.replace_selection_text = new_text
         return True
 
     def expand_selection_to_word(self) -> SelectionInfo:

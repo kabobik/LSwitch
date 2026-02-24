@@ -26,16 +26,45 @@ class VirtualKeyboard:
         except Exception as e:
             logger.warning("Cannot create UInput device: %s", e)
 
+    # Delay between press and release, and between successive key taps.
+    # Without a pause many applications (GTK, Qt, X terminals) drop events
+    # when they arrive faster than the input processing loop runs.
+    KEY_PRESS_DELAY  = 0.008   # 8 ms between press and release
+    KEY_REPEAT_DELAY = 0.010   # 10 ms between successive key taps
+
     def tap_key(self, keycode: int, n_times: int = 1) -> None:
         """Press and release a keycode n times."""
-        for _ in range(n_times):
+        for i in range(n_times):
             self._write(keycode, 1)
+            time.sleep(self.KEY_PRESS_DELAY)
             self._write(keycode, 0)
+            if i < n_times - 1:
+                time.sleep(self.KEY_REPEAT_DELAY)
 
     def replay_events(self, events: list) -> None:
-        """Replay a list of evdev InputEvent objects."""
+        """Replay a list of evdev InputEvent objects.
+
+        If an event has value=1 (key press) and no matching release follows in
+        the list, a synthetic release (value=0) is appended automatically.
+        This prevents the kernel from generating infinite auto-repeat events.
+        """
+        # Build a set of codes that get a release in the list already
+        released_codes: set[int] = set()
         for ev in events:
-            self._write(ev.code, ev.value)
+            if getattr(ev, 'value', None) == 0:
+                released_codes.add(getattr(ev, 'code', -1))
+
+        for ev in events:
+            code = getattr(ev, 'code', None)
+            value = getattr(ev, 'value', None)
+            if code is None or value is None:
+                continue
+            self._write(code, value)
+            # Send synthetic release if this is a press without a paired release
+            if value == 1 and code not in released_codes:
+                time.sleep(self.KEY_PRESS_DELAY)
+                self._write(code, 0)
+            time.sleep(self.KEY_REPEAT_DELAY)
 
     def _write(self, code: int, value: int) -> None:
         if self._uinput is None:

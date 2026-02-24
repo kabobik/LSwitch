@@ -39,19 +39,23 @@ class StateManager:
 
     def on_shift_down(self) -> None:
         self.context.shift_pressed = True
-        self.context.last_shift_time = time.time()
         self._transition("shift_down")
 
     def on_shift_up(self) -> bool:
-        """Returns True if double-shift was detected."""
+        """Returns True if double-shift was detected.
+
+        Double-shift is measured as the time between the FIRST release and
+        the SECOND release (not press→release, which is always fast).
+        """
         self.context.shift_pressed = False
         now = time.time()
         delta = now - self.context.last_shift_time
-        if delta < self.double_click_timeout:
+        if self.context.last_shift_time > 0 and delta < self.double_click_timeout:
+            self.context.last_shift_time = 0  # reset so next single Shift starts fresh
             self._transition("shift_up_double")
             return True
         else:
-            self.context.last_shift_time = now
+            self.context.last_shift_time = now  # record time of first release
             self._transition("shift_up_single")
             return False
 
@@ -72,6 +76,7 @@ class StateManager:
 
     def on_conversion_complete(self) -> None:
         self.context.backspace_hold_active = False
+        self.context.reset()
         self._transition("complete")
 
     def on_conversion_cancelled(self) -> None:

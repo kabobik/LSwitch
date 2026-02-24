@@ -10,6 +10,9 @@ from lswitch.platform.system_adapter import CommandResult, ISystemAdapter
 class SubprocessSystemAdapter(ISystemAdapter):
     """Executes real subprocess calls."""
 
+    def __init__(self, debug: bool = False) -> None:
+        self.debug = debug
+
     def run_command(self, args: list[str], timeout: float = 1.0) -> CommandResult:
         try:
             r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)

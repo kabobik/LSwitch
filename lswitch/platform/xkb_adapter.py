@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import os
+import re
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -78,6 +79,13 @@ class X11XKBAdapter(IXKBAdapter):
         self._xkb_available = self._libX11 is not None
         self._layouts: list[LayoutInfo] | None = None
         self._dpy = None  # cached Display*
+        # X11 must be initialised for multi-thread use before any Xlib call.
+        # switch_layout() is called from the evdev background thread.
+        if self._xkb_available:
+            try:
+                self._libX11.XInitThreads()
+            except Exception:
+                pass
 
     # -- private helpers ----------------------------------------------------
 
@@ -107,9 +115,15 @@ class X11XKBAdapter(IXKBAdapter):
             lib.XkbLockGroup.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
             lib.XkbLockGroup.restype = ctypes.c_int
 
-            # XFlush
+            # XFlush / XSync
             lib.XFlush.argtypes = [ctypes.c_void_p]
             lib.XFlush.restype = ctypes.c_int
+            lib.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            lib.XSync.restype = ctypes.c_int
+
+            # XInitThreads — must be called before any other Xlib call
+            lib.XInitThreads.argtypes = []
+            lib.XInitThreads.restype = ctypes.c_int
 
             # XkbKeycodeToKeysym
             lib.XkbKeycodeToKeysym.argtypes = [
@@ -158,6 +172,53 @@ class X11XKBAdapter(IXKBAdapter):
             pass
         return []
 
+    def _cinnamon_get_sources(self) -> list[tuple] | None:
+        """Query Cinnamon D-Bus GetInputSources.
+
+        Returns list of (cinnamon_index, xkb_name, is_active) or None if
+        Cinnamon D-Bus is unavailable.
+        """
+        try:
+            r = subprocess.run(
+                ["gdbus", "call", "--session",
+                 "--dest", "org.Cinnamon",
+                 "--object-path", "/org/Cinnamon",
+                 "--method", "org.Cinnamon.GetInputSources"],
+                capture_output=True, text=True, timeout=3,
+            )
+            if r.returncode != 0 or not r.stdout.strip():
+                return None
+            sources = []
+            # Each entry: ('xkb', 'name', index, 'Display (name)', ..., true|false)
+            # Display name may contain parens (e.g. 'English (US)'), so we
+            # use (?:[^()]|\([^)]*\))+ to allow one level of nested parens.
+            for m in re.finditer(
+                r"\('xkb',\s*'(\w+)',\s*(\d+),(?:[^()]|\([^)]*\))+,\s*(true|false)\)",
+                r.stdout,
+            ):
+                xkb_name = m.group(1)
+                idx = int(m.group(2))
+                active = m.group(3) == "true"
+                sources.append((idx, xkb_name, active))
+            return sources if sources else None
+        except Exception:
+            return None
+
+    def _cinnamon_activate(self, index: int) -> bool:
+        """Switch layout via Cinnamon D-Bus ActivateInputSourceIndex."""
+        try:
+            r = subprocess.run(
+                ["gdbus", "call", "--session",
+                 "--dest", "org.Cinnamon",
+                 "--object-path", "/org/Cinnamon",
+                 "--method", "org.Cinnamon.ActivateInputSourceIndex",
+                 str(index)],
+                capture_output=True, text=True, timeout=3,
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
+
     @staticmethod
     def _xkb_name_to_short(xkb: str) -> str:
         """'us' → 'en', other names stay as-is."""
@@ -169,6 +230,21 @@ class X11XKBAdapter(IXKBAdapter):
         if self._layouts is not None:
             return self._layouts
 
+        # Prefer Cinnamon D-Bus — returns the exact list without duplicates
+        # that sometimes appear in setxkbmap -query output.
+        sources = self._cinnamon_get_sources()
+        if sources:
+            self._layouts = [
+                LayoutInfo(
+                    name=self._xkb_name_to_short(xkb),
+                    index=idx,
+                    xkb_name=xkb,
+                )
+                for idx, xkb, _active in sources
+            ]
+            return self._layouts
+
+        # Fallback: setxkbmap
         xkb_names = self._query_setxkbmap()
         if not xkb_names:
             xkb_names = ["us", "ru"]  # sensible default
@@ -207,16 +283,26 @@ class X11XKBAdapter(IXKBAdapter):
             current = self.get_current_layout()
             new_index = (current.index + 1) % len(layouts)
 
-        if not self._xkb_available:
-            return layouts[new_index] if new_index < len(layouts) else layouts[0]
+        new_layout = layouts[new_index] if new_index < len(layouts) else layouts[0]
 
+        # Try Cinnamon D-Bus first — it's the only method that survives the WM
+        # immediately reverting XkbLockGroup via XkbStateNotify.
+        if self._cinnamon_activate(new_index):
+            return new_layout
+
+        # Fallback: direct XkbLockGroup (works without Cinnamon / on other DEs)
+        if not self._xkb_available:
+            return new_layout
         dpy = self._get_display()
         if not dpy:
-            return layouts[new_index] if new_index < len(layouts) else layouts[0]
+            return new_layout
         self._libX11.XkbLockGroup(dpy, self.XKB_USE_CORE_KBD, new_index)
-        self._libX11.XFlush(dpy)
+        try:
+            self._libX11.XSync(dpy, 0)
+        except Exception:
+            self._libX11.XFlush(dpy)
 
-        return layouts[new_index] if new_index < len(layouts) else layouts[0]
+        return new_layout
 
     def keycode_to_char(self, keycode: int, layout: LayoutInfo, shift: bool = False) -> str:
         if not self._xkb_available:

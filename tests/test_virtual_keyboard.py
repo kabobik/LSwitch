@@ -110,6 +110,65 @@ class TestReplayEvents:
             # No writes should have been made
             assert mock_uinput.write.call_count == 0
 
+    def test_replay_events_auto_release_for_press_only(self):
+        """Press-only event (value=1) without a matching release in the list
+        must get a synthetic release (value=0) appended automatically.
+        This prevents the kernel from generating infinite auto-repeat events."""
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            ev = MagicMock(code=49, value=1)  # 'n' pressed, never released
+            vk.replay_events([ev])
+
+            # Expect: write(EV_KEY, 49, 1), syn, write(EV_KEY, 49, 0), syn
+            expected = [
+                call.write(1, 49, 1),
+                call.syn(),
+                call.write(1, 49, 0),
+                call.syn(),
+            ]
+            assert mock_uinput.method_calls == expected
+
+    def test_replay_events_no_extra_release_when_paired(self):
+        """If the event list already contains the release, no extra release
+        should be added (prevents double-release / XKB-toggle bug)."""
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            ev_press = MagicMock(code=42, value=1)   # LShift press
+            ev_release = MagicMock(code=42, value=0)  # LShift release (paired)
+            vk.replay_events([ev_press, ev_release])
+
+            # Exactly 4 calls: press + syn + release + syn (no extra)
+            assert mock_uinput.write.call_count == 2
+            assert mock_uinput.method_calls == [
+                call.write(1, 42, 1),
+                call.syn(),
+                call.write(1, 42, 0),
+                call.syn(),
+            ]
+
+    def test_replay_events_multiple_keys_auto_release(self):
+        """Multiple press-only events each get their own synthetic release."""
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            events = [
+                MagicMock(code=30, value=1),  # 'a' press, no release
+                MagicMock(code=48, value=1),  # 'b' press, no release
+            ]
+            vk.replay_events(events)
+
+            writes = [(c.args[1], c.args[2]) for c in mock_uinput.write.call_args_list]
+            # Both should be pressed then released
+            assert (30, 1) in writes
+            assert (30, 0) in writes
+            assert (48, 1) in writes
+            assert (48, 0) in writes
+
 
 class TestWriteWithNoUInput:
     def test_write_does_not_crash_when_uinput_is_none(self):

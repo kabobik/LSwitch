@@ -50,6 +50,10 @@ class EventManager:
         code = event.code
         value = event.value  # 0=release, 1=press, 2=repeat
 
+        if self.debug:
+            val_name = {0: 'release', 1: 'press', 2: 'repeat'}.get(value, str(value))
+            logger.debug("RawEvent: dev=%s code=%d (%s)", device_name, code, val_name)
+
         # Mouse button → MOUSE_CLICK on press
         if code in MOUSE_BUTTONS:
             if value == 1:

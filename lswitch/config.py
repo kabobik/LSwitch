@@ -25,7 +25,7 @@ DEFAULT_CONFIG: dict = {
     'switch_layout_after_convert': True,
     'layout_switch_key': 'Alt_L+Shift_L',
     'auto_switch': False,
-    'auto_switch_threshold': 10,
+    'auto_switch_threshold': 0,
     'user_dict_enabled': False,
     'user_dict_min_weight': 2,
 }

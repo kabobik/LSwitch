@@ -108,8 +108,10 @@ class TestRetypeModeShiftRelease:
     def test_no_shift_state_leak(self):
         """After execute, no lingering shift state should remain.
 
-        Verify that if a Shift press was in the buffer, a corresponding
-        release is emitted so that the OS doesn't think Shift is stuck.
+        Verify that if a Shift press is in the buffer without a paired release,
+        it is still passed to replay_events.  VirtualKeyboard.replay_events()
+        is responsible for appending the synthetic release (auto-release logic
+        was moved there to avoid the double-release / XKB toggle bug).
         """
         retype, vk, xkb, _ = _make_retype()
         events = [
@@ -124,11 +126,12 @@ class TestRetypeModeShiftRelease:
 
         retype.execute(ctx)
 
-        # Even without a release in the buffer, the mode should still send
-        # a shift release because there WAS a shift press
-        assert vk.replay_events.call_count == 2
-        release_events = vk.replay_events.call_args_list[1][0][0]
-        assert any(e.code == 42 and e.value == 0 for e in release_events)
+        # replay_events is called exactly once; auto-release of unpaired keys
+        # is now handled inside VirtualKeyboard.replay_events() itself.
+        assert vk.replay_events.call_count == 1
+        replayed = vk.replay_events.call_args_list[0][0][0]
+        # The shift press must be present so VirtualKeyboard can add release
+        assert any(e.code == 42 and e.value == 1 for e in replayed)
 
 
 class TestRetypeModeEmptyBuffer:
@@ -169,6 +172,7 @@ class TestRetypeModeRightShift:
     """Conditional Shift release works for KEY_RIGHTSHIFT (54) too."""
 
     def test_rshift_unpaired_sends_release(self):
+        """Unpaired RShift is passed to replay_events; VK handles auto-release."""
         retype, vk, xkb, _ = _make_retype()
         events = [
             _make_event(54, 1),   # RShift press (unpaired)
@@ -181,11 +185,11 @@ class TestRetypeModeRightShift:
 
         retype.execute(ctx)
 
-        assert vk.replay_events.call_count == 2
-        release_events = vk.replay_events.call_args_list[1][0][0]
-        assert len(release_events) == 1
-        assert release_events[0].code == 54
-        assert release_events[0].value == 0
+        # One call to replay_events; auto-release is VK's responsibility
+        assert vk.replay_events.call_count == 1
+        replayed = vk.replay_events.call_args_list[0][0][0]
+        # RShift press must be in the replayed list
+        assert any(e.code == 54 and e.value == 1 for e in replayed)
 
     def test_rshift_paired_no_extra_release(self):
         retype, vk, xkb, _ = _make_retype()

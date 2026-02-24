@@ -53,7 +53,29 @@ pip install -e .[gui]      # с GUI (PyQt5)
 
 ## Запуск
 
-### Ручной запуск
+### Из исходников (без установки)
+
+Если пакет не установлен через `make install`, используйте:
+
+```bash
+cd /path/to/LSwitch
+
+# С GUI (иконка в трее)
+python3 -m lswitch
+
+# Без GUI (daemon-режим)
+python3 -m lswitch --headless
+
+# С отладочным выводом
+python3 -m lswitch --debug
+
+# Комбинация
+python3 -m lswitch --headless --debug
+```
+
+### После установки (`make install`)
+
+После установки команда `lswitch` доступна глобально:
 
 ```bash
 # С GUI (иконка в трее)
@@ -244,6 +266,10 @@ journalctl --user-unit=lswitch -f
 ### Запустить с отладкой
 
 ```bash
+# Из исходников (без make install):
+python3 -m lswitch --headless --debug
+
+# После make install:
 lswitch --headless --debug
 ```
 
@@ -274,5 +300,9 @@ make uninstall
 ## Версия
 
 ```bash
+# Из исходников:
+python3 -m lswitch --version
+
+# После make install:
 lswitch --version
 ```
