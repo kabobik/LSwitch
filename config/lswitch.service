@@ -1,0 +1,21 @@
+[Unit]
+Description=LSwitch - Layout Switcher (evdev)
+Documentation=https://github.com/kabobik/lswitch
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'exec $(command -v lswitch || echo /usr/local/bin/lswitch) --headless'
+Restart=on-failure
+RestartSec=5s
+Environment="PYTHONUNBUFFERED=1"
+Environment="XAUTHORITY=%h/.Xauthority"
+# DISPLAY наследуется из user session, но на всякий случай:
+ImportEnvironment=DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lswitch
+
+[Install]
+WantedBy=default.target

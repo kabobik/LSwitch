@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+import os
+import signal
+
 from lswitch.config import ConfigManager
+
+logger = logging.getLogger(__name__)
 from lswitch.core.event_bus import EventBus
 from lswitch.core.state_manager import StateManager
 from lswitch.core.conversion_engine import ConversionEngine
@@ -194,6 +200,12 @@ class LSwitchApp:
 
     def run(self):
         """Blocking main event loop."""
+        if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
+            raise RuntimeError(
+                "LSwitch требует X11 (переменная DISPLAY не установлена). "
+                "Для systemd: добавьте ImportEnvironment=DISPLAY в .service файл."
+            )
+
         self._init_platform()
         self._wire_event_bus()
 
@@ -204,8 +216,13 @@ class LSwitchApp:
 
         self._running = True
 
-        if self.debug:
-            print(f"🚀 LSwitch 2.0 запущен (headless={self.headless}, {count} устройств)")
+        logger.info("LSwitch 2.0 запущен (headless=%s, %d устройств)", self.headless, count)
+
+        def _reload_handler(signum, frame):
+            self.config.reload()
+            if self.debug:
+                logger.debug("Config reloaded via SIGHUP")
+        signal.signal(signal.SIGHUP, _reload_handler)
 
         try:
             while self._running:

@@ -64,9 +64,29 @@
 - Сквозной тест test_integration_full.py: 14 E2E тестов (EventBus → StateManager → ConversionEngine)
 - 28 новых тестов (14 i18n + 14 integration)
 
-## Все этапы завершены ✅
+### Packaging: обновление сборочных файлов ✅
+- __version__.py, lswitch/__init__.py, lswitch/cli.py: синхронизированы на `2.0.0`
+- setup.py: убраны py_modules, lswitch-control entry point, data_files; python_requires>=3.10
+- requirements.txt: core deps + закомментирован PyQt5
+- Makefile: исправлен test target, install [gui], clean .mypy_cache, убрана ссылка на lswitch-control
+- TODO.md: обновлены таблица «Лишнее в корне» и базовый статус реализованных модулей
+
+### Деплой: фикс блокеров и рекомендаций ✅
+- Создан `config/` с актуальными: lswitch.service (--headless, ImportEnvironment=DISPLAY), 99-lswitch.rules, lswitch-control.desktop (Exec=lswitch), config.json.example
+- Makefile: post-install копирует .service→~/.config/systemd/user/, .rules→/etc/udev/rules.d/, .desktop→~/.local/share/applications/; uninstall удаляет
+- app.py: logging вместо print (3 места), SIGHUP-обработчик для reload конфига, проверка DISPLAY перед _init_platform()
+- config.py: logging вместо print (2 места), метод reload()
+- cli.py: версия из lswitch.__version__ (не захардкожена)
+- requirements.txt: документированы системные зависимости (xclip, xdotool)
+
+## Проект готов к деплою ✅
 
 ### 331 тест — все зелёные
+### Версия: 2.0.0
+### Режимы запуска:
+- `python3 -m lswitch --debug` — ручной с GUI
+- `python3 -m lswitch --headless --debug` — ручной без GUI
+- `make install && make enable` — systemd-сервис
 
 ## Архитектурные решения
 

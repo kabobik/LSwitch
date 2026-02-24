@@ -2,6 +2,8 @@
 
 import argparse
 
+from lswitch import __version__
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -21,7 +23,7 @@ def parse_args():
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 2.0.0-dev",
+        version=f"%(prog)s {__version__}",
     )
     return parser.parse_args()
 

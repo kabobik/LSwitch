@@ -26,7 +26,7 @@ class TestParseArgs:
             parse_args()
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "2.0.0-dev" in captured.out
+        assert "2.0.0" in captured.out
 
     def test_defaults_no_args(self, monkeypatch):
         monkeypatch.setattr("sys.argv", ["lswitch"])

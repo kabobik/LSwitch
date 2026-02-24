@@ -1,4 +1,11 @@
-# LSwitch dependencies
+# Core dependencies
 evdev
 python-xlib
 pyudev>=0.24
+
+# GUI (optional — install with: pip install lswitch[gui])
+# PyQt5
+
+# System dependencies (install via package manager):
+#   sudo apt install xclip xdotool   # Debian/Ubuntu
+#   sudo pacman -S xclip xdotool     # Arch

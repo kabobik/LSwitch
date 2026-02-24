@@ -154,9 +154,9 @@
 |------------|--------|----------|
 | `lswitch.egg-info/` | В `.gitignore` | Игнорируем |
 | `__pycache__/` | В `.gitignore` | Игнорируем |
-| `setup.py` | Оставить | Обновить для v2 на этапе 5 |
-| `requirements.txt` | Оставить | Обновить на этапе 5 |
-| `Makefile` | Оставить | Обновить команды |
+| `setup.py` | ✅ Обновлено для v2 | Готово |
+| `requirements.txt` | ✅ Обновлено для v2 | Готово |
+| `Makefile` | ✅ Обновлено для v2 | Готово |
 
 ---
 
@@ -164,29 +164,52 @@
 
 ```
 331 tests passed  ✓  (all stages 1-7 complete)
+Version: 2.0.0
 ```
 
-Готовые модули (реализованы, тесты зелёные):
+Реализованные модули (все тесты зелёные):
+
+**Core:**
 - `lswitch/core/event_bus.py`
 - `lswitch/core/events.py`
 - `lswitch/core/states.py`
 - `lswitch/core/transitions.py`
 - `lswitch/core/state_manager.py`
 - `lswitch/core/text_converter.py`
-- `lswitch/intelligence/maps.py`
-- `lswitch/intelligence/persistence.py`
-- `lswitch/intelligence/user_dictionary.py`
-
-Заглушки (структура есть, реализация TODO):
 - `lswitch/core/conversion_engine.py`
 - `lswitch/core/modes.py`
 - `lswitch/core/event_manager.py`
+
+**Intelligence:**
+- `lswitch/intelligence/maps.py`
+- `lswitch/intelligence/persistence.py`
+- `lswitch/intelligence/user_dictionary.py`
+- `lswitch/intelligence/dictionary_service.py`
+- `lswitch/intelligence/ngram_analyzer.py`
+- `lswitch/intelligence/auto_detector.py`
+- `lswitch/intelligence/ru_words.py`
+- `lswitch/intelligence/en_words.py`
+- `lswitch/intelligence/bigrams.py`
+- `lswitch/intelligence/trigrams.py`
+
+**Input:**
 - `lswitch/input/device_manager.py`
 - `lswitch/input/virtual_keyboard.py`
 - `lswitch/input/udev_monitor.py`
-- `lswitch/platform/xkb_adapter.py` (интерфейс)
-- `lswitch/platform/selection_adapter.py` (интерфейс)
-- `lswitch/intelligence/dictionary_service.py` (пустые словари)
-- `lswitch/intelligence/ngram_analyzer.py` (пустые таблицы)
-- `lswitch/ui/` (все файлы)
+
+**Platform:**
+- `lswitch/platform/xkb_adapter.py`
+- `lswitch/platform/selection_adapter.py`
+- `lswitch/platform/system_adapter.py`
+
+**UI:**
+- `lswitch/ui/tray_icon.py`
+- `lswitch/ui/context_menu.py`
+- `lswitch/ui/config_dialog.py`
+- `lswitch/ui/desktop_adapters.py`
+
+**Application:**
 - `lswitch/app.py`
+- `lswitch/cli.py`
+- `lswitch/config.py`
+- `lswitch/i18n.py`

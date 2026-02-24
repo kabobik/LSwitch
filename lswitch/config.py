@@ -11,9 +11,12 @@ validates config keys, raising ``ValueError`` on invalid values.
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 from lswitch.intelligence.persistence import save_json
+
+logger = logging.getLogger(__name__)
 
 # Single source of truth for default configuration
 DEFAULT_CONFIG: dict = {
@@ -143,7 +146,7 @@ def _read_and_merge(path: str, target_config: dict, debug: bool = False) -> bool
             cfg = json.loads(sanitized)
         except json.JSONDecodeError as exc:
             if debug:
-                print(f"⚠️  JSON parse error in {path}: {exc}")
+                logger.warning("JSON parse error in %s: %s", path, exc)
             return False
 
     try:
@@ -155,7 +158,7 @@ def _read_and_merge(path: str, target_config: dict, debug: bool = False) -> bool
         return True
     except ValueError as verr:
         if debug:
-            print(f"⚠️  Invalid config {path}: {verr}")
+            logger.warning("Invalid config %s: %s", path, verr)
         return False
 
 
