@@ -3,11 +3,17 @@
 import argparse
 import logging
 
+import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch import __version__
 
 
-def _setup_logging(debug: bool) -> None:
-    level = logging.DEBUG if debug else logging.INFO
+def _setup_logging(debug: bool, trace: bool = False) -> None:
+    if trace:
+        level = lswitch.log.TRACE
+    elif debug:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
@@ -28,7 +34,12 @@ def parse_args():
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Enable debug output",
+        help="Enable debug output (state changes, auto-conv decisions)",
+    )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Enable trace output (all raw events, ignored transitions; implies --debug)",
     )
     parser.add_argument(
         "--version",
@@ -40,7 +51,8 @@ def parse_args():
 
 def main():
     args = parse_args()
-    _setup_logging(args.debug)
+    debug = args.debug or args.trace  # --trace implies --debug
+    _setup_logging(debug=debug, trace=args.trace)
     from lswitch.app import LSwitchApp
-    app = LSwitchApp(headless=args.headless, debug=args.debug)
+    app = LSwitchApp(headless=args.headless, debug=debug)
     app.run()

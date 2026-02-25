@@ -43,9 +43,22 @@ class AutoDetector:
         if not word_clean:
             return (False, "empty input")
 
-        # Guard: non-alpha (numbers, symbols, mixed) — never convert
-        if not word_clean.isalpha():
-            return (False, "non-alphabetic input")
+        # Guard: reject words that contain characters which are neither
+        # alphabetic nor valid "letter keys" for the given layout.
+        # On EN keyboard ',' / '.' / ';' etc. are the physical keys for
+        # Cyrillic letters б / ю / ж — they must not block conversion.
+        from lswitch.intelligence.maps import EN_TO_RU, RU_TO_EN
+        if current_layout == "en":
+            if not all(c.isalpha() or EN_TO_RU.get(c.lower(), "").isalpha()
+                       for c in word_clean):
+                return (False, "non-alphabetic input")
+        elif current_layout == "ru":
+            if not all(c.isalpha() or RU_TO_EN.get(c.lower(), "").isalpha()
+                       for c in word_clean):
+                return (False, "non-alphabetic input")
+        else:
+            if not word_clean.isalpha():
+                return (False, "non-alphabetic input")
 
         # Priority 1 & 2: dictionary-based detection
         dict_convert, dict_reason = self.dictionary.should_convert(word_clean, current_layout)

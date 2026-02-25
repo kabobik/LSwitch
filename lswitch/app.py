@@ -8,6 +8,7 @@ import signal
 import sys
 import threading
 
+import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.config import ConfigManager
 
 logger = logging.getLogger(__name__)
@@ -147,13 +148,12 @@ class LSwitchApp:
         from lswitch.core.event_manager import SHIFT_KEYS, KEY_BACKSPACE, KEY_SPACE
 
         data = event.data
-        if self.debug:
-            logger.debug(
-                "KeyPress: code=%d dev=%s | state=%s buf=%d",
-                data.code, data.device_name,
-                self.state_manager.state.name,
-                self.state_manager.context.chars_in_buffer,
-            )
+        logger.trace(  # type: ignore[attr-defined]
+            "KeyPress: code=%d dev=%s | state=%s buf=%d",
+            data.code, data.device_name,
+            self.state_manager.state.name,
+            self.state_manager.context.chars_in_buffer,
+        )
         if data.code in SHIFT_KEYS:
             self.state_manager.on_shift_down()
         elif data.code == KEY_BACKSPACE:
@@ -244,10 +244,8 @@ class LSwitchApp:
         reset before auto-conversion activates.  Set to 0 (default) to
         convert from the very first word.  Increase to avoid false-positives
         at the start of a field (e.g., 5 = activate after ≥5 chars typed).
-
-        Words shorter than 3 characters are always skipped (articles, etc.).
         """
-        MIN_WORD_LEN = 3
+        MIN_WORD_LEN = 1
 
         ctx = self.state_manager.context
         if ctx.chars_in_buffer == 0:
@@ -263,22 +261,24 @@ class LSwitchApp:
                 )
             return False
 
-        # Extract last word events and chars
-        word, word_events = self._extract_last_word_events()
-
-        # Skip very short words
-        if not word or len(word) < MIN_WORD_LEN:
-            if self.debug:
-                logger.debug("Auto-conv skipped: word %r too short (%d chars)", word, len(word) if word else 0)
-            return False
-
-        # Get current layout info
+        # Get current layout FIRST — needed for correct char extraction below
         try:
             current_layout_info = self.xkb.get_current_layout() if self.xkb else None
         except Exception:
             return False
 
         current_lang = self._layout_to_lang(current_layout_info)
+
+        # Extract last word using actual XKB layout mapping.
+        # This prevents false truncation on RU keys that map to non-alpha EN
+        # chars (б→, ю→. ж→; etc.) which would split the word mid-way.
+        word, word_events = self._extract_last_word_events(current_layout_info)
+
+        # Skip very short words
+        if not word or len(word) < MIN_WORD_LEN:
+            if self.debug:
+                logger.debug("Auto-conv skipped: word %r too short (%d chars)", word, len(word) if word else 0)
+            return False
 
         # Ask AutoDetector
         try:
@@ -295,26 +295,49 @@ class LSwitchApp:
         self._do_auto_conversion_at_space(len(word_events), word_events, direction)
         return True
 
-    def _extract_last_word_events(self) -> "tuple[str, list]":
+    def _extract_last_word_events(self, current_layout=None) -> "tuple[str, list]":
         """Extract events for the last typed word from event_buffer.
 
         Scans backwards until a space or non-alpha character is found.
         Returns (word_str, word_events_in_order).
+
+        When ``current_layout`` (a LayoutInfo) is provided and ``self.xkb`` is
+        available, characters are resolved via the real XKB mapping so that
+        Cyrillic letters on a RU layout are returned as Cyrillic (not as their
+        EN physical-key equivalents, where б→, and ю→. are non-alpha and would
+        truncate the word prematurely).
         """
         from lswitch.core.event_manager import KEY_SPACE
-        from lswitch.input.key_mapper import keycode_to_char
+        from lswitch.input.key_mapper import keycode_to_char as _kc_en
+
+        # Chars in EN layout that map to Cyrillic letters (e.g. ',' → 'б').
+        # These keys must NOT break word scanning when the user is typing
+        # Russian on the wrong EN keyboard.
+        from lswitch.intelligence.maps import EN_TO_RU as _EN_TO_RU
+        _is_cyrillic_key = lambda c: bool(c and not c.isalpha() and _EN_TO_RU.get(c.lower(), '').isalpha())
 
         word_events: list = []
         chars: list[str] = []
         for ev in reversed(self.state_manager.context.event_buffer):
             if ev.code == KEY_SPACE:
                 break
-            ch = keycode_to_char(ev.code)
+            # Prefer actual XKB mapping for the current layout
+            if current_layout is not None and self.xkb is not None:
+                ch = self.xkb.keycode_to_char(ev.code, current_layout)
+            else:
+                ch = _kc_en(ev.code)
             if ch and ch.isalpha():
                 word_events.append(ev)
                 chars.append(ch)
-            elif ch:
-                break  # non-alpha, non-space → punctuation boundary
+            elif _is_cyrillic_key(ch):
+                # On EN layout this key produces punctuation, but on RU it's a
+                # Cyrillic letter (е.g. kc51 → ',' in EN, but 'б' in RU).
+                # Include it so the full translit sequence is preserved for
+                # AutoDetector ("hf,jnftn" → "работает" after conversion).
+                word_events.append(ev)
+                chars.append(ch)
+            else:
+                break  # genuine boundary: punctuation, digit, or unresolved key
 
         word_events.reverse()
         chars.reverse()

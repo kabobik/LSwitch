@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
+import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.core.states import State, StateContext
 from lswitch.core.transitions import can_transition, next_state
 
@@ -25,8 +26,7 @@ class StateManager:
 
     def _transition(self, event_name: str) -> bool:
         if not can_transition(self.context.state, event_name):
-            if self.debug:
-                logger.debug("Ignored transition %r from %s", event_name, self.context.state)
+            logger.trace("Ignored transition %r from %s", event_name, self.context.state)  # type: ignore[attr-defined]
             return False
         new_state = next_state(self.context.state, event_name)
         if self.debug:

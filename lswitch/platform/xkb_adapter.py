@@ -317,11 +317,19 @@ class X11XKBAdapter(IXKBAdapter):
         keysym = self._libX11.XkbKeycodeToKeysym(dpy, x11_keycode, group, level)
         if keysym == 0:
             return ""
+        # Printable ASCII keysyms (0x20–0x7E) have the same value as their
+        # Unicode/ASCII code point.  Return them directly so that keys like
+        # comma (keysym 0x2C → ','), period, semicolon etc. are recognised
+        # correctly — XKeysymToString returns the word "comma" for 0x2C, not
+        # the single character, which would cause the word-boundary scan in
+        # _extract_last_word_events to silently skip past them.
+        if 0x20 <= keysym <= 0x7E:
+            return chr(keysym)
         raw = self._libX11.XKeysymToString(keysym)
         if not raw:
             return ""
         name = raw.decode("utf-8")
-        # Single ASCII character
+        # Single ASCII character (fallback, should be caught above)
         if len(name) == 1:
             return name
         # Cyrillic keysym names

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
+import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.core.event_bus import EventBus
 from lswitch.core.events import Event, EventType, KeyEventData
 
@@ -52,7 +53,7 @@ class EventManager:
 
         if self.debug:
             val_name = {0: 'release', 1: 'press', 2: 'repeat'}.get(value, str(value))
-            logger.debug("RawEvent: dev=%s code=%d (%s)", device_name, code, val_name)
+            logger.trace("RawEvent: dev=%s code=%d (%s)", device_name, code, val_name)  # type: ignore[attr-defined]
 
         # Mouse button → MOUSE_CLICK on press
         if code in MOUSE_BUTTONS:
