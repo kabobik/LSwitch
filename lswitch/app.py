@@ -170,11 +170,13 @@ class LSwitchApp:
             # Normal space: add to buffer
             self.state_manager.on_key_press(data.code)
             self.state_manager.context.chars_in_buffer += 1
+            data.shifted = self.state_manager.context.shift_pressed
             self.state_manager.context.event_buffer.append(data)
             self.state_manager.context.backspace_repeats = 0
         else:
             self.state_manager.on_key_press(data.code)
             self.state_manager.context.chars_in_buffer += 1
+            data.shifted = self.state_manager.context.shift_pressed
             self.state_manager.context.event_buffer.append(data)
             self.state_manager.context.backspace_repeats = 0
 

@@ -40,6 +40,7 @@ class KeyEventData:
     code: int
     value: int          # 0=release, 1=press, 2=repeat
     device_name: str = ""
+    shifted: bool = False   # True if Shift was held when this key was pressed
 
 
 @dataclass

@@ -41,12 +41,20 @@ class VirtualKeyboard:
             if i < n_times - 1:
                 time.sleep(self.KEY_REPEAT_DELAY)
 
+    # evdev keycode for Left Shift — used to replay shifted keys.
+    KEY_LEFTSHIFT = 42
+
     def replay_events(self, events: list) -> None:
         """Replay a list of evdev InputEvent objects.
 
         If an event has value=1 (key press) and no matching release follows in
         the list, a synthetic release (value=0) is appended automatically.
         This prevents the kernel from generating infinite auto-repeat events.
+
+        If an event carries ``shifted=True`` (set by app.py when Shift was held
+        during the original keypress), the replay wraps that key with a
+        synthetic Shift press/release so the target application sees an
+        uppercase letter in the new layout.
         """
         # Build a set of codes that get a release in the list already
         released_codes: set[int] = set()
@@ -59,11 +67,19 @@ class VirtualKeyboard:
             value = getattr(ev, 'value', None)
             if code is None or value is None:
                 continue
+            # Use strict identity check so that MagicMock attrs (truthy but
+            # not literally True) don't accidentally trigger Shift injection.
+            shifted = getattr(ev, 'shifted', False) is True
+            if shifted:
+                self._write(self.KEY_LEFTSHIFT, 1)
+                time.sleep(self.KEY_PRESS_DELAY)
             self._write(code, value)
             # Send synthetic release if this is a press without a paired release
             if value == 1 and code not in released_codes:
                 time.sleep(self.KEY_PRESS_DELAY)
                 self._write(code, 0)
+            if shifted:
+                self._write(self.KEY_LEFTSHIFT, 0)
             time.sleep(self.KEY_REPEAT_DELAY)
 
     def _write(self, code: int, value: int) -> None:
