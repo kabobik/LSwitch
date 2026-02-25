@@ -59,6 +59,11 @@ class LSwitchApp:
         self.event_manager = None
         self._udev_monitor = None
         self.auto_detector = None
+        self.user_dict = None
+        self._last_auto_marker = None
+        self._selection_valid: bool = False
+        self._prev_sel_text: str = ""
+        self._prev_sel_owner_id: int = 0
 
     # ------------------------------------------------------------------
     # Platform initialisation (lazy — for testability)
@@ -98,7 +103,15 @@ class LSwitchApp:
 
         dictionary = DictionaryService()
         ngrams = NgramAnalyzer()
-        self.auto_detector = AutoDetector(dictionary=dictionary, ngrams=ngrams)
+
+        # UserDictionary: self-learning word weights
+        if self.config.get('user_dict_enabled'):
+            from lswitch.intelligence.user_dictionary import UserDictionary
+            self.user_dict = UserDictionary()
+
+        self.auto_detector = AutoDetector(
+            dictionary=dictionary, ngrams=ngrams, user_dict=self.user_dict,
+        )
 
         self.conversion_engine = ConversionEngine(
             xkb=self.xkb,
@@ -106,6 +119,7 @@ class LSwitchApp:
             virtual_kb=self.virtual_kb,
             dictionary=dictionary,
             system=self.system,
+            user_dict=self.user_dict,
             debug=self.debug,
         )
 
@@ -162,6 +176,7 @@ class LSwitchApp:
             if ctx.event_buffer:
                 ctx.event_buffer.pop()
             ctx.backspace_repeats = 0
+            self._selection_valid = False
         elif data.code == KEY_SPACE:
             # Word boundary — try auto-conversion if enabled
             if self.auto_detector and self.config.get('auto_switch'):
@@ -173,12 +188,14 @@ class LSwitchApp:
             data.shifted = self.state_manager.context.shift_pressed
             self.state_manager.context.event_buffer.append(data)
             self.state_manager.context.backspace_repeats = 0
+            self._selection_valid = False
         else:
             self.state_manager.on_key_press(data.code)
             self.state_manager.context.chars_in_buffer += 1
             data.shifted = self.state_manager.context.shift_pressed
             self.state_manager.context.event_buffer.append(data)
             self.state_manager.context.backspace_repeats = 0
+            self._selection_valid = False
 
     def _on_key_release(self, event):
         from lswitch.core.event_manager import (
@@ -191,8 +208,12 @@ class LSwitchApp:
             if is_double:
                 self._do_conversion()
         elif data.code in NAVIGATION_KEYS:
+            self._last_auto_marker = None
+            self._selection_valid = False
             self.state_manager.on_navigation()
         elif data.code == KEY_ENTER:
+            self._last_auto_marker = None
+            self._selection_valid = False
             self.state_manager.on_navigation()
         elif data.code == KEY_BACKSPACE:
             self.state_manager.context.backspace_repeats = 0
@@ -215,21 +236,103 @@ class LSwitchApp:
                 self.state_manager.on_backspace_hold()
 
     def _on_mouse_click(self, event):
+        self._last_auto_marker = None
+        self._selection_valid = False
         self.state_manager.on_mouse_click()
+
+    # ------------------------------------------------------------------
+    # Selection validity tracking
+    # ------------------------------------------------------------------
+
+    def _check_selection_changed(self) -> bool:
+        """Check if PRIMARY selection content changed and update _selection_valid."""
+        if self.selection is None:
+            return False
+        try:
+            info = self.selection.get_selection()
+            if not info.text:
+                return False
+            owner_changed = info.owner_id != self._prev_sel_owner_id and info.owner_id != 0
+            text_changed = info.text != self._prev_sel_text
+            if owner_changed or text_changed:
+                self._prev_sel_text = info.text
+                self._prev_sel_owner_id = info.owner_id
+                self._selection_valid = True
+                return True
+        except Exception:
+            pass
+        return False
 
     # ------------------------------------------------------------------
     # Conversion
     # ------------------------------------------------------------------
 
     def _do_conversion(self):
-        """Trigger conversion if state machine is in CONVERTING state."""
+        """Trigger conversion if state machine is in CONVERTING state.
+
+        User-dict learning logic:
+          A) Shift+Shift right after auto-conversion (undo):
+             _last_auto_marker is set, event_buffer is empty (reset by auto-conv).
+             → add_correction(typed_word, typed_lang)  — weight -1
+          B) Pure manual Shift+Shift (no prior auto-conversion):
+             _last_auto_marker is None, event_buffer has the typed chars.
+             → add_confirmation(typed_word, typed_lang)  — weight +1
+             Weight accumulates across sessions; once |weight| >= min_weight
+             AutoDetector will handle this word automatically.
+        """
+        import time as _time
         from lswitch.core.states import State
 
         if self.state_manager.state != State.CONVERTING:
             return
+
+        # --- Extract typed word from buffer BEFORE convert() clears it ---
+        # Only relevant for Case B (manual conversion); Case A buffer is already empty.
+        manual_word: str = ""
+        manual_lang: str = ""
+        if self.user_dict and self.state_manager.context.chars_in_buffer > 0:
+            try:
+                layout_info = self.xkb.get_current_layout() if self.xkb else None
+                manual_lang = self._layout_to_lang(layout_info)
+                manual_word, _ = self._extract_last_word_events(layout_info)
+            except Exception:
+                pass
+
+        # --- Case A: undo of recent auto-conversion → penalise ---
+        if self._last_auto_marker is not None:
+            marker = self._last_auto_marker
+            elapsed = _time.time() - marker['time']
+            timeout = (
+                self.user_dict.data.get('settings', {}).get('correction_timeout', 5.0)
+                if self.user_dict else 5.0
+            )
+            if self.user_dict and elapsed < timeout:
+                self.user_dict.add_correction(
+                    marker['word'], marker['lang'], debug=self.debug,
+                )
+                logger.info(
+                    "Correction: '%s' (%s) — weight -1",
+                    marker['word'], marker['lang'],
+                )
+            self._last_auto_marker = None
+
+        # --- Case B: pure manual conversion → confirm this word needs switching ---
+        elif manual_word and manual_lang and self.user_dict:
+            self.user_dict.add_confirmation(manual_word, manual_lang, debug=self.debug)
+            logger.info(
+                "Manual conversion: '%s' (%s) — weight +1",
+                manual_word, manual_lang,
+            )
+
         try:
-            self.conversion_engine.convert(self.state_manager.context)
+            # Check if PRIMARY selection changed (user selected something new)
+            self._check_selection_changed()
+            self.conversion_engine.convert(
+                self.state_manager.context,
+                selection_valid=self._selection_valid,
+            )
         finally:
+            self._selection_valid = False  # consumed
             self.state_manager.on_conversion_complete()
 
     # ------------------------------------------------------------------
@@ -289,12 +392,21 @@ class LSwitchApp:
             logger.warning("AutoDetector error: %s", exc)
             return False
 
+        # Previous auto-conversion was accepted (user kept typing → next space)
+        if self._last_auto_marker is not None and self.user_dict:
+            old = self._last_auto_marker
+            self.user_dict.add_confirmation(old['word'], old['lang'], debug=self.debug)
+            self._last_auto_marker = None
+
         if not should:
             return False
 
         direction = "en_to_ru" if current_lang == "en" else "ru_to_en"
         logger.info("Auto-convert at space: '%s' → %s (%s)", word, direction, reason)
-        self._do_auto_conversion_at_space(len(word_events), word_events, direction)
+        self._do_auto_conversion_at_space(
+            len(word_events), word_events, direction,
+            orig_word=word, orig_lang=current_lang,
+        )
         return True
 
     def _extract_last_word_events(self, current_layout=None) -> "tuple[str, list]":
@@ -355,7 +467,8 @@ class LSwitchApp:
         return "en"
 
     def _do_auto_conversion_at_space(
-        self, word_len: int, word_events: list, direction: str
+        self, word_len: int, word_events: list, direction: str,
+        orig_word: str = "", orig_lang: str = "",
     ) -> None:
         """Perform auto-conversion: delete (word + space), retype in target layout, add space.
 
@@ -395,6 +508,15 @@ class LSwitchApp:
         except Exception as exc:
             logger.error("Auto-conversion at space failed: %s", exc)
         finally:
+            # Save marker BEFORE reset so correction can be detected later
+            import time as _time
+            if orig_word:
+                self._last_auto_marker = {
+                    'word': orig_word,
+                    'direction': direction,
+                    'lang': orig_lang,
+                    'time': _time.time(),
+                }
             ctx.reset()
             ctx.state = State.IDLE
 
@@ -457,7 +579,7 @@ class LSwitchApp:
         tray = TrayIcon(event_bus=self.event_bus, config=self.config, app=qt_app)
 
         # Build context menu
-        menu_obj = ContextMenu(config=self.config, event_bus=self.event_bus)
+        menu_obj = ContextMenu(config=self.config, event_bus=self.event_bus, app=self)
         menu = menu_obj.build()
         tray.set_context_menu(menu)
 

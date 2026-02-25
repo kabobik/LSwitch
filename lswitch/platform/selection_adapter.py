@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
 
 from lswitch.platform.system_adapter import ISystemAdapter
 
@@ -22,7 +21,7 @@ class ISelectionAdapter(ABC):
     def get_selection(self) -> SelectionInfo: ...
 
     @abstractmethod
-    def has_fresh_selection(self, threshold: float = 0.5) -> bool: ...
+    def has_fresh_selection(self) -> bool: ...
 
     @abstractmethod
     def replace_selection(self, new_text: str) -> bool: ...
@@ -51,9 +50,8 @@ def _get_selection_owner_id() -> int:
 class X11SelectionAdapter(ISelectionAdapter):
     """Selection adapter for X11 — reads PRIMARY selection and tracks freshness.
 
-    Key improvement over v1: freshness is determined by **(owner_id, text, timestamp)**
-    triple — even if the user re-selects the *same* text, the new owner_id or
-    timestamp change marks the selection as fresh.
+    Freshness is determined by **(owner_id, text)** pair: even if the user
+    re-selects the same text, a new owner_id marks the selection as fresh.
     """
 
     def __init__(self, system: ISystemAdapter, debug: bool = False) -> None:
@@ -63,10 +61,6 @@ class X11SelectionAdapter(ISelectionAdapter):
         # Cached previous state for freshness comparison
         self._prev_owner_id: int = 0
         self._prev_text: str = ""
-        self._prev_timestamp: float = 0.0
-
-        # Timestamp of last cursor movement (set externally by input layer)
-        self.cursor_moved_at: float = 0.0
 
     # -- ISelectionAdapter --------------------------------------------------
 
@@ -75,14 +69,13 @@ class X11SelectionAdapter(ISelectionAdapter):
         owner_id = _get_selection_owner_id()
         return SelectionInfo(text=text, owner_id=owner_id, timestamp=time.time())
 
-    def has_fresh_selection(self, threshold: float = 0.5) -> bool:
+    def has_fresh_selection(self) -> bool:
         """Determine whether there is a *fresh* selection.
 
         A selection is considered fresh when **any** of the following changed
         compared to the last call:
         - ``owner_id`` (different window grabbed PRIMARY)
         - ``text`` (different content selected)
-        - recent cursor movement (within *threshold* seconds)
 
         Even if the text is identical, a different ``owner_id`` means the user
         made a new selection and the result should be treated as fresh (v1 bug fix).
@@ -91,21 +84,14 @@ class X11SelectionAdapter(ISelectionAdapter):
         if not info.text:
             return False
 
-        now = time.time()
-
         owner_changed = info.owner_id != self._prev_owner_id and info.owner_id != 0
         text_changed = info.text != self._prev_text
-        recent_cursor = (
-            self.cursor_moved_at > 0.0
-            and (now - self.cursor_moved_at) < threshold
-        )
 
-        is_fresh = owner_changed or text_changed or recent_cursor
+        is_fresh = owner_changed or text_changed
 
         if is_fresh:
             self._prev_owner_id = info.owner_id
             self._prev_text = info.text
-            self._prev_timestamp = now
 
         return is_fresh
 

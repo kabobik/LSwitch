@@ -42,7 +42,7 @@ class TestMockSelectionAdapter:
 
     def test_has_fresh_selection_after_set(self, mock_selection: MockSelectionAdapter):
         mock_selection.set_selection("word")
-        assert mock_selection.has_fresh_selection(threshold=1.0) is True
+        assert mock_selection.has_fresh_selection() is True
 
     def test_has_fresh_selection_on_same_text(self, mock_selection: MockSelectionAdapter):
         """CRITICAL: re-selecting the same text should still count as fresh.
@@ -51,10 +51,10 @@ class TestMockSelectionAdapter:
         even when the text content is identical.
         """
         mock_selection.set_selection("same")
-        assert mock_selection.has_fresh_selection(threshold=1.0) is True
+        assert mock_selection.has_fresh_selection() is True
         # "Re-select" the same text — owner_id increments
         mock_selection.set_selection("same")
-        assert mock_selection.has_fresh_selection(threshold=1.0) is True
+        assert mock_selection.has_fresh_selection() is True
 
     def test_replace_selection(self, mock_selection: MockSelectionAdapter):
         mock_selection.set_selection("old")
@@ -115,28 +115,24 @@ class TestX11SelectionAdapterUnit:
         adapter = self._make_adapter(sys)
 
         sys._clipboard["primary"] = "alpha"
-        assert adapter.has_fresh_selection(threshold=1.0) is True
+        assert adapter.has_fresh_selection() is True
 
         # Same text, same owner (owner_id=0 from mock) → not fresh
-        assert adapter.has_fresh_selection(threshold=1.0) is False
+        assert adapter.has_fresh_selection() is False
 
         # Text changes
         sys._clipboard["primary"] = "beta"
-        assert adapter.has_fresh_selection(threshold=1.0) is True
+        assert adapter.has_fresh_selection() is True
 
-    def test_has_fresh_selection_detects_cursor_move(self):
+    def test_has_fresh_selection_same_text_same_owner_not_fresh(self):
         sys = _RecordingSystemAdapter()
         sys._clipboard["primary"] = "text"
         adapter = self._make_adapter(sys)
 
         # First call: fresh because text changed from ""
-        assert adapter.has_fresh_selection(threshold=1.0) is True
-        # Second call: not fresh
-        assert adapter.has_fresh_selection(threshold=1.0) is False
-
-        # Simulate cursor movement
-        adapter.cursor_moved_at = time.time()
-        assert adapter.has_fresh_selection(threshold=1.0) is True
+        assert adapter.has_fresh_selection() is True
+        # Second call: same text, same owner → not fresh
+        assert adapter.has_fresh_selection() is False
 
     def test_replace_selection(self):
         sys = _RecordingSystemAdapter()

@@ -45,7 +45,6 @@ class _MiniSystem:
         # Mock adapters
         self.mock_xkb = MagicMock()
         self.mock_selection = MagicMock()
-        self.mock_selection.has_fresh_selection.return_value = False
         self.mock_selection.get_selection.return_value = SelectionInfo(text="", owner_id=0, timestamp=0.0)
         self.mock_vk = MagicMock()
         self.mock_dict = MagicMock()
@@ -253,7 +252,6 @@ class TestBackspaceHoldSelectionMode:
         sys = _MiniSystem()
 
         # Set up selection so conversion can succeed
-        sys.mock_selection.has_fresh_selection.return_value = False
         sys.mock_selection.get_selection.return_value = SelectionInfo(
             text="ghbdtn", owner_id=1, timestamp=time.time()
         )

@@ -98,7 +98,9 @@ class TestDoConversion:
         app = _make_app()
         app.state_manager.context.state = State.CONVERTING
         app._do_conversion()
-        app.conversion_engine.convert.assert_called_once_with(app.state_manager.context)
+        app.conversion_engine.convert.assert_called_once_with(
+            app.state_manager.context, selection_valid=False,
+        )
 
     def test_does_not_call_convert_when_idle(self):
         app = _make_app()

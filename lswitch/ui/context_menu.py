@@ -21,11 +21,13 @@ class ContextMenu:
     about dialog entry, and quit action.
     """
 
-    def __init__(self, config=None, event_bus=None):
+    def __init__(self, config=None, event_bus=None, app=None):
         self.config = config
         self.event_bus = event_bus
+        self._app = app  # LSwitchApp instance for debug monitor
         self._menu: QMenu | None = None
         self._status_action: QAction | None = None
+        self._debug_monitor = None  # DebugMonitorWindow instance
 
     # -- public API --------------------------------------------------------
 
@@ -77,6 +79,13 @@ class ContextMenu:
         menu.addAction(restart_action)
 
         menu.addSeparator()
+
+        # Debug Monitor (only when debug mode is enabled)
+        if self.config and self.config.get("debug", False):
+            debug_action = QAction("Debug Monitor", menu)
+            debug_action.triggered.connect(self._show_debug_monitor)
+            menu.addAction(debug_action)
+            menu.addSeparator()
 
         # About
         about_action = QAction(t('about'), menu)
@@ -188,6 +197,22 @@ class ContextMenu:
             from PyQt5.QtWidgets import QMessageBox
             from lswitch import __version__
             QMessageBox.about(None, t('about_title', version=__version__), t('about_description'))
+        except Exception:
+            pass
+
+    def _show_debug_monitor(self) -> None:
+        """Open or raise the Debug Monitor window."""
+        try:
+            from lswitch.ui.debug_monitor import DebugMonitorWindow
+
+            if self._debug_monitor is None or not self._debug_monitor.isVisible():
+                self._debug_monitor = DebugMonitorWindow(
+                    app=self._app,
+                    event_bus=self.event_bus,
+                )
+            self._debug_monitor.show()
+            self._debug_monitor.raise_()
+            self._debug_monitor.activateWindow()
         except Exception:
             pass
 

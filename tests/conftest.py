@@ -45,7 +45,8 @@ class MockSelectionAdapter(ISelectionAdapter):
     def __init__(self):
         self._selection = SelectionInfo(text="", owner_id=0, timestamp=0.0)
         self._owner_counter = 0
-        self._freshness_threshold = 0.5
+        self._prev_text: str = ""
+        self._prev_owner_id: int = 0
         self.replace_selection_called: bool = False  # set True when replace_selection() runs
         self.replace_selection_text: str = ""       # last text passed to replace_selection()
 
@@ -57,9 +58,17 @@ class MockSelectionAdapter(ISelectionAdapter):
     def get_selection(self) -> SelectionInfo:
         return self._selection
 
-    def has_fresh_selection(self, threshold: float = 0.5) -> bool:
-        import time
-        return bool(self._selection.text) and (time.time() - self._selection.timestamp) < threshold
+    def has_fresh_selection(self) -> bool:
+        info = self._selection
+        if not info.text:
+            return False
+        owner_changed = info.owner_id != self._prev_owner_id and info.owner_id != 0
+        text_changed = info.text != self._prev_text
+        is_fresh = owner_changed or text_changed
+        if is_fresh:
+            self._prev_owner_id = info.owner_id
+            self._prev_text = info.text
+        return is_fresh
 
     def replace_selection(self, new_text: str) -> bool:
         self.set_selection(new_text)

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from lswitch.intelligence.dictionary_service import DictionaryService
     from lswitch.intelligence.ngram_analyzer import NgramAnalyzer
+    from lswitch.intelligence.user_dictionary import UserDictionary
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,11 @@ class AutoDetector:
     4. Otherwise → no convert
     """
 
-    def __init__(self, dictionary: "DictionaryService", ngrams: "NgramAnalyzer"):
+    def __init__(self, dictionary: "DictionaryService", ngrams: "NgramAnalyzer",
+                 user_dict: "UserDictionary | None" = None):
         self.dictionary = dictionary
         self.ngrams = ngrams
+        self.user_dict = user_dict
 
     def should_convert(self, word: str | None, current_layout: str) -> tuple[bool, str]:
         """Return (should_convert, reason).
@@ -67,13 +70,21 @@ class AutoDetector:
         if not dict_convert and "already correct" in dict_reason:
             return (False, dict_reason)
 
+        # Priority 1.5: UserDictionary protection
+        if self.user_dict:
+            w_lower = word_clean.lower()
+            if self.user_dict.is_protected(w_lower, current_layout):
+                return (False, "user_dict: temporarily protected")
+            weight = self.user_dict.get_weight(w_lower, current_layout)
+            min_w = self.user_dict.data.get('settings', {}).get('min_weight', 2)
+            if weight <= -min_w:
+                return (False, f"user_dict: weight={weight} <= -{min_w}")
+
         # Priority 2: converted form is a known word → convert
         if dict_convert:
             return (True, dict_reason)
 
         # Priority 3: N-gram analysis on the converted text
-        from lswitch.intelligence.maps import EN_TO_RU, RU_TO_EN
-
         w = word_clean.lower()
         if current_layout == "en":
             converted = "".join(EN_TO_RU.get(c, c) for c in w)

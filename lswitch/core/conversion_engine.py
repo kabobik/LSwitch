@@ -38,21 +38,21 @@ class ConversionEngine:
         self.user_dict = user_dict
         self.debug = debug
 
-    def choose_mode(self, context: "StateContext") -> str:
+    def choose_mode(self, context: "StateContext", selection_valid: bool = False) -> str:
         """Return 'selection' or 'retype' based on current state."""
         if context.backspace_hold_active:
             return "selection"
-        if self.selection.has_fresh_selection():
+        if selection_valid:
             return "selection"
         if context.chars_in_buffer > 0:
             return "retype"
         return "selection"
 
-    def convert(self, context: "StateContext") -> bool:
+    def convert(self, context: "StateContext", selection_valid: bool = False) -> bool:
         """Perform conversion. Returns True on success."""
         from lswitch.core.modes import RetypeMode, SelectionMode
 
-        mode = self.choose_mode(context)
+        mode = self.choose_mode(context, selection_valid=selection_valid)
         if self.debug:
             logger.debug("Converting in mode: %s", mode)
         if mode == "retype":

@@ -32,11 +32,6 @@ class StateContext:
     backspace_repeats: int = 0
     backspace_hold_active: bool = False
 
-    # X11 selection state
-    selection_owner_id: int = 0
-    selection_text: str = ""
-    selection_timestamp: float = 0.0
-
     # Layout
     current_layout: str = "en"
 
