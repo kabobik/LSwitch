@@ -198,6 +198,15 @@ class DebugMonitorWindow(QWidget):
         self._sel_changed_label.setFont(mono_font)
         selection_layout.addWidget(self._sel_changed_label)
 
+        self._prev_sel_text_label = QLabel("Prev text: (none)")
+        self._prev_sel_text_label.setFont(mono_font)
+        self._prev_sel_text_label.setWordWrap(True)
+        selection_layout.addWidget(self._prev_sel_text_label)
+
+        self._prev_sel_owner_label = QLabel("Prev owner: -")
+        self._prev_sel_owner_label.setFont(mono_font)
+        selection_layout.addWidget(self._prev_sel_owner_label)
+
         splitter.addWidget(selection_group)
 
         # -- Section 6: Event Log --
@@ -377,6 +386,16 @@ class DebugMonitorWindow(QWidget):
         )
         self._sel_valid_label.setText(
             f"Selection valid: {'yes' if getattr(self._app, '_selection_valid', False) else 'no'}"
+        )
+
+        # Section 5: _prev_sel baseline
+        prev_text = getattr(self._app, '_prev_sel_text', '')
+        prev_owner = getattr(self._app, '_prev_sel_owner_id', 0)
+        self._prev_sel_text_label.setText(
+            f"Prev text: {prev_text!r}" if prev_text else "Prev text: (empty)"
+        )
+        self._prev_sel_owner_label.setText(
+            f"Prev owner: {f'0x{prev_owner:08x}' if prev_owner else '-'}"
         )
 
         # Section 2: Event Buffer

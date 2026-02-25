@@ -205,6 +205,64 @@ class TestSelectionValidOnEvents:
 
         assert app._selection_valid is False
 
+    def test_mouse_click_snapshots_primary_into_prev(self):
+        """Mouse click must update _prev_sel_text/_prev_sel_owner_id so that
+        stale PRIMARY from another window is not treated as 'new' on next
+        Shift+Shift."""
+        app = _make_app()
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="hello", owner_id=42, timestamp=time.time(),
+        )
+
+        app._on_mouse_click(_mouse_event())
+
+        assert app._prev_sel_text == "hello"
+        assert app._prev_sel_owner_id == 42
+        assert app._selection_valid is False
+
+    def test_stale_primary_not_converted_after_click_in_other_window(self):
+        """Regression: select text in window A, click in window B, Shift+Shift
+        must NOT trigger selection conversion (bug: _prev_sel_text was '' so
+        _check_selection_changed() saw it as 'new')."""
+        app = _make_app()
+
+        # PRIMARY has text from window A
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="hello", owner_id=99, timestamp=time.time(),
+        )
+
+        # User clicks in window B — snapshots PRIMARY as baseline
+        app._on_mouse_click(_mouse_event())
+        assert app._prev_sel_text == "hello"
+
+        # No new selection activity — PRIMARY unchanged
+        result = app._check_selection_changed()
+
+        assert result is False
+        assert app._selection_valid is False
+
+    def test_new_selection_after_click_is_still_valid(self):
+        """If user drags to select NEW text after the snapshot, it should be
+        treated as valid (text differs from baseline)."""
+        app = _make_app()
+
+        # At click time PRIMARY has old content
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="old", owner_id=1, timestamp=time.time(),
+        )
+        app._on_mouse_click(_mouse_event())
+        assert app._prev_sel_text == "old"
+
+        # User drags → PRIMARY updated with new selection
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="new selection", owner_id=1, timestamp=time.time(),
+        )
+
+        result = app._check_selection_changed()
+
+        assert result is True
+        assert app._selection_valid is True
+
     def test_selection_valid_false_after_navigation(self):
         app = _make_app()
         app._selection_valid = True
@@ -254,6 +312,31 @@ class TestSelectionValidOnEvents:
         app._on_key_press(_key_event(KEY_LEFTSHIFT))
 
         assert app._selection_valid is True
+
+    def test_modifier_keys_not_added_to_buffer(self):
+        """Alt, Ctrl, Meta and other modifiers must not enter the event buffer."""
+        KEY_LEFTALT = 56
+        KEY_LEFTCTRL = 29
+        KEY_LEFTMETA = 125
+        KEY_F5 = 63
+        KEY_DELETE = 111
+
+        for code in (KEY_LEFTALT, KEY_LEFTCTRL, KEY_LEFTMETA, KEY_F5, KEY_DELETE):
+            app = _make_app()
+            app._on_key_press(_key_event(code))
+            assert app.state_manager.context.chars_in_buffer == 0, \
+                f"key code {code} should not be buffered"
+            assert len(app.state_manager.context.event_buffer) == 0, \
+                f"key code {code} should not appear in event_buffer"
+
+    def test_regular_key_still_buffered(self):
+        """Sanity check: regular letter keys ARE still added to the buffer."""
+        app = _make_app()
+
+        app._on_key_press(_key_event(KEY_Q))
+
+        assert app.state_manager.context.chars_in_buffer == 1
+        assert len(app.state_manager.context.event_buffer) == 1
 
 
 class TestDoConversionUsesSelectionValid:
@@ -359,3 +442,156 @@ class TestDoConversionUsesSelectionValid:
 
         assert len(convert_calls) == 1
         assert convert_calls[0] is False
+
+
+class TestStickyRetypeBuffer:
+    """Test sticky buffer: repeat Shift+Shift toggles retype conversion."""
+
+    def test_sticky_buffer_saved_after_retype(self):
+        """After successful retype, _last_retype_events is populated."""
+        app = _make_app()
+
+        # Fill buffer with "hello" keycodes
+        ctx = app.state_manager.context
+        for code in [35, 18, 38, 38, 24]:
+            ev = MagicMock()
+            ev.code = code
+            ev.shifted = False
+            ctx.event_buffer.append(ev)
+        ctx.chars_in_buffer = 5
+
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager._state = State.CONVERTING
+
+        def mock_convert(context, selection_valid=False):
+            return True
+
+        app.conversion_engine.convert = mock_convert
+        app._do_conversion()
+
+        assert len(app._last_retype_events) == 5
+        assert [e.code for e in app._last_retype_events] == [35, 18, 38, 38, 24]
+
+    def test_sticky_buffer_restores_on_empty_buffer(self):
+        """When buffer is empty but sticky has events, they are restored."""
+        app = _make_app()
+
+        # Simulate saved sticky buffer from previous conversion
+        saved = []
+        for code in [35, 18, 38, 38, 24]:
+            ev = MagicMock()
+            ev.code = code
+            ev.shifted = False
+            saved.append(ev)
+        app._last_retype_events = saved
+
+        # Buffer is empty (reset by previous conversion)
+        ctx = app.state_manager.context
+        ctx.chars_in_buffer = 0
+        ctx.event_buffer = []
+
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager._state = State.CONVERTING
+
+        convert_calls = []
+
+        def mock_convert(context, selection_valid=False):
+            # At this point context should have restored events
+            convert_calls.append(context.chars_in_buffer)
+            return True
+
+        app.conversion_engine.convert = mock_convert
+        app._do_conversion()
+
+        # convert should have been called with 5 chars
+        assert len(convert_calls) == 1
+        assert convert_calls[0] == 5
+        # sticky buffer should still be populated for next repeat
+        assert len(app._last_retype_events) == 5
+
+    def test_sticky_cleared_on_regular_key(self):
+        app = _make_app()
+        app._last_retype_events = [MagicMock()]
+
+        app._on_key_press(_key_event(KEY_Q))
+
+        assert app._last_retype_events == []
+
+    def test_sticky_cleared_on_space(self):
+        app = _make_app()
+        app._last_retype_events = [MagicMock()]
+
+        app._on_key_press(_key_event(KEY_SPACE))
+
+        assert app._last_retype_events == []
+
+    def test_sticky_cleared_on_backspace(self):
+        app = _make_app()
+        app._last_retype_events = [MagicMock()]
+
+        app._on_key_press(_key_event(KEY_BACKSPACE))
+
+        assert app._last_retype_events == []
+
+    def test_sticky_cleared_on_navigation(self):
+        app = _make_app()
+        app._last_retype_events = [MagicMock()]
+
+        app._on_key_release(_key_release_event(KEY_LEFT))
+
+        assert app._last_retype_events == []
+
+    def test_sticky_cleared_on_enter(self):
+        app = _make_app()
+        app._last_retype_events = [MagicMock()]
+
+        app._on_key_release(_key_release_event(KEY_ENTER))
+
+        assert app._last_retype_events == []
+
+    def test_sticky_cleared_on_mouse_click(self):
+        app = _make_app()
+        app._last_retype_events = [MagicMock()]
+
+        app._on_mouse_click(_mouse_event())
+
+        assert app._last_retype_events == []
+
+    def test_sticky_preserved_on_shift(self):
+        """Shift must NOT clear sticky buffer — it's needed for Shift+Shift."""
+        app = _make_app()
+        app._last_retype_events = [MagicMock()]
+
+        app._on_key_press(_key_event(KEY_LEFTSHIFT))
+
+        assert len(app._last_retype_events) == 1
+
+    def test_sticky_preserved_on_modifier(self):
+        """Modifier keys (Alt etc) must NOT clear sticky buffer."""
+        KEY_LEFTALT = 56
+        app = _make_app()
+        app._last_retype_events = [MagicMock()]
+
+        app._on_key_press(_key_event(KEY_LEFTALT))
+
+        assert len(app._last_retype_events) == 1
+
+    def test_sticky_not_saved_for_selection_mode(self):
+        """Selection conversion should NOT populate sticky buffer."""
+        app = _make_app()
+        app._selection_valid = True
+
+        ctx = app.state_manager.context
+        ctx.chars_in_buffer = 0
+        ctx.event_buffer = []
+
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager._state = State.CONVERTING
+
+        def mock_convert(context, selection_valid=False):
+            return True
+
+        app.conversion_engine.convert = mock_convert
+        app._do_conversion()
+
+        assert app._last_retype_events == []

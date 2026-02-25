@@ -369,8 +369,9 @@ class TestR07ContextResetAfterConversion:
             "event_buffer not cleared after conversion"
         )
 
-    def test_second_double_shift_after_conversion_does_not_replay_old_buffer(self, tmp_path):
-        """After one conversion, a second double-Shift must not replay the old events."""
+    def test_second_double_shift_replays_sticky_buffer(self, tmp_path):
+        """After one conversion, a second double-Shift replays the same events
+        (sticky buffer) so the user can toggle back and forth."""
         app = _make_app(tmp_path)
         app._wire_event_bus()
 
@@ -378,15 +379,29 @@ class TestR07ContextResetAfterConversion:
         _double_shift(app)  # first conversion
 
         assert app.state_manager.state == State.IDLE
-        app.virtual_kb.reset_mock()  # reset call records
+        # Sticky buffer should be populated
+        assert len(app._last_retype_events) == 6
 
-        # Second double-Shift without new typing — buffer should be empty
+        app.virtual_kb.reset_mock()
+
+        # Second double-Shift — should replay from sticky buffer
         _double_shift(app)
 
-        # replay_events must NOT have been called with 6 events again
-        if app.virtual_kb.replay_events.called:
-            for c in app.virtual_kb.replay_events.call_args_list:
-                events = c[0][0]
-                assert len(events) == 0, (
-                    f"Old buffer events were replayed again: {[getattr(e,'code',None) for e in events]}"
-                )
+        assert app.virtual_kb.replay_events.called
+        events = app.virtual_kb.replay_events.call_args[0][0]
+        assert len(events) == 6, (
+            f"Sticky buffer should have replayed 6 events, got {len(events)}"
+        )
+
+    def test_sticky_buffer_cleared_by_new_typing(self, tmp_path):
+        """Typing new characters clears sticky buffer — prevents old replay."""
+        app = _make_app(tmp_path)
+        app._wire_event_bus()
+
+        _type_keys(app, GHBDTN)
+        _double_shift(app)
+        assert len(app._last_retype_events) == 6
+
+        # Type new characters → sticky buffer must be cleared
+        _type_keys(app, [16])  # 'q'
+        assert app._last_retype_events == []

@@ -39,14 +39,21 @@ class ConversionEngine:
         self.debug = debug
 
     def choose_mode(self, context: "StateContext", selection_valid: bool = False) -> str:
-        """Return 'selection' or 'retype' based on current state."""
+        """Return 'selection' or 'retype' based on current state.
+
+        Priority:
+          1. backspace_hold_active → selection (explicit hold gesture)
+          2. chars_in_buffer > 0  → retype   (user typed something — always wins)
+          3. selection_valid       → selection (empty buffer, deliberate selection)
+          4. fallback              → retype   (RetypeMode will skip gracefully)
+        """
         if context.backspace_hold_active:
-            return "selection"
-        if selection_valid:
             return "selection"
         if context.chars_in_buffer > 0:
             return "retype"
-        return "selection"
+        if selection_valid:
+            return "selection"
+        return "retype"
 
     def convert(self, context: "StateContext", selection_valid: bool = False) -> bool:
         """Perform conversion. Returns True on success."""

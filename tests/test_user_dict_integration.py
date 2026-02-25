@@ -162,7 +162,8 @@ class TestDoubleShiftAfterAutoCallsCorrection:
         # Marker cleared
         assert app._last_auto_marker is None
 
-    def test_no_correction_when_timeout_expired(self):
+    def test_correction_fires_after_long_delay(self):
+        """Marker fires even if user returns after a long time (no TTL)."""
         app = _make_app(auto_switch=True)
         ud = _make_user_dict_in_memory()
         app.user_dict = ud
@@ -172,15 +173,15 @@ class TestDoubleShiftAfterAutoCallsCorrection:
         _fill_buffer(app, WORD_GHBDTN)
         app._on_key_press(_event(KEY_SPACE))
 
-        # Expire the marker
-        app._last_auto_marker['time'] -= 10.0
+        # Simulate user returning after a very long time
+        app._last_auto_marker['time'] -= 3600.0
 
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
         app._do_conversion()
 
-        # No correction — timeout expired
-        assert ud.get_weight('ghbdtn', 'en') == 0
+        # Correction must still fire — no timeout
+        assert ud.get_weight('ghbdtn', 'en') == -1
         assert app._last_auto_marker is None
 
     def test_no_correction_when_no_user_dict(self):

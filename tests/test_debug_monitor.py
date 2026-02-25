@@ -179,6 +179,9 @@ def mock_app():
     app.state_manager.context.backspace_hold_active = False
     app.state_manager.context.backspace_repeats = 0
     app._last_auto_marker = None
+    app._selection_valid = False
+    app._prev_sel_text = ""
+    app._prev_sel_owner_id = 0
     app._extract_last_word_events = Mock(return_value=("", []))
     app.xkb = None
     return app
@@ -215,6 +218,8 @@ class DebugMonitorWindowMock:
         self._sel_text_label = MockQLabel("Text: (none)")
         self._sel_owner_label = MockQLabel("Owner ID: -")
         self._sel_changed_label = MockQLabel("Last changed: -")
+        self._prev_sel_text_label = MockQLabel("Prev text: (empty)")
+        self._prev_sel_owner_label = MockQLabel("Prev owner: -")
         self._log_text = MockQTextEdit()
         self._age_timer = MockQTimer()
         
@@ -294,6 +299,14 @@ class DebugMonitorWindowMock:
         self._backspace_label.setText(
             f"Backspace hold: {'yes' if ctx.backspace_hold_active else 'no'} "
             f"(repeats: {ctx.backspace_repeats})"
+        )
+        prev_text = getattr(self._app, '_prev_sel_text', '')
+        prev_owner = getattr(self._app, '_prev_sel_owner_id', 0)
+        self._prev_sel_text_label.setText(
+            f"Prev text: {prev_text!r}" if prev_text else "Prev text: (empty)"
+        )
+        self._prev_sel_owner_label.setText(
+            f"Prev owner: {f'0x{prev_owner:08x}' if prev_owner else '-'}"
         )
         self._refresh_buffer_table(ctx.event_buffer)
         self._refresh_last_word()
@@ -442,6 +455,48 @@ class TestStateRefresh:
         
         assert "5" in window._chars_label.text()
         
+        window.cleanup()
+
+    def test_prev_sel_text_empty(self, mock_app, event_bus):
+        mock_app._prev_sel_text = ""
+        window = DebugMonitorWindowMock(app=mock_app, event_bus=event_bus)
+
+        assert "empty" in window._prev_sel_text_label.text()
+
+        window.cleanup()
+
+    def test_prev_sel_text_with_value(self, mock_app, event_bus):
+        mock_app._prev_sel_text = "hello"
+        mock_app._prev_sel_owner_id = 0x04a00003
+        window = DebugMonitorWindowMock(app=mock_app, event_bus=event_bus)
+
+        assert "hello" in window._prev_sel_text_label.text()
+        assert "0x04a00003" in window._prev_sel_owner_label.text()
+
+        window.cleanup()
+
+    def test_prev_sel_owner_zero_shows_dash(self, mock_app, event_bus):
+        mock_app._prev_sel_owner_id = 0
+        window = DebugMonitorWindowMock(app=mock_app, event_bus=event_bus)
+
+        assert "Prev owner: -" in window._prev_sel_owner_label.text()
+
+        window.cleanup()
+
+    def test_prev_sel_updates_on_refresh(self, mock_app, event_bus):
+        mock_app._prev_sel_text = ""
+        mock_app._prev_sel_owner_id = 0
+        window = DebugMonitorWindowMock(app=mock_app, event_bus=event_bus)
+
+        assert "empty" in window._prev_sel_text_label.text()
+
+        mock_app._prev_sel_text = "world"
+        mock_app._prev_sel_owner_id = 0x00000007
+        window._refresh_state()
+
+        assert "world" in window._prev_sel_text_label.text()
+        assert "0x00000007" in window._prev_sel_owner_label.text()
+
         window.cleanup()
 
 

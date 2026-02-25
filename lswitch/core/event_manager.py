@@ -22,6 +22,18 @@ KEY_ENTER = 28
 NAVIGATION_KEYS = {103, 108, 105, 106, 102, 107, 104, 109, 15}  # arrows, home, end, pgup, pgdn, tab
 MOUSE_BUTTONS = {272, 273, 274}  # BTN_LEFT, BTN_RIGHT, BTN_MIDDLE
 
+# Modifier and control keys that must never enter the event buffer
+MODIFIER_KEYS = {
+    29, 97,          # KEY_LEFTCTRL, KEY_RIGHTCTRL
+    56, 100,         # KEY_LEFTALT, KEY_RIGHTALT
+    125, 126,        # KEY_LEFTMETA, KEY_RIGHTMETA
+    58,              # KEY_CAPSLOCK
+    110, 111,        # KEY_INSERT, KEY_DELETE
+    99, 119,         # KEY_SYSRQ (PrintScreen), KEY_PAUSE
+    # F1-F12
+    59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 87, 88,
+}
+
 # EV_KEY type constant (used when evdev is not importable)
 EV_KEY = 1
 

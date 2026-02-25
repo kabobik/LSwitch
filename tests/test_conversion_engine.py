@@ -78,18 +78,31 @@ class TestChooseMode:
 
         assert engine.choose_mode(ctx, selection_valid=False) == "selection"
 
-    def test_selection_when_empty_buffer_and_no_selection(self):
+    def test_retype_when_empty_buffer_and_no_selection(self):
+        """Empty buffer + selection_valid=False → retype (will skip gracefully)."""
         engine, _, sel, _, _, _ = _make_engine()
         ctx = StateContext()
         ctx.chars_in_buffer = 0
 
-        assert engine.choose_mode(ctx, selection_valid=False) == "selection"
+        assert engine.choose_mode(ctx, selection_valid=False) == "retype"
 
-    def test_fresh_selection_takes_precedence_over_buffer(self):
-        """If both chars_in_buffer > 0 and fresh selection, prefer selection."""
+    def test_buffer_wins_over_selection_valid(self):
+        """If chars_in_buffer > 0, retype wins even when selection_valid=True.
+
+        User typed something → retype their actual input, don't grab stale
+        PRIMARY from another window.
+        """
         engine, _, sel, _, _, _ = _make_engine()
         ctx = StateContext()
         ctx.chars_in_buffer = 5
+
+        assert engine.choose_mode(ctx, selection_valid=True) == "retype"
+
+    def test_selection_valid_wins_when_buffer_empty(self):
+        """Empty buffer + selection_valid=True → selection mode."""
+        engine, _, sel, _, _, _ = _make_engine()
+        ctx = StateContext()
+        ctx.chars_in_buffer = 0
 
         assert engine.choose_mode(ctx, selection_valid=True) == "selection"
 

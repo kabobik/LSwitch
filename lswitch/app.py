@@ -64,6 +64,7 @@ class LSwitchApp:
         self._selection_valid: bool = False
         self._prev_sel_text: str = ""
         self._prev_sel_owner_id: int = 0
+        self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
 
     # ------------------------------------------------------------------
     # Platform initialisation (lazy — for testability)
@@ -159,7 +160,7 @@ class LSwitchApp:
     # ------------------------------------------------------------------
 
     def _on_key_press(self, event):
-        from lswitch.core.event_manager import SHIFT_KEYS, KEY_BACKSPACE, KEY_SPACE
+        from lswitch.core.event_manager import SHIFT_KEYS, KEY_BACKSPACE, KEY_SPACE, MODIFIER_KEYS
 
         data = event.data
         logger.trace(  # type: ignore[attr-defined]
@@ -170,6 +171,8 @@ class LSwitchApp:
         )
         if data.code in SHIFT_KEYS:
             self.state_manager.on_shift_down()
+        elif data.code in MODIFIER_KEYS:
+            pass  # modifiers don't produce text — ignore entirely
         elif data.code == KEY_BACKSPACE:
             # Backspace removes last event from buffer (don't append it)
             ctx = self.state_manager.context
@@ -177,6 +180,7 @@ class LSwitchApp:
                 ctx.event_buffer.pop()
             ctx.backspace_repeats = 0
             self._selection_valid = False
+            self._last_retype_events = []
         elif data.code == KEY_SPACE:
             # Word boundary — try auto-conversion if enabled
             if self.auto_detector and self.config.get('auto_switch'):
@@ -189,6 +193,7 @@ class LSwitchApp:
             self.state_manager.context.event_buffer.append(data)
             self.state_manager.context.backspace_repeats = 0
             self._selection_valid = False
+            self._last_retype_events = []
         else:
             self.state_manager.on_key_press(data.code)
             self.state_manager.context.chars_in_buffer += 1
@@ -196,6 +201,7 @@ class LSwitchApp:
             self.state_manager.context.event_buffer.append(data)
             self.state_manager.context.backspace_repeats = 0
             self._selection_valid = False
+            self._last_retype_events = []
 
     def _on_key_release(self, event):
         from lswitch.core.event_manager import (
@@ -210,10 +216,12 @@ class LSwitchApp:
         elif data.code in NAVIGATION_KEYS:
             self._last_auto_marker = None
             self._selection_valid = False
+            self._last_retype_events = []
             self.state_manager.on_navigation()
         elif data.code == KEY_ENTER:
             self._last_auto_marker = None
             self._selection_valid = False
+            self._last_retype_events = []
             self.state_manager.on_navigation()
         elif data.code == KEY_BACKSPACE:
             self.state_manager.context.backspace_repeats = 0
@@ -238,6 +246,16 @@ class LSwitchApp:
     def _on_mouse_click(self, event):
         self._last_auto_marker = None
         self._selection_valid = False
+        self._last_retype_events = []
+        # Snapshot current PRIMARY so _check_selection_changed() won't
+        # treat a selection made in another window as "new" on next Shift+Shift.
+        if self.selection is not None:
+            try:
+                info = self.selection.get_selection()
+                self._prev_sel_text = info.text
+                self._prev_sel_owner_id = info.owner_id
+            except Exception:
+                pass
         self.state_manager.on_mouse_click()
 
     # ------------------------------------------------------------------
@@ -280,7 +298,6 @@ class LSwitchApp:
              Weight accumulates across sessions; once |weight| >= min_weight
              AutoDetector will handle this word automatically.
         """
-        import time as _time
         from lswitch.core.states import State
 
         if self.state_manager.state != State.CONVERTING:
@@ -301,12 +318,7 @@ class LSwitchApp:
         # --- Case A: undo of recent auto-conversion → penalise ---
         if self._last_auto_marker is not None:
             marker = self._last_auto_marker
-            elapsed = _time.time() - marker['time']
-            timeout = (
-                self.user_dict.data.get('settings', {}).get('correction_timeout', 5.0)
-                if self.user_dict else 5.0
-            )
-            if self.user_dict and elapsed < timeout:
+            if self.user_dict:
                 self.user_dict.add_correction(
                     marker['word'], marker['lang'], debug=self.debug,
                 )
@@ -327,10 +339,28 @@ class LSwitchApp:
         try:
             # Check if PRIMARY selection changed (user selected something new)
             self._check_selection_changed()
-            self.conversion_engine.convert(
+
+            # Save buffer before convert (reset() will clear it)
+            saved_events = list(self.state_manager.context.event_buffer)
+            saved_count = self.state_manager.context.chars_in_buffer
+
+            # Restore sticky buffer if context buffer is empty (repeat Shift+Shift)
+            if saved_count == 0 and self._last_retype_events:
+                saved_events = list(self._last_retype_events)
+                saved_count = len(saved_events)
+                self.state_manager.context.event_buffer = list(saved_events)
+                self.state_manager.context.chars_in_buffer = saved_count
+
+            success = self.conversion_engine.convert(
                 self.state_manager.context,
                 selection_valid=self._selection_valid,
             )
+
+            # Remember events for potential repeat retype
+            if success and saved_count > 0 and not self._selection_valid:
+                self._last_retype_events = saved_events
+            else:
+                self._last_retype_events = []
         finally:
             self._selection_valid = False  # consumed
             self.state_manager.on_conversion_complete()
