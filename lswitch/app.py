@@ -18,6 +18,43 @@ from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.event_manager import EventManager
 
 
+class _SelectionLoggerThread(threading.Thread):
+    """Background daemon thread polling X11 PRIMARY selection every 500ms.
+
+    Logs changes at DEBUG level. Does NOT read PRIMARY at click time
+    (avoids the race condition). Only runs when debug=True.
+    """
+
+    def __init__(self, selection_adapter):
+        super().__init__(daemon=True, name="sel-logger")
+        self._selection = selection_adapter
+        self._running = True
+        self._prev_text: str = ""
+        self._prev_owner_id: int = 0
+
+    def run(self):
+        import time
+        _logger = logging.getLogger(__name__)
+        while self._running:
+            try:
+                info = self._selection.get_selection()
+                text_changed = info.text != self._prev_text
+                owner_changed = info.owner_id != self._prev_owner_id
+                if text_changed or owner_changed:
+                    self._prev_text = info.text
+                    self._prev_owner_id = info.owner_id
+                    _logger.debug(
+                        "PRIMARY changed: text=%r owner=0x%x",
+                        info.text[:80] if info.text else "", info.owner_id,
+                    )
+            except Exception as exc:
+                _logger.trace("sel-logger error: %s", exc)  # type: ignore[attr-defined]
+            time.sleep(0.5)
+
+    def stop(self):
+        self._running = False
+
+
 class LSwitchApp:
     """Single-process application combining input daemon and tray GUI.
 
@@ -66,6 +103,7 @@ class LSwitchApp:
         self._prev_sel_owner_id: int = 0
         self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
         self._mouse_clicked_since_last_check: bool = False
+        self._selection_logger: _SelectionLoggerThread | None = None
 
     # ------------------------------------------------------------------
     # Platform initialisation (lazy — for testability)
@@ -162,6 +200,7 @@ class LSwitchApp:
 
     def _on_key_press(self, event):
         from lswitch.core.event_manager import SHIFT_KEYS, KEY_BACKSPACE, KEY_SPACE, MODIFIER_KEYS
+        from lswitch.input.key_mapper import keycode_to_char
 
         data = event.data
         logger.trace(  # type: ignore[attr-defined]
@@ -179,6 +218,11 @@ class LSwitchApp:
             ctx = self.state_manager.context
             if ctx.event_buffer:
                 ctx.event_buffer.pop()
+            logger.trace(  # type: ignore[attr-defined]
+                "Buffer -[BS] → %r (%d chars)",
+                self._decode_buffer(),
+                self.state_manager.context.chars_in_buffer,
+            )
             ctx.backspace_repeats = 0
             self._selection_valid = False
             self._last_retype_events = []
@@ -192,6 +236,13 @@ class LSwitchApp:
             self.state_manager.context.chars_in_buffer += 1
             data.shifted = self.state_manager.context.shift_pressed
             self.state_manager.context.event_buffer.append(data)
+            logger.trace(  # type: ignore[attr-defined]
+                "Buffer +[%d:%s] → %r (%d chars)",
+                data.code,
+                keycode_to_char(data.code, shift=data.shifted) or '?',
+                self._decode_buffer(),
+                self.state_manager.context.chars_in_buffer,
+            )
             self.state_manager.context.backspace_repeats = 0
             self._selection_valid = False
             self._last_retype_events = []
@@ -200,6 +251,13 @@ class LSwitchApp:
             self.state_manager.context.chars_in_buffer += 1
             data.shifted = self.state_manager.context.shift_pressed
             self.state_manager.context.event_buffer.append(data)
+            logger.trace(  # type: ignore[attr-defined]
+                "Buffer +[%d:%s] → %r (%d chars)",
+                data.code,
+                keycode_to_char(data.code, shift=data.shifted) or '?',
+                self._decode_buffer(),
+                self.state_manager.context.chars_in_buffer,
+            )
             self.state_manager.context.backspace_repeats = 0
             self._selection_valid = False
             self._last_retype_events = []
@@ -246,6 +304,11 @@ class LSwitchApp:
             # Each auto-repeat removes one more char from the event buffer
             if ctx.event_buffer:
                 ctx.event_buffer.pop()
+            logger.trace(  # type: ignore[attr-defined]
+                "Buffer -[BS repeat] → %r (%d chars)",
+                self._decode_buffer(),
+                len(self.state_manager.context.event_buffer),
+            )
             if ctx.chars_in_buffer > 0:
                 ctx.chars_in_buffer -= 1
             if ctx.backspace_repeats >= 3:
@@ -261,11 +324,26 @@ class LSwitchApp:
         # Instead, mark that a click occurred so _check_selection_changed()
         # will update the baseline lazily on the next Shift+Shift.
         self._mouse_clicked_since_last_check = True
-        logger.debug(
+        logger.trace(  # type: ignore[attr-defined]
             "MouseClick: _mouse_clicked_since_last_check=True, "
             "reset sel_valid/sticky/auto_marker"
         )
         self.state_manager.on_mouse_click()
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _decode_buffer(self, events: list | None = None) -> str:
+        """Decode event buffer to human-readable string of characters."""
+        from lswitch.input.key_mapper import keycode_to_char
+        if events is None:
+            events = self.state_manager.context.event_buffer
+        chars = []
+        for e in events:
+            ch = keycode_to_char(e.code, shift=getattr(e, 'shifted', False))
+            chars.append(ch if ch else '?')
+        return "".join(chars)
 
     # ------------------------------------------------------------------
     # Selection validity tracking
@@ -305,13 +383,25 @@ class LSwitchApp:
                     )
                 return False
 
-            # After a mouse click, update baseline without marking fresh.
+            # After a mouse click, compare with OLD baseline before updating.
+            # If PRIMARY genuinely changed (e.g. drag-select), mark as fresh.
+            # If identical (stale PRIMARY from another window), just refresh baseline.
             if self._mouse_clicked_since_last_check:
                 self._mouse_clicked_since_last_check = False
+                owner_changed = info.owner_id != self._prev_sel_owner_id and info.owner_id != 0
+                text_changed = info.text != self._prev_sel_text
                 self._prev_sel_text = info.text
                 self._prev_sel_owner_id = info.owner_id
+                if owner_changed or text_changed:
+                    self._selection_valid = True
+                    logger.debug(
+                        "CheckSelection: post-click FRESH — "
+                        "owner_changed=%s text_changed=%s text=%r owner=0x%x",
+                        owner_changed, text_changed, info.text[:50], info.owner_id,
+                    )
+                    return True
                 logger.debug(
-                    "CheckSelection: mouse-click baseline refresh → "
+                    "CheckSelection: post-click baseline unchanged → "
                     "prev_text=%r, prev_owner=0x%x (NOT fresh)",
                     info.text[:50], info.owner_id,
                 )
@@ -409,9 +499,10 @@ class LSwitchApp:
 
             logger.debug(
                 "DoConversion: selection_valid=%s, chars_in_buffer=%d, "
-                "saved_events=%d, sticky=%d",
+                "saved_events=%d, sticky=%d, buffer=%r",
                 self._selection_valid, saved_count,
                 len(saved_events), len(self._last_retype_events),
+                self._decode_buffer(saved_events),
             )
 
             success = self.conversion_engine.convert(
@@ -452,11 +543,10 @@ class LSwitchApp:
         # Buffer warmup: don't activate until enough chars have been typed
         threshold = self.config.get('auto_switch_threshold', 0)
         if ctx.chars_in_buffer < threshold:
-            if self.debug:
-                logger.debug(
-                    "Auto-conv skipped: buf=%d < threshold=%d",
-                    ctx.chars_in_buffer, threshold,
-                )
+            logger.debug(
+                "Auto-conv skipped: buf=%d < threshold=%d",
+                ctx.chars_in_buffer, threshold,
+            )
             return False
 
         # Get current layout FIRST — needed for correct char extraction below
@@ -472,10 +562,15 @@ class LSwitchApp:
         # chars (б→, ю→. ж→; etc.) which would split the word mid-way.
         word, word_events = self._extract_last_word_events(current_layout_info)
 
+        logger.debug(
+            "AutoConv: extracted word=%r (%d chars), lang=%s, buf=%d",
+            word, len(word) if word else 0, current_lang,
+            ctx.chars_in_buffer,
+        )
+
         # Skip very short words
         if not word or len(word) < MIN_WORD_LEN:
-            if self.debug:
-                logger.debug("Auto-conv skipped: word %r too short (%d chars)", word, len(word) if word else 0)
+            logger.debug("Auto-conv skipped: word %r too short (%d chars)", word, len(word) if word else 0)
             return False
 
         # Ask AutoDetector
@@ -628,6 +723,10 @@ class LSwitchApp:
         self._init_platform()
         self._wire_event_bus()
 
+        if self.debug and self.selection:
+            self._selection_logger = _SelectionLoggerThread(self.selection)
+            self._selection_logger.start()
+
         count = self.device_manager.scan_devices()
 
         if self._udev_monitor:
@@ -718,6 +817,8 @@ class LSwitchApp:
     def stop(self):
         """Graceful shutdown — safe to call multiple times."""
         self._running = False
+        if self._selection_logger:
+            self._selection_logger.stop()
         if self._udev_monitor:
             try:
                 self._udev_monitor.stop()

@@ -155,11 +155,10 @@ class SelectionMode(BaseMode):
         )
         self.xkb.switch_layout(target=target_layout)  # None = cycle, which is ok as fallback
 
-        if self.debug:
-            logger.debug(
-                "SelectionMode: '%s' (%s) → '%s' (%s), switching to layout '%s'",
-                sel.text, source_lang,
-                converted, target_lang,
-                target_layout.name if target_layout else "next",
-            )
+        logger.debug(
+            "SelectionMode: '%s' (%s) → '%s' (%s), switching to layout '%s'",
+            sel.text[:50], source_lang,
+            converted[:50], target_lang,
+            target_layout.name if target_layout else "next",
+        )
         return True
