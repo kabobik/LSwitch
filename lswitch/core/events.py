@@ -16,6 +16,7 @@ class EventType(Enum):
     DOUBLE_SHIFT = auto()
     BACKSPACE_HOLD = auto()
     MOUSE_CLICK = auto()
+    MOUSE_RELEASE = auto()
     # Conversion lifecycle
     CONVERSION_START = auto()
     CONVERSION_COMPLETE = auto()

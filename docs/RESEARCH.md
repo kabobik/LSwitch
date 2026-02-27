@@ -374,7 +374,8 @@ class EventType(Enum):
     KEY_REPEAT          # Авто-повтор (зажатая клавиша)
     DOUBLE_SHIFT        # Двойной Shift (не используется для dispatch, обрабатывается в on_shift_up)
     BACKSPACE_HOLD      # Удержание Backspace
-    MOUSE_CLICK         # Клик мышью
+    MOUSE_CLICK         # Клик мышью (button press, value=1)
+    MOUSE_RELEASE       # Отпускание кнопки мыши (button release, value=0)
     CONVERSION_START    # Начало конвертации
     CONVERSION_COMPLETE # Конвертация завершена
     CONVERSION_CANCELLED # Конвертация отменена
@@ -390,7 +391,9 @@ class EventType(Enum):
 ```
 evdev event (type=EV_KEY) → EventManager.handle_raw_event()
     │
-    ├── code ∈ MOUSE_BUTTONS + value==1 → publish(MOUSE_CLICK)
+    ├── code ∈ MOUSE_BUTTONS:
+    │   ├── value==1 → publish(MOUSE_CLICK)
+    │   └── value==0 → publish(MOUSE_RELEASE)
     ├── value == 1 (press)              → publish(KEY_PRESS)
     ├── value == 0 (release)            → publish(KEY_RELEASE)
     └── value == 2 (repeat)             → publish(KEY_REPEAT)
@@ -399,10 +402,11 @@ evdev event (type=EV_KEY) → EventManager.handle_raw_event()
 #### 5.4. Подписки в app.py (`_wire_event_bus`)
 
 ```python
-EventType.KEY_PRESS   → _on_key_press
-EventType.KEY_RELEASE → _on_key_release
-EventType.KEY_REPEAT  → _on_key_repeat
-EventType.MOUSE_CLICK → _on_mouse_click
+EventType.KEY_PRESS     → _on_key_press
+EventType.KEY_RELEASE   → _on_key_release
+EventType.KEY_REPEAT    → _on_key_repeat
+EventType.MOUSE_CLICK   → _on_mouse_click
+EventType.MOUSE_RELEASE → _on_mouse_release
 ```
 
 #### 5.5. Цепочка обработки evdev события
@@ -410,11 +414,16 @@ EventType.MOUSE_CLICK → _on_mouse_click
 ```
 evdev device → DeviceManager.get_events() → (device, event)
     → EventManager.handle_raw_event(event, device.name)
-        → EventBus.publish(Event(KEY_PRESS/KEY_RELEASE/KEY_REPEAT/MOUSE_CLICK, data, ts))
-            → LSwitchApp._on_key_press / _on_key_release / _on_key_repeat / _on_mouse_click
+        → EventBus.publish(Event(KEY_PRESS/KEY_RELEASE/KEY_REPEAT/MOUSE_CLICK/MOUSE_RELEASE, data, ts))
+            → LSwitchApp._on_key_press / _on_key_release / _on_key_repeat / _on_mouse_click / _on_mouse_release
                 → StateManager transitions
                     → ConversionEngine.convert() (при CONVERTING)
                         → RetypeMode / SelectionMode
+
+Параллельно:
+_SelectionLoggerThread (polling 500ms):
+    → get_selection() → сравнение с предыдущим
+        → если изменилось → callback _on_poller_primary_changed → _selection_valid = True
 ```
 
 ---
@@ -504,96 +513,151 @@ should_convert("ghbdtn", "en"):
 
 ---
 
-### 7. Флаг `_selection_valid`
+### 7. Флаг `_selection_valid` (fresh)
 
 #### 7.1. Назначение
 
-Указывает, есть ли **свежее** выделение текста, которое можно использовать для SelectionMode.
+Указывает, есть ли **свежее** выделение текста, которое можно использовать для SelectionMode. Реализован как property с setter-логированием.
 
-#### 7.2. Установка в True
+#### 7.2. Установка в True (два источника)
 
-Единственное место:
+**1. `_on_mouse_release`** — при отпускании кнопки мыши:
 ```python
-# _check_selection_changed() в app.py
-if owner_changed or text_changed:
+# Читает PRIMARY (безопасно — GTK закончила обработку release)
+info = self.selection.get_selection()
+# Сравнивает с baseline (_prev_sel_text / _prev_sel_owner_id)
+if info.text and (info.text != old_text or owner changed):
     self._selection_valid = True
 ```
+Покрывает **быстрый drag-select** (< 500ms), который поллер не успевает поймать.
 
-`_check_selection_changed()` вызывается в `_do_conversion()` **перед** конвертацией.
+**2. `_on_poller_primary_changed`** — callback от `_SelectionLoggerThread` (каждые 500ms):
+```python
+self._selection_valid = True
+# НЕ обновляет baseline! Baseline трогает только mouse_release и _do_conversion.
+```
+Покрывает **клавиатурное выделение** (Shift+стрелки) и **медленный drag-select**.
 
 #### 7.3. Сброс в False
 
-Многие места:
-- `_on_key_press`: обычный символ, Backspace, Space
-- `_on_key_release`: navigation, Enter
-- `_on_mouse_click`: при любом клике мыши
-- `_do_conversion` (finally): после конвертации
+| Место | Когда |
+|-------|-------|
+| `_on_key_press` | Обычный символ, Backspace, Space |
+| `_on_key_release` | Navigation (стрелки, Home/End/PgUp/PgDn), Enter |
+| `_on_mouse_click` | Любой клик мыши (button press) |
+| `_do_conversion` finally | После конвертации (consumed) |
 
-**Смысл:** после клика мыши (сброс выделения) или набора нового текста, selection_valid сбрасывается. Свежее выделение определяется в момент Shift+Shift через `_check_selection_changed()`.
+**Ключевой инвариант:** клик мыши **всегда** сбрасывает fresh. Поэтому стale PRIMARY из другого окна не конвертируется: поллер ставит True → клик сбрасывает → Shift+Shift видит False.
 
-#### 7.4. Как используется
+#### 7.4. Baseline (`_prev_sel_text`, `_prev_sel_owner_id`)
+
+Baseline — запомненное состояние PRIMARY для сравнения. Обновляется **только** в двух местах:
+
+| Место | Когда |
+|-------|-------|
+| `_on_mouse_release` | Всегда (независимо от fresh) |
+| `_do_conversion` finally | После конвертации (чтобы следующий Shift+Shift не считал результат за новое выделение) |
+
+Поллер (`_on_poller_primary_changed`) **НЕ обновляет baseline** — это принципиально: иначе mouse_release не увидит разницу.
+
+#### 7.5. Как используется
 
 ```python
-# В _do_conversion:
-self._check_selection_changed()  # может установить _selection_valid = True
-
+# В _do_conversion (метод _check_selection_changed удалён):
 success = self.conversion_engine.convert(
     context, selection_valid=self._selection_valid
 )
 
 # choose_mode проверяет:
 if context.chars_in_buffer > 0:  return "retype"    # приоритет!
-if selection_valid:              return "selection"   
+if selection_valid:              return "selection"
+```
+
+#### 7.6. Property setter с логированием
+
+```python
+@_selection_valid.setter
+def _selection_valid(self, value: bool) -> None:
+    if value != self.__selection_valid:
+        logger.debug("fresh=%s → %s", self.__selection_valid, value)
+        self.__selection_valid = value
+    if logger.isEnabledFor(5):  # TRACE = 5 (guard от overhead extract_stack)
+        caller = traceback.extract_stack(limit=3)[-2]
+        logger.trace("fresh=%s (set by %s:%d)", self.__selection_valid, caller.name, caller.lineno)
 ```
 
 ---
 
-### 8. _on_mouse_click
+### 8. _on_mouse_click и _on_mouse_release
 
-#### 8.1. Полный код
+#### 8.1. `_on_mouse_click` (button press)
 
 ```python
 def _on_mouse_click(self, event):
     self._last_auto_marker = None       # сброс маркера авто-конвертации
     self._selection_valid = False        # сброс флага выделения
     self._last_retype_events = []       # сброс sticky buffer
-    # Snapshot current PRIMARY
-    if self.selection is not None:
-        try:
-            info = self.selection.get_selection()
-            self._prev_sel_text = info.text
-            self._prev_sel_owner_id = info.owner_id
-        except Exception:
-            pass
+    # НЕ читаем PRIMARY здесь! xclip -o отправляет XConvertSelection,
+    # что может заставить GTK-приложение сбросить PRIMARY (race condition).
+    # Baseline обновляется в _on_mouse_release.
     self.state_manager.on_mouse_click()  # state → IDLE, context.reset()
 ```
 
-#### 8.2. Что происходит
+**Ключевое изменение:** PRIMARY **НЕ читается** при клике. Это устраняет race condition с GTK/Cinnamon, когда `xclip -o` при клике сбрасывает PRIMARY.
 
-1. **Сброс маркеров** — авто-конвертация, selection_valid, sticky buffer
-2. **Снапшот PRIMARY** — запоминает текущее содержимое PRIMARY selection и owner_id
-3. **Сброс автомата** — state → IDLE, все буферы чистятся
+#### 8.2. `_on_mouse_release` (button release)
 
-#### 8.3. Зачем снапшот PRIMARY
+```python
+def _on_mouse_release(self, event):
+    if self.selection is None:
+        return
+    try:
+        info = self.selection.get_selection()    # безопасно — GTK закончила
+        old_text = self._prev_sel_text
+        old_owner = self._prev_sel_owner_id
+        # Всегда обновляем baseline
+        self._prev_sel_text = info.text or ""
+        self._prev_sel_owner_id = info.owner_id
+        # Если PRIMARY изменился → свежее выделение (drag-select)
+        if info.text and (info.text != old_text or
+                          (info.owner_id != old_owner and info.owner_id != 0)):
+            self._selection_valid = True
+    except Exception:
+        pass
+```
 
-Чтобы `_check_selection_changed()` при следующем Shift+Shift не считал старое выделение за "новое". Без снапшота: если PRIMARY содержит "hello" и пользователь кликает в другом окне, а потом сразу Shift+Shift — `_check_selection_changed` увидел бы "hello" из PRIMARY и попытался бы конвертировать.
+**Почему release безопасен:** к моменту отпускания кнопки GTK-приложение уже обработало событие и зафиксировало выделение в PRIMARY. Race condition не возникает.
 
-**Логика:** при клике запоминаем, что сейчас в PRIMARY. При Shift+Shift проверяем: изменилось ли PRIMARY с момента последнего клика? Если да → `_selection_valid = True`. Если нет → пользователь просто кликнул без нового выделения.
+#### 8.3. Цепочка click → release
+
+```
+Button press → _on_mouse_click:
+    fresh = False, sticky = [], auto_marker = None
+    State → IDLE
+
+Drag (пользователь тянет мышь, выделяя текст)
+
+Button release → _on_mouse_release:
+    Читает PRIMARY → сравнивает с baseline
+    Если текст изменился → fresh = True
+    Всегда обновляет baseline
+```
+
+#### 8.4. Сценарии
+
+| Сценарий | click | release | fresh |
+|----------|-------|---------|-------|
+| Простой клик (без drag) | False | PRIMARY не изменился → нет | False |
+| Drag-select | False | PRIMARY изменился → True | True |
+| Клик в другом окне | False | PRIMARY тот же → нет | False |
 
 ---
 
 ### 9. Практические примеры
 
-#### Пример 1: Пользователь набирает "руддщ", нажимает Shift+Shift
+#### Пример 1: Пользователь набирает "ghbdtn", нажимает Shift+Shift
 
-**Раскладка:** EN (пользователь забыл переключить)  
-**Физические нажатия:** r-u-l-l-o → `hello` в EN, но пользователь хотел RU  
-
-Нет, подожди. "Руддщ" — это **кириллица**. Значит, пользователь набрал на EN раскладке буквы `h-e-l-l-o` вместо переключения на RU, и получилось "руддщ"? Нет. 
-
-Давайте точнее: пользователь на **EN** раскладке набирает клавиши `h-e-l-l-o`, и в текстовом поле появляется `hello`. Он хотел `привет`. Он нажимает Shift+Shift.
-
-Или: пользователь на **EN** раскладке набирает клавиши, которые в RU дают "привет": `g-h-b-d-t-n` → в текстовом поле `ghbdtn`. Нажимает Shift+Shift.
+Пользователь на **EN** раскладке набирает клавиши, которые в RU дают "привет": `g-h-b-d-t-n` → в текстовом поле `ghbdtn`. Нажимает Shift+Shift.
 
 Пошаговый сценарий для "ghbdtn" → "привет":
 
@@ -615,7 +679,7 @@ def _on_mouse_click(self, event):
 **_do_conversion:**
 ```
 1. State == CONVERTING ✓
-2. _check_selection_changed() → нет нового выделения → _selection_valid = False
+2. selection_valid = False (не было drag-select или поллера)
 3. saved_events = [g,h,b,d,t,n], saved_count = 6
 4. _last_retype_events пуст → не восстанавливаем
 5. conversion_engine.convert(context, selection_valid=False)
@@ -642,21 +706,24 @@ def _on_mouse_click(self, event):
 
 ```
 Шаг  Событие                        Состояние
-1    Mouse drag (выделение)          Не отслеживается (нет click event при drag)
+1    Mouse click (button press)      IDLE, fresh=False
+2    Mouse drag (выделение)          Пользователь тянет мышь
                                      PRIMARY = "ghbdtn", owner изменился
-2    Shift press                     IDLE→SHIFT_PRESSED
+3    Mouse release (button release)  _on_mouse_release:
+                                     PRIMARY изменился → fresh=True
+                                     baseline обновлён
+4    Shift press                     IDLE→SHIFT_PRESSED
      (chars_in_buffer == 0, event_buffer пуст)
-3    Shift release                   last_shift_time = T₁
-4    Shift press                     (уже в SHIFT_PRESSED)
-5    Shift release                   delta < 0.3s → SHIFT_P→CONVERTING
+5    Shift release                   last_shift_time = T₁
+6    Shift press                     (уже в SHIFT_PRESSED)
+7    Shift release                   delta < 0.3s → SHIFT_P→CONVERTING
                                      → _do_conversion()
 ```
 
 **_do_conversion:**
 ```
 1. State == CONVERTING ✓
-2. _check_selection_changed() → PRIMARY = "ghbdtn", owner изменился
-   → _selection_valid = True
+2. selection_valid = True (установлено mouse_release)
 3. saved_count = 0, _last_retype_events пуст
 4. conversion_engine.convert(context, selection_valid=True)
 5. choose_mode: chars_in_buffer=0, selection_valid=True → "selection"
@@ -856,129 +923,85 @@ def _get_selection_owner_id() -> int:
 
 **Это race condition:** LSwitch вызывает `xclip -o` слишком рано после клика, когда приложение ещё обрабатывает событие снятия выделения.
 
-#### Дополнительные места чтения PRIMARY
+#### Места чтения PRIMARY (актуальные)
 
 | Метод | Файл | Когда |
 |-------|------|-------|
-| `_on_mouse_click` | app.py | Каждый клик мыши |
-| `_check_selection_changed` | app.py | При каждом Shift+Shift |
+| `_on_mouse_release` | app.py | Отпускание кнопки мыши (button release) |
+| `_SelectionLoggerThread.run` | app.py | Поллинг каждые 500ms (фоновый поток) |
+| `_do_conversion` finally | app.py | После конвертации (обновление baseline) |
 | `SelectionMode.execute` | modes.py | При конвертации выделения |
-| `has_fresh_selection` | selection_adapter.py | Не вызывается из основного кода |
+
+**Убрано:** `_on_mouse_click` больше НЕ читает PRIMARY (устранён race condition).
 
 ---
 
-### Решение
+### Реализованное решение
 
-#### Вариант 1 (рекомендуемый): Убрать чтение PRIMARY из `_on_mouse_click`
+Архитектура была переработана: PRIMARY больше **НЕ читается при клике мыши**. Вместо одного метода `_check_selection_changed()` теперь два независимых источника fresh-флага.
 
-Снапшот PRIMARY при клике **не является обязательным**. Его цель — предотвратить ложные срабатывания, когда старое выделение из другого окна считается "новым" при Shift+Shift.
+#### Архитектура: два источника + сброс
 
-**Альтернатива:** вместо снапшота текста, запоминать только **факт клика** как маркер "неактуальности". При Shift+Shift проверять PRIMARY и сравнивать **только owner_id**, а сам `_check_selection_changed` будет запрашивать PRIMARY только лениво, при необходимости.
-
-```python
-# app.py — изменённый _on_mouse_click
-def _on_mouse_click(self, event):
-    self._last_auto_marker = None
-    self._selection_valid = False
-    self._last_retype_events = []
-    # НЕ читаем PRIMARY здесь!
-    # Маркируем, что был клик — _check_selection_changed учтёт это.
-    self._mouse_clicked_since_last_check = True
-    self.state_manager.on_mouse_click()
+```
+┌─────────────────────────────────────────────────────────┐
+│               fresh = True (готово к SelectionMode)     │
+│                                                         │
+│  Источник 1: _on_mouse_release                          │
+│    → Читает PRIMARY при отпускании кнопки мыши          │
+│    → Сравнивает с baseline → если изменился → True       │
+│    → Всегда обновляет baseline                          │
+│    → Покрывает: drag-select (любая скорость)            │
+│                                                         │
+│  Источник 2: _on_poller_primary_changed (каждые 500ms)  │
+│    → Только ставит True, НЕ трогает baseline            │
+│    → Покрывает: Shift+стрелки, медленный drag-select    │
+├─────────────────────────────────────────────────────────┤
+│               fresh = False (сброс)                     │
+│                                                         │
+│  - _on_mouse_click (кнопка нажата)                      │
+│  - _on_key_press (символ, Backspace, Space)             │
+│  - _on_key_release (Navigation, Enter)                  │
+│  - _do_conversion finally (после конвертации)           │
+├─────────────────────────────────────────────────────────┤
+│               Baseline обновляется                      │
+│                                                         │
+│  - _on_mouse_release (всегда)                           │
+│  - _do_conversion finally (после конвертации)           │
+│  - Поллер НЕ обновляет baseline!                        │
+└─────────────────────────────────────────────────────────┘
 ```
 
-```python
-# app.py — изменённый _check_selection_changed
-def _check_selection_changed(self) -> bool:
-    if self.selection is None:
-        return False
-    try:
-        info = self.selection.get_selection()
-        if not info.text:
-            return False
+#### Что было удалено
 
-        # Если был клик — обновить baseline, но не считать "свежим"
-        if self._mouse_clicked_since_last_check:
-            self._mouse_clicked_since_last_check = False
-            self._prev_sel_text = info.text
-            self._prev_sel_owner_id = info.owner_id
-            # Не возвращаем True — клик не создаёт свежее выделение
-            return False
+- **`_check_selection_changed()`** — метод полностью удалён. Его роль разделена между `_on_mouse_release` и поллером.
+- **`_mouse_clicked_since_last_check`** — промежуточный флаг больше не нужен.
+- **Чтение PRIMARY в `_on_mouse_click`** — убрано (устраняет race condition с GTK).
 
-        owner_changed = info.owner_id != self._prev_sel_owner_id and info.owner_id != 0
-        text_changed = info.text != self._prev_sel_text
-        if owner_changed or text_changed:
-            self._prev_sel_text = info.text
-            self._prev_sel_owner_id = info.owner_id
-            self._selection_valid = True
-            return True
-    except Exception:
-        pass
-    return False
-```
+#### Что было добавлено
 
-**Плюсы:**
-- PRIMARY не читается при каждом клике мыши
-- Нет race condition с приложением-владельцем
-- `_check_selection_changed` вызывается только при Shift+Shift (редко)
-- Нативное поведение PRIMARY не ломается
+- **`MOUSE_RELEASE`** — новый EventType в events.py.
+- **`_on_mouse_release`** — обработчик, читает PRIMARY при отпускании кнопки.
+- **`_SelectionLoggerThread`** — фоновый daemon-поток, поллит PRIMARY каждые 500ms.
+- **Baseline update в `_do_conversion` finally** — предотвращает повторную конвертацию того же текста.
+- **Property setter для `_selection_valid`** — логирует изменения (DEBUG) и каждое присвоение (TRACE с guard'ом).
 
-**Минусы:**
-- Потенциально ложные срабатывания, если пользователь кликнет, а потом Shift+Shift — но это покрывается сравнением owner_id.
+#### Проверка сценариев
 
-#### Вариант 2: Добавить задержку перед чтением PRIMARY
+| Сценарий | Результат |
+|----------|-----------|
+| **Cross-window stale:** выделил в A → поллер True → кликнул в B → False → Shift+Shift | ✅ НЕ конвертирует (fresh=False) |
+| **Drag-select быстрый (<500ms):** клик → тянет → отпустил | ✅ mouse_release → fresh=True |
+| **Drag-select медленный (>500ms):** клик → тянет → поллер + release | ✅ fresh=True от обоих источников |
+| **Клавиатурное выделение (Shift+стрелки):** | ✅ поллер → fresh=True (с задержкой ≤500ms) |
+| **Простой клик (без drag):** | ✅ fresh=False (PRIMARY не изменился) |
+| **Повторный Shift+Shift (sticky retype):** | ✅ _last_retype_events восстанавливает буфер |
+| **Повторный Shift+Shift (selection):** | ✅ поллер видит изменение PRIMARY → fresh=True (задержка ≤500ms) |
 
-```python
-def _on_mouse_click(self, event):
-    self._last_auto_marker = None
-    self._selection_valid = False
-    self._last_retype_events = []
-    # Отложить снапшот PRIMARY (не читать сразу после клика)
-    self._pending_primary_snapshot = True
-    self.state_manager.on_mouse_click()
-```
+#### Почему поллер НЕ обновляет baseline
 
-И делать снапшот позже (при следующем key_press или с таймером). Но это добавляет сложность.
+Если бы поллер обновлял baseline, то к моменту `_on_mouse_release` baseline уже совпадал бы с PRIMARY → mouse_release не увидел бы разницу → быстрый drag-select (<500ms) не обнаруживался бы.
 
-#### Вариант 3: Не использовать xclip, считывать через Xlib напрямую
-
-Заменить `xclip -o -selection primary` на чтение через `python-xlib`:
-
-```python
-def get_selection_text_xlib(self) -> str:
-    """Чтение PRIMARY selection через Xlib без ConvertSelection."""
-    # Использовать XGetSelectionOwner для проверки, 
-    # но НЕ запрашивать ConvertSelection
-    pass
-```
-
-**Проблема:** чтение текста из PRIMARY **требует** ConvertSelection — нет другого способа в X11. Поэтому вариант 3 не избавляет от проблемы полностью.
-
-### Рекомендация
-
-**Вариант 1** — самый чистый и эффективный. Он устраняет корневую причину: ненужное чтение PRIMARY при **каждом** клике мыши.
-
-Дополнительно можно оптимизировать `_get_selection_owner_id()`: вместо открытия нового Display* при каждом вызове, использовать кэшированное соединение из XKBAdapter:
-
-```python
-# Вместо:
-def _get_selection_owner_id() -> int:
-    d = xdisplay.Display()  # НОВОЕ соединение
-    owner = d.get_selection_owner(Xatom.PRIMARY)
-    d.close()               # закрытие
-    return owner_id
-
-# Лучше — передавать Display* из X11XKBAdapter или создать один раз:
-class X11SelectionAdapter:
-    def __init__(self, ...):
-        self._xdisplay = xdisplay.Display()  # одно соединение на весь жизненный цикл
-
-    def _get_owner_id(self) -> int:
-        owner = self._xdisplay.get_selection_owner(Xatom.PRIMARY)
-        ...
-```
-
-Это устранит накладные расходы на открытие/закрытие X11 соединений.
+Без обновления baseline поллером, mouse_release всегда видит актуальную разницу между «до клика» и «после drag-select».
 
 ---
 
@@ -1028,8 +1051,14 @@ evdev-loop thread (daemon):
   ├── StateManager transitions
   └── ConversionEngine (retype/selection) — тоже в этом потоке
 
+_SelectionLoggerThread "sel-logger" (daemon):
+  ├── Polling get_selection() каждые 500ms
+  ├── Сравнивает text + owner_id с предыдущими значениями
+  ├── При изменении → callback _on_poller_primary_changed(text, owner_id)
+  └── НЕ обновляет app baseline (только свой внутренний _prev_text/_prev_owner_id)
+
 UdevMonitor thread (daemon):
   └── pyudev polling → on_added/on_removed callbacks
 ```
 
-**Важно:** все EventBus handlers работают в evdev-loop потоке. ConversionEngine (включая xdotool_key, xclip) тоже вызывается из этого потока.
+**Важно:** все EventBus handlers работают в evdev-loop потоке. ConversionEngine (включая xdotool_key, xclip) тоже вызывается из этого потока. `_on_poller_primary_changed` вызывается из sel-logger потока, но `_selection_valid` — простой bool (atomic в CPython GIL), поэтому thread-safe.

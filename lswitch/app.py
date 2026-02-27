@@ -21,16 +21,19 @@ from lswitch.core.event_manager import EventManager
 class _SelectionLoggerThread(threading.Thread):
     """Background daemon thread polling X11 PRIMARY selection every 500ms.
 
-    Logs changes at DEBUG level. Does NOT read PRIMARY at click time
-    (avoids the race condition). Only runs when debug=True.
+    Logs changes at DEBUG level, and notifies ``LSwitchApp`` via
+    ``on_primary_changed`` callback so the baseline is always up to date.
+    Does NOT read PRIMARY at click time (avoids the race condition).
+    Always runs when a selection adapter is available.
     """
 
-    def __init__(self, selection_adapter):
+    def __init__(self, selection_adapter, on_primary_changed=None):
         super().__init__(daemon=True, name="sel-logger")
         self._selection = selection_adapter
         self._running = True
         self._prev_text: str = ""
         self._prev_owner_id: int = 0
+        self._on_primary_changed = on_primary_changed  # callback(text, owner_id)
 
     def run(self):
         import time
@@ -47,6 +50,8 @@ class _SelectionLoggerThread(threading.Thread):
                         "PRIMARY changed: text=%r owner=0x%x",
                         info.text[:80] if info.text else "", info.owner_id,
                     )
+                    if self._on_primary_changed:
+                        self._on_primary_changed(info.text, info.owner_id)
             except Exception as exc:
                 _logger.trace("sel-logger error: %s", exc)  # type: ignore[attr-defined]
             time.sleep(0.5)
@@ -98,11 +103,10 @@ class LSwitchApp:
         self.auto_detector = None
         self.user_dict = None
         self._last_auto_marker = None
-        self._selection_valid: bool = False
+        self.__selection_valid: bool = False
         self._prev_sel_text: str = ""
         self._prev_sel_owner_id: int = 0
         self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
-        self._mouse_clicked_since_last_check: bool = False
         self._selection_logger: _SelectionLoggerThread | None = None
 
     # ------------------------------------------------------------------
@@ -193,10 +197,32 @@ class LSwitchApp:
         self.event_bus.subscribe(EventType.KEY_RELEASE, self._on_key_release)
         self.event_bus.subscribe(EventType.KEY_REPEAT, self._on_key_repeat)
         self.event_bus.subscribe(EventType.MOUSE_CLICK, self._on_mouse_click)
+        self.event_bus.subscribe(EventType.MOUSE_RELEASE, self._on_mouse_release)
 
     # ------------------------------------------------------------------
     # Event callbacks
     # ------------------------------------------------------------------
+
+    @property
+    def _selection_valid(self) -> bool:
+        return self.__selection_valid
+
+    @_selection_valid.setter
+    def _selection_valid(self, value: bool) -> None:
+        if value != self.__selection_valid:
+            logger.debug(
+                "fresh=%s → %s",
+                self.__selection_valid, value,
+            )
+            self.__selection_valid = value
+        # Log at TRACE every assignment and its source (guarded to avoid extract_stack overhead)
+        if logger.isEnabledFor(5):  # TRACE = 5
+            import traceback as _tb
+            caller = _tb.extract_stack(limit=3)[-2]
+            logger.trace(  # type: ignore[attr-defined]
+                "fresh=%s (set by %s:%d)",
+                self.__selection_valid, caller.name, caller.lineno,
+            )
 
     def _on_key_press(self, event):
         from lswitch.core.event_manager import SHIFT_KEYS, KEY_BACKSPACE, KEY_SPACE, MODIFIER_KEYS
@@ -273,10 +299,9 @@ class LSwitchApp:
             if is_double:
                 logger.debug(
                     "DoubleShift detected → _do_conversion() "
-                    "[sel_valid=%s, chars=%d, mouse_clicked=%s]",
+                    "[sel_valid=%s, chars=%d]",
                     self._selection_valid,
                     self.state_manager.context.chars_in_buffer,
-                    self._mouse_clicked_since_last_check,
                 )
                 self._do_conversion()
         elif data.code in NAVIGATION_KEYS:
@@ -321,14 +346,48 @@ class LSwitchApp:
         # Do NOT read PRIMARY here — xclip -o sends XConvertSelection which
         # can cause the selection owner to drop PRIMARY when the click has
         # just deselected text (race condition on Cinnamon/GTK apps).
-        # Instead, mark that a click occurred so _check_selection_changed()
-        # will update the baseline lazily on the next Shift+Shift.
-        self._mouse_clicked_since_last_check = True
+        # Baseline will be updated by _on_mouse_release instead.
         logger.trace(  # type: ignore[attr-defined]
-            "MouseClick: _mouse_clicked_since_last_check=True, "
-            "reset sel_valid/sticky/auto_marker"
+            "MouseClick: reset sel_valid/sticky/auto_marker"
         )
         self.state_manager.on_mouse_click()
+
+    def _on_mouse_release(self, event):
+        """Mouse button release — potential end of drag-select.
+
+        Read PRIMARY and compare with baseline.  If content changed,
+        a drag-select just happened — mark selection as fresh.
+        Always update baseline so the next click/release cycle has
+        an accurate reference.
+
+        Reading PRIMARY at release time is safe — the GTK application
+        has already finished processing the button-release event and
+        committed the selection to PRIMARY.
+        """
+        if self.selection is None:
+            return
+        try:
+            info = self.selection.get_selection()
+            old_text = self._prev_sel_text
+            old_owner = self._prev_sel_owner_id
+            # Always update baseline on release
+            self._prev_sel_text = info.text or ""
+            self._prev_sel_owner_id = info.owner_id
+            # If PRIMARY changed → fresh selection (drag-select happened)
+            if info.text and (info.text != old_text or
+                              (info.owner_id != old_owner and info.owner_id != 0)):
+                self._selection_valid = True
+                logger.debug(
+                    "MouseRelease: fresh selection — text=%r owner=0x%x",
+                    info.text[:50] if info.text else "", info.owner_id,
+                )
+            else:
+                logger.trace(  # type: ignore[attr-defined]
+                    "MouseRelease: PRIMARY unchanged — text=%r",
+                    info.text[:50] if info.text else "",
+                )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Helpers
@@ -349,79 +408,18 @@ class LSwitchApp:
     # Selection validity tracking
     # ------------------------------------------------------------------
 
-    def _check_selection_changed(self) -> bool:
-        """Check if PRIMARY selection content changed and update _selection_valid.
+    def _on_poller_primary_changed(self, text: str, owner_id: int) -> None:
+        """Called by _SelectionLoggerThread when PRIMARY changes.
 
-        When ``_mouse_clicked_since_last_check`` is set, the baseline is
-        refreshed but the selection is NOT marked as fresh.  This avoids the
-        race condition caused by reading PRIMARY immediately after a click
-        (which can cause the owner to drop the selection), while still
-        preventing stale PRIMARY content from being treated as "new".
+        Sets fresh=True so the next Shift+Shift will use SelectionMode.
+        Does NOT update baseline (_prev_sel_text / _prev_sel_owner_id) —
+        baseline is maintained by _on_mouse_release and _do_conversion.
         """
-        if self.selection is None:
-            return False
-        try:
-            info = self.selection.get_selection()
-            logger.debug(
-                "CheckSelection: PRIMARY text=%r owner=0x%x | "
-                "baseline text=%r owner=0x%x",
-                info.text[:80] if info.text else "",
-                info.owner_id,
-                self._prev_sel_text[:80] if self._prev_sel_text else "",
-                self._prev_sel_owner_id,
-            )
-            if not info.text:
-                # If mouse was clicked and PRIMARY is now empty, just
-                # update the baseline and clear the flag.
-                if self._mouse_clicked_since_last_check:
-                    self._mouse_clicked_since_last_check = False
-                    self._prev_sel_text = ""
-                    self._prev_sel_owner_id = info.owner_id
-                    logger.debug(
-                        "CheckSelection: mouse-click baseline refresh (empty PRIMARY), "
-                        "owner_id=%d", info.owner_id,
-                    )
-                return False
-
-            # After a mouse click, compare with OLD baseline before updating.
-            # If PRIMARY genuinely changed (e.g. drag-select), mark as fresh.
-            # If identical (stale PRIMARY from another window), just refresh baseline.
-            if self._mouse_clicked_since_last_check:
-                self._mouse_clicked_since_last_check = False
-                owner_changed = info.owner_id != self._prev_sel_owner_id and info.owner_id != 0
-                text_changed = info.text != self._prev_sel_text
-                self._prev_sel_text = info.text
-                self._prev_sel_owner_id = info.owner_id
-                if owner_changed or text_changed:
-                    self._selection_valid = True
-                    logger.debug(
-                        "CheckSelection: post-click FRESH — "
-                        "owner_changed=%s text_changed=%s text=%r owner=0x%x",
-                        owner_changed, text_changed, info.text[:50], info.owner_id,
-                    )
-                    return True
-                logger.debug(
-                    "CheckSelection: post-click baseline unchanged → "
-                    "prev_text=%r, prev_owner=0x%x (NOT fresh)",
-                    info.text[:50], info.owner_id,
-                )
-                return False
-
-            owner_changed = info.owner_id != self._prev_sel_owner_id and info.owner_id != 0
-            text_changed = info.text != self._prev_sel_text
-            if owner_changed or text_changed:
-                self._prev_sel_text = info.text
-                self._prev_sel_owner_id = info.owner_id
-                self._selection_valid = True
-                logger.debug(
-                    "CheckSelection: FRESH — owner_changed=%s text_changed=%s "
-                    "text=%r owner=0x%x",
-                    owner_changed, text_changed, info.text[:50], info.owner_id,
-                )
-                return True
-        except Exception:
-            pass
-        return False
+        self._selection_valid = True
+        logger.debug(
+            "Poller: PRIMARY changed, fresh=True — text=%r owner=0x%x",
+            text[:50] if text else "", owner_id,
+        )
 
     # ------------------------------------------------------------------
     # Conversion
@@ -479,9 +477,6 @@ class LSwitchApp:
             )
 
         try:
-            # Check if PRIMARY selection changed (user selected something new)
-            self._check_selection_changed()
-
             # Save buffer before convert (reset() will clear it)
             saved_events = list(self.state_manager.context.event_buffer)
             saved_count = self.state_manager.context.chars_in_buffer
@@ -516,6 +511,14 @@ class LSwitchApp:
             else:
                 self._last_retype_events = []
         finally:
+            # Update baseline to prevent re-conversion of same text
+            if self.selection is not None:
+                try:
+                    info = self.selection.get_selection()
+                    self._prev_sel_text = info.text or ""
+                    self._prev_sel_owner_id = info.owner_id
+                except Exception:
+                    pass
             self._selection_valid = False  # consumed
             self.state_manager.on_conversion_complete()
 
@@ -723,8 +726,11 @@ class LSwitchApp:
         self._init_platform()
         self._wire_event_bus()
 
-        if self.debug and self.selection:
-            self._selection_logger = _SelectionLoggerThread(self.selection)
+        if self.selection:
+            self._selection_logger = _SelectionLoggerThread(
+                self.selection,
+                on_primary_changed=self._on_poller_primary_changed,
+            )
             self._selection_logger.start()
 
         count = self.device_manager.scan_devices()

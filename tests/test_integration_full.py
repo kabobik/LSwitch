@@ -176,6 +176,7 @@ class TestSelectionModeE2E:
 
         # Set up a selection for selection mode
         app.selection.set_selection("ghbdtn")
+        app._selection_valid = True  # as if poller/mouse_release detected it
 
         # Double Shift
         app.event_manager.handle_raw_event(_press(KEY_LSHIFT), "test_kb")

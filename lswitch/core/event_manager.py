@@ -67,10 +67,12 @@ class EventManager:
             val_name = {0: 'release', 1: 'press', 2: 'repeat'}.get(value, str(value))
             logger.trace("RawEvent: dev=%s code=%d (%s)", device_name, code, val_name)  # type: ignore[attr-defined]
 
-        # Mouse button → MOUSE_CLICK on press
+        # Mouse button → MOUSE_CLICK on press, MOUSE_RELEASE on release
         if code in MOUSE_BUTTONS:
             if value == 1:
                 self.bus.publish(Event(EventType.MOUSE_CLICK, KeyEventData(code=code, value=value, device_name=device_name), time.time()))
+            elif value == 0:
+                self.bus.publish(Event(EventType.MOUSE_RELEASE, KeyEventData(code=code, value=value, device_name=device_name), time.time()))
             return
 
         data = KeyEventData(code=code, value=value, device_name=device_name)

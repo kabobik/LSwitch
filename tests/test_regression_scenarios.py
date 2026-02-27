@@ -197,6 +197,7 @@ class TestR03SelectionModeFromIdle:
 
         # Simulate fresh selection
         app.selection.set_selection("привет")
+        app._selection_valid = True  # as if poller/mouse_release detected it
 
         _double_shift(app)
 
@@ -316,6 +317,7 @@ class TestR06SelectionModeTargetLayout:
         app._wire_event_bus()
 
         app.selection.set_selection("привет")
+        app._selection_valid = True  # as if poller/mouse_release detected it
         _double_shift(app)
 
         # XKB adapter must have been asked to switch to 'en' layout (index 0)
@@ -333,6 +335,7 @@ class TestR06SelectionModeTargetLayout:
         app._wire_event_bus()
 
         app.selection.set_selection("ghbdtn")
+        app._selection_valid = True  # as if poller/mouse_release detected it
         _double_shift(app)
 
         calls = app.xkb.switch_calls

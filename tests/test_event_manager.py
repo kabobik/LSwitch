@@ -146,8 +146,20 @@ class TestMouseButton:
         assert len(received) == 1
         assert received[0].type == EventType.MOUSE_CLICK
 
-    def test_mouse_release_not_published(self):
-        """Only mouse press triggers MOUSE_CLICK, not release."""
+    def test_mouse_release_publishes_mouse_release(self):
+        """Mouse button release triggers MOUSE_RELEASE event."""
+        bus = EventBus()
+        mgr = EventManager(bus)
+        received = []
+        bus.subscribe(EventType.MOUSE_RELEASE, lambda e: received.append(e))
+
+        mgr.handle_raw_event(_ev(EV_KEY, 272, 0))  # BTN_LEFT release
+
+        assert len(received) == 1
+        assert received[0].type == EventType.MOUSE_RELEASE
+
+    def test_mouse_release_not_published_as_click(self):
+        """Mouse release must NOT trigger MOUSE_CLICK."""
         bus = EventBus()
         mgr = EventManager(bus)
         received = []

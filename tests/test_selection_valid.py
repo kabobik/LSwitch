@@ -77,6 +77,11 @@ def _mouse_event() -> Event:
     return Event(type=EventType.MOUSE_CLICK, data=data, timestamp=time.time())
 
 
+def _mouse_release_event() -> Event:
+    data = MagicMock()
+    return Event(type=EventType.MOUSE_RELEASE, data=data, timestamp=time.time())
+
+
 # Key constants (matching evdev)
 KEY_Q = 16
 KEY_W = 17
@@ -110,89 +115,151 @@ class TestSelectionValidInitial:
         assert app._prev_sel_owner_id == 0
 
 
-class TestCheckSelectionChanged:
-    def test_check_selection_changed_sets_valid_true(self):
+class TestMouseRelease:
+    """Tests for _on_mouse_release — detects drag-select and sets fresh."""
+
+    def test_mouse_release_detects_new_selection(self):
+        """PRIMARY changed between click (baseline) and release → fresh=True."""
         app = _make_app()
+        app._prev_sel_text = ""
+        app._prev_sel_owner_id = 0
+
         app.selection.get_selection.return_value = SelectionInfo(
             text="hello", owner_id=42, timestamp=time.time(),
         )
 
-        result = app._check_selection_changed()
+        app._on_mouse_release(_mouse_release_event())
 
-        assert result is True
         assert app._selection_valid is True
         assert app._prev_sel_text == "hello"
         assert app._prev_sel_owner_id == 42
 
-    def test_check_selection_changed_no_change(self):
+    def test_mouse_release_no_change(self):
+        """PRIMARY unchanged between click and release → stays False."""
         app = _make_app()
-        # First call sets state
+        app._prev_sel_text = "hello"
+        app._prev_sel_owner_id = 42
+
         app.selection.get_selection.return_value = SelectionInfo(
             text="hello", owner_id=42, timestamp=time.time(),
         )
-        app._check_selection_changed()
 
-        # Reset _selection_valid (as if consumed)
-        app._selection_valid = False
+        app._on_mouse_release(_mouse_release_event())
 
-        # Same text and owner — no change
-        result = app._check_selection_changed()
-        assert result is False
         assert app._selection_valid is False
 
-    def test_check_selection_changed_text_changed(self):
+    def test_mouse_release_updates_baseline(self):
+        """Baseline is always updated on release regardless of change."""
         app = _make_app()
-        # Set initial state
-        app._prev_sel_text = "hello"
-        app._prev_sel_owner_id = 42
+        app._prev_sel_text = "old"
+        app._prev_sel_owner_id = 1
 
-        # Different text, same owner
         app.selection.get_selection.return_value = SelectionInfo(
-            text="world", owner_id=42, timestamp=time.time(),
+            text="old", owner_id=1, timestamp=time.time(),
         )
 
-        result = app._check_selection_changed()
-        assert result is True
-        assert app._selection_valid is True
+        app._on_mouse_release(_mouse_release_event())
 
-    def test_check_selection_changed_owner_changed(self):
+        assert app._prev_sel_text == "old"
+        assert app._prev_sel_owner_id == 1
+
+    def test_mouse_release_empty_primary(self):
+        """Empty PRIMARY on release → baseline updated, NOT fresh."""
         app = _make_app()
-        # Set initial state
+        app._prev_sel_text = "old"
+        app._prev_sel_owner_id = 1
+
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="", owner_id=0, timestamp=time.time(),
+        )
+
+        app._on_mouse_release(_mouse_release_event())
+
+        assert app._selection_valid is False
+        assert app._prev_sel_text == ""
+
+    def test_mouse_release_no_selection_adapter(self):
+        """No crash when selection adapter is None."""
+        app = _make_app()
+        app.selection = None
+
+        app._on_mouse_release(_mouse_release_event())  # should not crash
+
+    def test_mouse_release_exception_no_crash(self):
+        """Exception during get_selection → no crash, state unchanged."""
+        app = _make_app()
+        app.selection.get_selection.side_effect = RuntimeError("X11 error")
+
+        app._on_mouse_release(_mouse_release_event())  # should not crash
+        assert app._selection_valid is False
+
+    def test_drag_select_click_then_release(self):
+        """Full drag-select scenario: click resets fresh, release sets it back."""
+        app = _make_app()
+        app._prev_sel_text = ""
+        app._prev_sel_owner_id = 0
+
+        # Click at start of drag → resets sel_valid
+        app._on_mouse_click(_mouse_event())
+        assert app._selection_valid is False
+
+        # Release at end of drag → new PRIMARY detected
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="selected text", owner_id=1, timestamp=time.time(),
+        )
+        app._on_mouse_release(_mouse_release_event())
+
+        assert app._selection_valid is True
+        assert app._prev_sel_text == "selected text"
+
+    def test_owner_change_detected(self):
+        """Owner changed with same text → still fresh."""
+        app = _make_app()
         app._prev_sel_text = "hello"
         app._prev_sel_owner_id = 42
 
-        # Same text, different owner
         app.selection.get_selection.return_value = SelectionInfo(
             text="hello", owner_id=99, timestamp=time.time(),
         )
 
-        result = app._check_selection_changed()
-        assert result is True
+        app._on_mouse_release(_mouse_release_event())
+
         assert app._selection_valid is True
 
-    def test_check_selection_changed_empty_text_returns_false(self):
-        app = _make_app()
-        app.selection.get_selection.return_value = SelectionInfo(
-            text="", owner_id=42, timestamp=time.time(),
-        )
 
-        result = app._check_selection_changed()
-        assert result is False
+class TestPollerCallback:
+    """Tests for _on_poller_primary_changed — sets fresh=True, does NOT update baseline."""
+
+    def test_poller_callback_sets_fresh_true(self):
+        app = _make_app()
         assert app._selection_valid is False
 
-    def test_check_selection_changed_no_selection_adapter(self):
+        app._on_poller_primary_changed("привет", 42)
+
+        assert app._selection_valid is True
+
+    def test_poller_callback_does_not_update_baseline(self):
+        """Poller must NOT update _prev_sel_text / _prev_sel_owner_id.
+        Baseline is only updated by _on_mouse_release and _do_conversion."""
         app = _make_app()
-        app.selection = None
+        app._prev_sel_text = "old"
+        app._prev_sel_owner_id = 1
 
-        result = app._check_selection_changed()
-        assert result is False
+        app._on_poller_primary_changed("new", 42)
 
-    def test_check_selection_changed_exception_returns_false(self):
+        # fresh is set, but baseline stays old
+        assert app._selection_valid is True
+        assert app._prev_sel_text == "old"
+        assert app._prev_sel_owner_id == 1
+
+    def test_poller_fresh_survives_until_click(self):
+        """Poller sets fresh → it persists until mouse click resets it."""
         app = _make_app()
-        app.selection.get_selection.side_effect = RuntimeError("X11 error")
+        app._on_poller_primary_changed("text", 1)
+        assert app._selection_valid is True
 
-        result = app._check_selection_changed()
-        assert result is False
+        # Click resets
+        app._on_mouse_click(_mouse_event())
         assert app._selection_valid is False
 
 
@@ -205,73 +272,6 @@ class TestSelectionValidOnEvents:
 
         assert app._selection_valid is False
 
-    def test_mouse_click_sets_clicked_flag(self):
-        """Mouse click must set _mouse_clicked_since_last_check so that
-        the next _check_selection_changed() updates the baseline lazily
-        (without reading PRIMARY at click time)."""
-        app = _make_app()
-
-        app._on_mouse_click(_mouse_event())
-
-        assert app._mouse_clicked_since_last_check is True
-        assert app._selection_valid is False
-        # PRIMARY must NOT be read at click time
-        app.selection.get_selection.assert_not_called()
-
-    def test_stale_primary_not_converted_after_click_in_other_window(self):
-        """Stale PRIMARY: baseline already matches current PRIMARY content.
-        User selected text before, baseline was updated, then user clicks
-        elsewhere and presses Shift+Shift — should NOT convert."""
-        app = _make_app()
-
-        # Baseline already contains the same text as PRIMARY
-        # (was updated by a previous _check_selection_changed or conversion)
-        app._prev_sel_text = "hello"
-        app._prev_sel_owner_id = 99
-
-        # PRIMARY still has the same content (stale, from window A)
-        app.selection.get_selection.return_value = SelectionInfo(
-            text="hello", owner_id=99, timestamp=time.time(),
-        )
-
-        # User clicks in window B — sets flag, does NOT read PRIMARY
-        app._on_mouse_click(_mouse_event())
-        assert app._mouse_clicked_since_last_check is True
-
-        # Shift+Shift triggers _check_selection_changed()
-        # PRIMARY unchanged vs baseline → NOT fresh
-        result = app._check_selection_changed()
-
-        assert result is False
-        assert app._selection_valid is False
-        assert app._prev_sel_text == "hello"
-        assert app._prev_sel_owner_id == 99
-        assert app._mouse_clicked_since_last_check is False
-
-    def test_new_selection_after_click_is_detected_fresh(self):
-        """Drag-select creates new PRIMARY that differs from baseline.
-        On Shift+Shift, _check_selection_changed detects text change → fresh."""
-        app = _make_app()
-
-        # Baseline has old content
-        app._prev_sel_text = "old"
-        app._prev_sel_owner_id = 1
-
-        # User drag-selects new text → MOUSE_CLICK at start of drag
-        app._on_mouse_click(_mouse_event())
-
-        # After drag, PRIMARY has new content
-        app.selection.get_selection.return_value = SelectionInfo(
-            text="new selection", owner_id=1, timestamp=time.time(),
-        )
-
-        # Shift+Shift → first _check_selection_changed detects change → FRESH
-        result = app._check_selection_changed()
-
-        assert result is True
-        assert app._selection_valid is True
-        assert app._prev_sel_text == "new selection"
-
     def test_mouse_click_does_not_read_primary(self):
         """_on_mouse_click must NOT call get_selection() — avoids race condition
         that can cause PRIMARY to be dropped in Cinnamon/GTK apps."""
@@ -281,52 +281,35 @@ class TestSelectionValidOnEvents:
 
         app.selection.get_selection.assert_not_called()
 
-    def test_click_without_selection_change_then_new_selection(self):
-        """Click without new selection (stale PRIMARY), then a later
-        genuine selection is still detected fresh."""
+    def test_cross_window_stale_selection(self):
+        """Cross-window scenario: select in Window A (poller sets fresh),
+        click in Window B (resets fresh), Shift+Shift → NOT fresh."""
         app = _make_app()
 
-        # Baseline matches current PRIMARY (stale)
-        app._prev_sel_text = "old"
-        app._prev_sel_owner_id = 1
-
-        app.selection.get_selection.return_value = SelectionInfo(
-            text="old", owner_id=1, timestamp=time.time(),
-        )
-
-        # Click + Shift+Shift with stale PRIMARY → NOT fresh
-        app._on_mouse_click(_mouse_event())
-        result = app._check_selection_changed()
-        assert result is False
-
-        # User makes a genuinely new selection
-        app.selection.get_selection.return_value = SelectionInfo(
-            text="new selection", owner_id=2, timestamp=time.time(),
-        )
-        result = app._check_selection_changed()
-        assert result is True
+        # Poller detected selection in Window A
+        app._on_poller_primary_changed("hello", 99)
         assert app._selection_valid is True
 
-    def test_click_then_empty_primary_updates_baseline(self):
-        """Edge case: click when PRIMARY becomes empty — baseline should
-        be set to '' and flag cleared without marking selection as fresh."""
+        # Click in Window B resets fresh
+        app._on_mouse_click(_mouse_event())
+        assert app._selection_valid is False
+
+        # Shift+Shift: fresh is False → retype/skip, not selection mode
+
+    def test_drag_select_via_mouse_release(self):
+        """Drag-select: click (resets) → release with new PRIMARY → fresh."""
         app = _make_app()
-        app._prev_sel_text = "old text"
-        app._prev_sel_owner_id = 42
 
         app._on_mouse_click(_mouse_event())
-        assert app._mouse_clicked_since_last_check is True
-
-        # PRIMARY is now empty
-        app.selection.get_selection.return_value = SelectionInfo(
-            text="", owner_id=0, timestamp=time.time(),
-        )
-        result = app._check_selection_changed()
-
-        assert result is False
         assert app._selection_valid is False
-        assert app._prev_sel_text == ""
-        assert app._mouse_clicked_since_last_check is False
+
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="new selection", owner_id=1, timestamp=time.time(),
+        )
+        app._on_mouse_release(_mouse_release_event())
+
+        assert app._selection_valid is True
+        assert app._prev_sel_text == "new selection"
 
     def test_selection_valid_false_after_navigation(self):
         app = _make_app()
@@ -451,35 +434,29 @@ class TestDoConversionUsesSelectionValid:
 
         assert app._selection_valid is False
 
-    def test_do_conversion_checks_selection_before_convert(self):
-        """_check_selection_changed() is called before convert(), so if
-        PRIMARY changed since last action, _selection_valid becomes True."""
+    def test_do_conversion_updates_baseline_after_convert(self):
+        """After conversion, baseline is updated to current PRIMARY
+        to prevent re-conversion of the same text."""
         app = _make_app()
-        assert app._selection_valid is False
+        app._selection_valid = True
 
-        # Simulate PRIMARY having new content
-        app.selection.get_selection.return_value = SelectionInfo(
-            text="ghbdtn", owner_id=1, timestamp=time.time(),
-        )
-
-        # Put state machine into CONVERTING
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
 
-        convert_calls = []
+        # PRIMARY will return new text after conversion
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="конвертированный", owner_id=1, timestamp=time.time(),
+        )
 
         def mock_convert(ctx, selection_valid=False):
-            convert_calls.append(selection_valid)
             return True
 
         app.conversion_engine.convert = mock_convert
-
         app._do_conversion()
 
-        # _check_selection_changed should have set _selection_valid=True
-        # before convert was called
-        assert len(convert_calls) == 1
-        assert convert_calls[0] is True
+        assert app._prev_sel_text == "конвертированный"
+        assert app._prev_sel_owner_id == 1
+        assert app._selection_valid is False
 
     def test_do_conversion_no_selection_change_stays_false(self):
         """If PRIMARY hasn't changed, _selection_valid stays False."""
