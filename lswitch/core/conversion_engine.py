@@ -48,11 +48,24 @@ class ConversionEngine:
           4. fallback              → retype   (RetypeMode will skip gracefully)
         """
         if context.backspace_hold_active:
+            logger.debug(
+                "choose_mode: backspace_hold_active=True → selection"
+            )
             return "selection"
         if context.chars_in_buffer > 0:
+            logger.debug(
+                "choose_mode: chars_in_buffer=%d > 0 → retype",
+                context.chars_in_buffer,
+            )
             return "retype"
         if selection_valid:
+            logger.debug(
+                "choose_mode: selection_valid=True, chars=0 → selection"
+            )
             return "selection"
+        logger.debug(
+            "choose_mode: fallback → retype (chars=0, sel_valid=False, bs_hold=False)"
+        )
         return "retype"
 
     def convert(self, context: "StateContext", selection_valid: bool = False) -> bool:
@@ -60,8 +73,7 @@ class ConversionEngine:
         from lswitch.core.modes import RetypeMode, SelectionMode
 
         mode = self.choose_mode(context, selection_valid=selection_valid)
-        if self.debug:
-            logger.debug("Converting in mode: %s", mode)
+        logger.debug("Converting in mode: %s", mode)
         if mode == "retype":
             retype = RetypeMode(self.virtual_kb, self.xkb, self.system, self.debug)
             return retype.execute(context)

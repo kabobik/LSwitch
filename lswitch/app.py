@@ -65,6 +65,7 @@ class LSwitchApp:
         self._prev_sel_text: str = ""
         self._prev_sel_owner_id: int = 0
         self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
+        self._mouse_clicked_since_last_check: bool = False
 
     # ------------------------------------------------------------------
     # Platform initialisation (lazy — for testability)
@@ -212,6 +213,13 @@ class LSwitchApp:
         if data.code in SHIFT_KEYS:
             is_double = self.state_manager.on_shift_up()
             if is_double:
+                logger.debug(
+                    "DoubleShift detected → _do_conversion() "
+                    "[sel_valid=%s, chars=%d, mouse_clicked=%s]",
+                    self._selection_valid,
+                    self.state_manager.context.chars_in_buffer,
+                    self._mouse_clicked_since_last_check,
+                )
                 self._do_conversion()
         elif data.code in NAVIGATION_KEYS:
             self._last_auto_marker = None
@@ -247,15 +255,16 @@ class LSwitchApp:
         self._last_auto_marker = None
         self._selection_valid = False
         self._last_retype_events = []
-        # Snapshot current PRIMARY so _check_selection_changed() won't
-        # treat a selection made in another window as "new" on next Shift+Shift.
-        if self.selection is not None:
-            try:
-                info = self.selection.get_selection()
-                self._prev_sel_text = info.text
-                self._prev_sel_owner_id = info.owner_id
-            except Exception:
-                pass
+        # Do NOT read PRIMARY here — xclip -o sends XConvertSelection which
+        # can cause the selection owner to drop PRIMARY when the click has
+        # just deselected text (race condition on Cinnamon/GTK apps).
+        # Instead, mark that a click occurred so _check_selection_changed()
+        # will update the baseline lazily on the next Shift+Shift.
+        self._mouse_clicked_since_last_check = True
+        logger.debug(
+            "MouseClick: _mouse_clicked_since_last_check=True, "
+            "reset sel_valid/sticky/auto_marker"
+        )
         self.state_manager.on_mouse_click()
 
     # ------------------------------------------------------------------
@@ -263,19 +272,62 @@ class LSwitchApp:
     # ------------------------------------------------------------------
 
     def _check_selection_changed(self) -> bool:
-        """Check if PRIMARY selection content changed and update _selection_valid."""
+        """Check if PRIMARY selection content changed and update _selection_valid.
+
+        When ``_mouse_clicked_since_last_check`` is set, the baseline is
+        refreshed but the selection is NOT marked as fresh.  This avoids the
+        race condition caused by reading PRIMARY immediately after a click
+        (which can cause the owner to drop the selection), while still
+        preventing stale PRIMARY content from being treated as "new".
+        """
         if self.selection is None:
             return False
         try:
             info = self.selection.get_selection()
+            logger.debug(
+                "CheckSelection: PRIMARY text=%r owner=0x%x | "
+                "baseline text=%r owner=0x%x",
+                info.text[:80] if info.text else "",
+                info.owner_id,
+                self._prev_sel_text[:80] if self._prev_sel_text else "",
+                self._prev_sel_owner_id,
+            )
             if not info.text:
+                # If mouse was clicked and PRIMARY is now empty, just
+                # update the baseline and clear the flag.
+                if self._mouse_clicked_since_last_check:
+                    self._mouse_clicked_since_last_check = False
+                    self._prev_sel_text = ""
+                    self._prev_sel_owner_id = info.owner_id
+                    logger.debug(
+                        "CheckSelection: mouse-click baseline refresh (empty PRIMARY), "
+                        "owner_id=%d", info.owner_id,
+                    )
                 return False
+
+            # After a mouse click, update baseline without marking fresh.
+            if self._mouse_clicked_since_last_check:
+                self._mouse_clicked_since_last_check = False
+                self._prev_sel_text = info.text
+                self._prev_sel_owner_id = info.owner_id
+                logger.debug(
+                    "CheckSelection: mouse-click baseline refresh → "
+                    "prev_text=%r, prev_owner=0x%x (NOT fresh)",
+                    info.text[:50], info.owner_id,
+                )
+                return False
+
             owner_changed = info.owner_id != self._prev_sel_owner_id and info.owner_id != 0
             text_changed = info.text != self._prev_sel_text
             if owner_changed or text_changed:
                 self._prev_sel_text = info.text
                 self._prev_sel_owner_id = info.owner_id
                 self._selection_valid = True
+                logger.debug(
+                    "CheckSelection: FRESH — owner_changed=%s text_changed=%s "
+                    "text=%r owner=0x%x",
+                    owner_changed, text_changed, info.text[:50], info.owner_id,
+                )
                 return True
         except Exception:
             pass
@@ -350,6 +402,17 @@ class LSwitchApp:
                 saved_count = len(saved_events)
                 self.state_manager.context.event_buffer = list(saved_events)
                 self.state_manager.context.chars_in_buffer = saved_count
+                logger.debug(
+                    "DoConversion: restored sticky buffer → chars=%d",
+                    saved_count,
+                )
+
+            logger.debug(
+                "DoConversion: selection_valid=%s, chars_in_buffer=%d, "
+                "saved_events=%d, sticky=%d",
+                self._selection_valid, saved_count,
+                len(saved_events), len(self._last_retype_events),
+            )
 
             success = self.conversion_engine.convert(
                 self.state_manager.context,

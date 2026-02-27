@@ -205,25 +205,23 @@ class TestSelectionValidOnEvents:
 
         assert app._selection_valid is False
 
-    def test_mouse_click_snapshots_primary_into_prev(self):
-        """Mouse click must update _prev_sel_text/_prev_sel_owner_id so that
-        stale PRIMARY from another window is not treated as 'new' on next
-        Shift+Shift."""
+    def test_mouse_click_sets_clicked_flag(self):
+        """Mouse click must set _mouse_clicked_since_last_check so that
+        the next _check_selection_changed() updates the baseline lazily
+        (without reading PRIMARY at click time)."""
         app = _make_app()
-        app.selection.get_selection.return_value = SelectionInfo(
-            text="hello", owner_id=42, timestamp=time.time(),
-        )
 
         app._on_mouse_click(_mouse_event())
 
-        assert app._prev_sel_text == "hello"
-        assert app._prev_sel_owner_id == 42
+        assert app._mouse_clicked_since_last_check is True
         assert app._selection_valid is False
+        # PRIMARY must NOT be read at click time
+        app.selection.get_selection.assert_not_called()
 
     def test_stale_primary_not_converted_after_click_in_other_window(self):
         """Regression: select text in window A, click in window B, Shift+Shift
-        must NOT trigger selection conversion (bug: _prev_sel_text was '' so
-        _check_selection_changed() saw it as 'new')."""
+        must NOT trigger selection conversion.  The lazy baseline update in
+        _check_selection_changed() prevents this."""
         app = _make_app()
 
         # PRIMARY has text from window A
@@ -231,26 +229,35 @@ class TestSelectionValidOnEvents:
             text="hello", owner_id=99, timestamp=time.time(),
         )
 
-        # User clicks in window B — snapshots PRIMARY as baseline
+        # User clicks in window B — sets flag, does NOT read PRIMARY
         app._on_mouse_click(_mouse_event())
-        assert app._prev_sel_text == "hello"
+        assert app._mouse_clicked_since_last_check is True
 
-        # No new selection activity — PRIMARY unchanged
+        # Shift+Shift triggers _check_selection_changed() which updates baseline
         result = app._check_selection_changed()
 
         assert result is False
         assert app._selection_valid is False
+        # Baseline now matches, so next check won't see it as "new"
+        assert app._prev_sel_text == "hello"
+        assert app._prev_sel_owner_id == 99
+        assert app._mouse_clicked_since_last_check is False
 
     def test_new_selection_after_click_is_still_valid(self):
-        """If user drags to select NEW text after the snapshot, it should be
-        treated as valid (text differs from baseline)."""
+        """If user drags to select NEW text after the click, the lazy baseline
+        update absorbs the old content, and a genuinely new selection is
+        detected on the subsequent check."""
         app = _make_app()
 
-        # At click time PRIMARY has old content
+        # Click sets flag (PRIMARY not read)
+        app._on_mouse_click(_mouse_event())
+
+        # First _check_selection_changed: baseline update with old content
         app.selection.get_selection.return_value = SelectionInfo(
             text="old", owner_id=1, timestamp=time.time(),
         )
-        app._on_mouse_click(_mouse_event())
+        result = app._check_selection_changed()
+        assert result is False  # baseline update, not "fresh"
         assert app._prev_sel_text == "old"
 
         # User drags → PRIMARY updated with new selection
@@ -262,6 +269,59 @@ class TestSelectionValidOnEvents:
 
         assert result is True
         assert app._selection_valid is True
+
+    def test_mouse_click_does_not_read_primary(self):
+        """_on_mouse_click must NOT call get_selection() — avoids race condition
+        that can cause PRIMARY to be dropped in Cinnamon/GTK apps."""
+        app = _make_app()
+
+        app._on_mouse_click(_mouse_event())
+
+        app.selection.get_selection.assert_not_called()
+
+    def test_lazy_baseline_after_click_then_new_selection(self):
+        """After click + baseline update, a genuinely new selection
+        is still detected correctly."""
+        app = _make_app()
+
+        # Click sets flag
+        app._on_mouse_click(_mouse_event())
+
+        # Baseline update (first _check_selection_changed after click)
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="old", owner_id=1, timestamp=time.time(),
+        )
+        result = app._check_selection_changed()
+        assert result is False  # baseline update, not "fresh"
+
+        # User makes a new selection
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="new selection", owner_id=2, timestamp=time.time(),
+        )
+        result = app._check_selection_changed()
+        assert result is True
+        assert app._selection_valid is True
+
+    def test_click_then_empty_primary_updates_baseline(self):
+        """Edge case: click when PRIMARY becomes empty — baseline should
+        be set to '' and flag cleared without marking selection as fresh."""
+        app = _make_app()
+        app._prev_sel_text = "old text"
+        app._prev_sel_owner_id = 42
+
+        app._on_mouse_click(_mouse_event())
+        assert app._mouse_clicked_since_last_check is True
+
+        # PRIMARY is now empty
+        app.selection.get_selection.return_value = SelectionInfo(
+            text="", owner_id=0, timestamp=time.time(),
+        )
+        result = app._check_selection_changed()
+
+        assert result is False
+        assert app._selection_valid is False
+        assert app._prev_sel_text == ""
+        assert app._mouse_clicked_since_last_check is False
 
     def test_selection_valid_false_after_navigation(self):
         app = _make_app()
