@@ -29,8 +29,8 @@ class VirtualKeyboard:
     # Delay between press and release, and between successive key taps.
     # Without a pause many applications (GTK, Qt, X terminals) drop events
     # when they arrive faster than the input processing loop runs.
-    KEY_PRESS_DELAY  = 0.008   # 8 ms between press and release
-    KEY_REPEAT_DELAY = 0.010   # 10 ms between successive key taps
+    KEY_PRESS_DELAY  = 0.001   # 1 ms between press and release
+    KEY_REPEAT_DELAY = 0.001   # 1 ms between successive key taps
 
     def tap_key(self, keycode: int, n_times: int = 1) -> None:
         """Press and release a keycode n times."""

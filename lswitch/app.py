@@ -347,9 +347,6 @@ class LSwitchApp:
         # can cause the selection owner to drop PRIMARY when the click has
         # just deselected text (race condition on Cinnamon/GTK apps).
         # Baseline will be updated by _on_mouse_release instead.
-        logger.trace(  # type: ignore[attr-defined]
-            "MouseClick: reset sel_valid/sticky/auto_marker"
-        )
         self.state_manager.on_mouse_click()
 
     def _on_mouse_release(self, event):
@@ -491,6 +488,27 @@ class LSwitchApp:
                     "DoConversion: restored sticky buffer → chars=%d",
                     saved_count,
                 )
+
+            # ---- Trim to last word for retype mode ----
+            # If buffer has multiple words (contains space), trim to last word only.
+            # Selection mode uses clipboard, not buffer — so trimming applies only
+            # when retype would be chosen (chars > 0 and selection not valid).
+            if saved_count > 0 and not self._selection_valid:
+                try:
+                    _, last_word_events = self._extract_last_word_events(
+                        self.xkb.get_current_layout() if self.xkb else None
+                    )
+                    if last_word_events and len(last_word_events) < saved_count:
+                        logger.debug(
+                            "DoConversion: trim buffer to last word → %d events (was %d)",
+                            len(last_word_events), saved_count,
+                        )
+                        saved_events = last_word_events
+                        saved_count = len(last_word_events)
+                        self.state_manager.context.event_buffer = list(last_word_events)
+                        self.state_manager.context.chars_in_buffer = saved_count
+                except Exception as exc:
+                    logger.debug("DoConversion: trim skipped: %s", exc)
 
             logger.debug(
                 "DoConversion: selection_valid=%s, chars_in_buffer=%d, "

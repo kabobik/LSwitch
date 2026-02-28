@@ -8,6 +8,7 @@ Bug history (all caught by manual testing before these tests existed):
   R05 — convert_text used both dicts simultaneously, direction ambiguous
   R06 — SelectionMode used cycle switch_layout instead of target layout
   R07 — context.reset() not called after conversion → stale buffer on next Shift+Shift
+  R08 — Shift+Shift converted entire buffer instead of last word only
 """
 
 from __future__ import annotations
@@ -408,3 +409,93 @@ class TestR07ContextResetAfterConversion:
         # Type new characters → sticky buffer must be cleared
         _type_keys(app, [16])  # 'q'
         assert app._last_retype_events == []
+
+
+# ---------------------------------------------------------------------------
+# R08 — Shift+Shift converts only last word, not entire buffer
+# ---------------------------------------------------------------------------
+
+class TestR08LastWordOnlyConversion:
+    """R08: When buffer has multiple words, Shift+Shift should only retype the last word."""
+
+    def test_multi_word_buffer_converts_last_word_only(self, tmp_path):
+        """Buffer = 'hello ghbdtn' → Shift+Shift should only delete and retype 'ghbdtn' (6 chars)."""
+        app = _make_app(tmp_path)
+        app._wire_event_bus()
+
+        # Type "hello" (5 chars on EN layout: h=35, e=18, l=38, l=38, o=24)
+        _type_keys(app, [35, 18, 38, 38, 24])
+        # Type space
+        _type_keys(app, [57])
+        # Type "ghbdtn" (6 chars)
+        _type_keys(app, GHBDTN)
+
+        assert app.state_manager.context.chars_in_buffer == 12  # 5 + 1 + 6
+
+        _double_shift(app)
+
+        # Verify conversion_engine.convert was called
+        # The context that was passed should have chars_in_buffer == 6 (last word only)
+        # Context is reset after conversion, so check through virtual_kb calls
+        # RetypeMode deletes chars_in_buffer chars via tap_key(BACKSPACE, n)
+        # So we check the backspace count
+        tap_key_calls = app.virtual_kb.tap_key.call_args_list
+        assert len(tap_key_calls) >= 1
+        # First tap_key call is backspace deletion
+        bs_call = tap_key_calls[0]
+        assert bs_call[0][0] == 14  # KEY_BACKSPACE
+        assert bs_call[0][1] == 6, (
+            f"Expected 6 backspaces (last word 'ghbdtn'), got {bs_call[0][1]}"
+        )
+
+    def test_single_word_buffer_converts_entire_buffer(self, tmp_path):
+        """Buffer = 'ghbdtn' (single word, no space) → entire buffer should be converted."""
+        app = _make_app(tmp_path)
+        app._wire_event_bus()
+
+        _type_keys(app, GHBDTN)
+        assert app.state_manager.context.chars_in_buffer == 6
+
+        _double_shift(app)
+
+        tap_key_calls = app.virtual_kb.tap_key.call_args_list
+        assert len(tap_key_calls) >= 1
+        bs_call = tap_key_calls[0]
+        assert bs_call[0][0] == 14  # KEY_BACKSPACE
+        assert bs_call[0][1] == 6, (
+            f"Expected 6 backspaces for single-word buffer, got {bs_call[0][1]}"
+        )
+
+    def test_sticky_buffer_after_trim_has_last_word(self, tmp_path):
+        """After trimmed retype, sticky buffer should contain only last word events."""
+        app = _make_app(tmp_path)
+        app._wire_event_bus()
+
+        _type_keys(app, [35, 18, 38, 38, 24])  # "hello"
+        _type_keys(app, [57])  # space
+        _type_keys(app, GHBDTN)  # "ghbdtn"
+
+        _double_shift(app)
+
+        # Sticky buffer should have only 6 events (last word)
+        assert len(app._last_retype_events) == 6, (
+            f"Sticky buffer should have 6 events (last word), got {len(app._last_retype_events)}"
+        )
+
+    def test_selection_mode_not_affected_by_trim(self, tmp_path):
+        """When selection_valid=True and buffer is empty, SelectionMode should not be affected."""
+        app = _make_app(tmp_path)
+        app._wire_event_bus()
+
+        # Simulate fresh selection (no typing — empty buffer)
+        app._selection_valid = True
+        app._prev_sel_text = "some text"
+
+        # Force state to CONVERTING to trigger _do_conversion
+        from lswitch.core.states import State
+        app.state_manager.context.state = State.CONVERTING
+
+        app._do_conversion()
+
+        # Should NOT crash, conversion engine should have been called
+        # (selection mode ignores event_buffer)
