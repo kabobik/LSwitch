@@ -715,8 +715,9 @@ class LSwitchApp:
         word_events: list = []
         chars: list[str] = []
         skipping_trailing_spaces = True
+        from lswitch.core.event_manager import KEY_SPACE, KEY_ENTER, KEY_TAB, KEY_ESC, KEY_BACKSPACE
         for ev in reversed(self.state_manager.context.event_buffer):
-            if ev.code == KEY_SPACE:
+            if ev.code in (KEY_SPACE, KEY_ENTER, KEY_TAB, KEY_ESC, KEY_BACKSPACE):
                 if skipping_trailing_spaces:
                     continue
                 break
@@ -726,18 +727,10 @@ class LSwitchApp:
                 ch = self.xkb.keycode_to_char(ev.code, current_layout)
             else:
                 ch = _kc_en(ev.code)
-            if ch and ch.isalpha():
-                word_events.append(ev)
+
+            if ch:
                 chars.append(ch)
-            elif _is_cyrillic_key(ch):
-                # On EN layout this key produces punctuation, but on RU it's a
-                # Cyrillic letter (е.g. kc51 → ',' in EN, but 'б' in RU).
-                # Include it so the full translit sequence is preserved for
-                # AutoDetector ("hf,jnftn" → "работает" after conversion).
-                word_events.append(ev)
-                chars.append(ch)
-            else:
-                break  # genuine boundary: punctuation, digit, or unresolved key
+            word_events.append(ev)
 
         word_events.reverse()
         chars.reverse()

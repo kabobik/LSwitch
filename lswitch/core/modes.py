@@ -134,7 +134,12 @@ class SelectionMode(BaseMode):
     def execute(self, context: "StateContext") -> bool:
         from lswitch.core.text_converter import convert_text, detect_language
 
-        sel = self.selection.get_selection()
+        if context.backspace_hold_active:
+            logger.debug("SelectionMode: backspace_hold_active=True, expanding selection...")
+            sel = self.selection.expand_selection_to_word()
+        else:
+            sel = self.selection.get_selection()
+
         if not sel.text:
             return False
 

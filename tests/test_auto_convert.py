@@ -121,16 +121,16 @@ class TestExtractLastWordEvents:
         assert len(events) == 6
 
     def test_stops_at_non_alpha_char(self):
-        """Buffer ends with non-alpha (digit key) → stops there."""
+        """Buffer includes non-alpha/digit keys now (to support Notepad++)."""
         app = _make_app()
-        # key 2 = "2" (digit, non-alpha)
+        # key 2 = "1" (digit, non-alpha)
         digit_data = KeyEventData(code=2, value=1, device_name="test")
         app.state_manager.context.event_buffer.append(digit_data)
         app.state_manager.context.chars_in_buffer += 1
         _fill_buffer(app, [KEY_G, KEY_H, KEY_B])
         word, events = app._extract_last_word_events()
-        assert word == "ghb"
-        assert len(events) == 3
+        assert word == "1ghb"
+        assert len(events) == 4
 
     def test_events_in_correct_order(self):
         """Events returned are in original typing order (not reversed)."""
