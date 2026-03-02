@@ -125,17 +125,19 @@ class SelectionMode(BaseMode):
         xkb: "IXKBAdapter",
         system: "ISystemAdapter",
         debug: bool = False,
+        expand: bool = False,
     ):
         self.selection = selection
         self.xkb = xkb
         self.system = system
         self.debug = debug
+        self.expand = expand
 
     def execute(self, context: "StateContext") -> bool:
         from lswitch.core.text_converter import convert_text, detect_language
 
-        if context.backspace_hold_active:
-            logger.debug("SelectionMode: backspace_hold_active=True, expanding selection...")
+        if self.expand or context.backspace_hold_active:
+            logger.debug(f"SelectionMode: expanding selection... (expand={self.expand}, backspace_hold={context.backspace_hold_active})")
             sel = self.selection.expand_selection_to_word()
         else:
             sel = self.selection.get_selection()

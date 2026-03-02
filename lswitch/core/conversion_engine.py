@@ -39,13 +39,13 @@ class ConversionEngine:
         self.debug = debug
 
     def choose_mode(self, context: "StateContext", selection_valid: bool = False) -> str:
-        """Return 'selection' or 'retype' based on current state.
+        """Return 'selection', 'selection_expand', or 'retype' based on state.
 
         Priority:
           1. backspace_hold_active → selection (explicit hold gesture)
-          2. chars_in_buffer > 0  → retype   (user typed something — always wins)
-          3. selection_valid       → selection (empty buffer, deliberate selection)
-          4. fallback              → retype   (RetypeMode will skip gracefully)
+          2. chars_in_buffer > 0  → retype
+          3. selection_valid       → selection (empty buffer, active selection)
+          4. fallback              → selection_expand (blind double-shift selects word)
         """
         if context.backspace_hold_active:
             logger.debug(
@@ -64,9 +64,9 @@ class ConversionEngine:
             )
             return "selection"
         logger.debug(
-            "choose_mode: fallback → retype (chars=0, sel_valid=False, bs_hold=False)"
+            "choose_mode: fallback → selection_expand (chars=0, sel_valid=False, bs_hold=False)"
         )
-        return "retype"
+        return "selection_expand"
 
     def convert(self, context: "StateContext", selection_valid: bool = False) -> bool:
         """Perform conversion. Returns True on success."""
@@ -77,6 +77,9 @@ class ConversionEngine:
         if mode == "retype":
             retype = RetypeMode(self.virtual_kb, self.xkb, self.system, self.debug)
             return retype.execute(context)
+        elif mode == "selection_expand":
+            sel_mode = SelectionMode(self.selection, self.xkb, self.system, self.debug, expand=True)
+            return sel_mode.execute(context)
         else:
             sel_mode = SelectionMode(self.selection, self.xkb, self.system, self.debug)
             return sel_mode.execute(context)

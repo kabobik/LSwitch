@@ -16,3 +16,16 @@ def test_selection_mode_expands_when_backspace_hold_active():
     sel.expand_selection_to_word.assert_called_once()
     sel.get_selection.assert_not_called()
     sel.replace_selection.assert_called_once_with("привет")
+
+def test_selection_mode_expands_when_expand_true():
+    sel = MagicMock()
+    sel.expand_selection_to_word.return_value = SelectionInfo(text="word", owner_id=1, timestamp=0.0)
+    xkb = MagicMock()
+    sys = MagicMock()
+    mode = SelectionMode(sel, xkb, sys, expand=True)
+    ctx = StateContext()
+    ctx.backspace_hold_active = False # default
+    
+    assert mode.execute(ctx) is True
+    sel.expand_selection_to_word.assert_called_once()
+    sel.get_selection.assert_not_called()

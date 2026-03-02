@@ -78,13 +78,13 @@ class TestChooseMode:
 
         assert engine.choose_mode(ctx, selection_valid=False) == "selection"
 
-    def test_retype_when_empty_buffer_and_no_selection(self):
-        """Empty buffer + selection_valid=False → retype (will skip gracefully)."""
+    def test_selection_expand_when_empty_buffer_and_no_selection(self):
+        """Empty buffer + selection_valid=False → selection_expand (blind double-shift)."""
         engine, _, sel, _, _, _ = _make_engine()
         ctx = StateContext()
         ctx.chars_in_buffer = 0
 
-        assert engine.choose_mode(ctx, selection_valid=False) == "retype"
+        assert engine.choose_mode(ctx, selection_valid=False) == "selection_expand"
 
     def test_buffer_wins_over_selection_valid(self):
         """If chars_in_buffer > 0, retype wins even when selection_valid=True.
@@ -145,11 +145,12 @@ class TestConvertSelection:
 class TestConvertReturnsFalse:
     """convert() must propagate False from the underlying mode."""
 
-    def test_retype_empty_buffer_returns_false(self):
+    def test_selection_expand_empty_buffer_returns_false_if_no_text(self):
         engine, xkb, sel, vk, _, sys_ = _make_engine()
         ctx = StateContext()
-        ctx.chars_in_buffer = 0  # fallback to selection
-        sel.get_selection.return_value = SelectionInfo(text="", owner_id=0, timestamp=0.0)
+        ctx.chars_in_buffer = 0
+        # selection_expand will call expand_selection_to_word
+        sel.expand_selection_to_word.return_value = SelectionInfo(text="", owner_id=0, timestamp=0.0)
 
         result = engine.convert(ctx, selection_valid=False)
         assert result is False
