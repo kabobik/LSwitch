@@ -63,22 +63,26 @@ class AutoDetector:
             if not word_clean.isalpha():
                 return (False, "non-alphabetic input")
 
+        # Priority 0: UserDictionary override & protection
+        if self.user_dict:
+            w_lower = word_clean.lower()
+            if self.user_dict.is_protected(w_lower, current_layout):
+                return (False, "user_dict: temporarily protected")
+            
+            weight = self.user_dict.get_weight(w_lower, current_layout)
+            min_w = self.user_dict.data.get('settings', {}).get('min_weight', 2)
+            
+            if weight >= min_w:
+                return (True, "User dict override")
+            if weight <= -min_w:
+                return (False, f"user_dict: weight={weight} <= -{min_w}")
+
         # Priority 1 & 2: dictionary-based detection
         dict_convert, dict_reason = self.dictionary.should_convert(word_clean, current_layout)
 
         # Priority 1: word is already correct → keep as-is
         if not dict_convert and "already correct" in dict_reason:
             return (False, dict_reason)
-
-        # Priority 1.5: UserDictionary protection
-        if self.user_dict:
-            w_lower = word_clean.lower()
-            if self.user_dict.is_protected(w_lower, current_layout):
-                return (False, "user_dict: temporarily protected")
-            weight = self.user_dict.get_weight(w_lower, current_layout)
-            min_w = self.user_dict.data.get('settings', {}).get('min_weight', 2)
-            if weight <= -min_w:
-                return (False, f"user_dict: weight={weight} <= -{min_w}")
 
         # Priority 2: converted form is a known word → convert
         if dict_convert:

@@ -34,6 +34,7 @@ class VirtualKeyboard:
 
     def tap_key(self, keycode: int, n_times: int = 1) -> None:
         """Press and release a keycode n times."""
+        logger.debug("VirtualKeyboard: tap_key code=%s n_times=%s", keycode, n_times)
         for i in range(n_times):
             self._write(keycode, 1)
             time.sleep(self.KEY_PRESS_DELAY)
@@ -56,6 +57,7 @@ class VirtualKeyboard:
         synthetic Shift press/release so the target application sees an
         uppercase letter in the new layout.
         """
+        logger.debug("VirtualKeyboard: replay_events %d events", len(events))
         # Build a set of codes that get a release in the list already
         released_codes: set[int] = set()
         for ev in events:
@@ -85,6 +87,7 @@ class VirtualKeyboard:
     def _write(self, code: int, value: int) -> None:
         if self._uinput is None:
             return
+        logger.debug("VK_out: write code=%s value=%s", code, value)
         try:
             from evdev import ecodes
             self._uinput.write(ecodes.EV_KEY, code, value)

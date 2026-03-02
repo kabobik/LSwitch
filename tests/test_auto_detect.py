@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import pytest
 
+from unittest.mock import MagicMock
+
 from lswitch.intelligence.dictionary_service import DictionaryService
 from lswitch.intelligence.ngram_analyzer import NgramAnalyzer
 from lswitch.intelligence.auto_detector import AutoDetector
+from lswitch.intelligence.user_dictionary import UserDictionary
 
 
 @pytest.fixture(scope="module")
@@ -84,3 +87,37 @@ def test_unknown_layout_no_crash(detector):
     """Unknown layout should not crash, returns False."""
     ok, reason = detector.should_convert("hello", "fr")
     assert ok is False
+
+
+def test_user_dict_positive_override():
+    # word "hello" is valid EN word, so normally shouldn't be converted
+    detector = AutoDetector(dictionary=DictionaryService(), ngrams=NgramAnalyzer())
+    ok, _ = detector.should_convert("hello", "en")
+    assert ok is False  # baseline
+    
+    mock_ud = MagicMock(spec=UserDictionary)
+    mock_ud.is_protected.return_value = False
+    mock_ud.get_weight.return_value = 5  # >= default 2
+    mock_ud.data = {'settings': {'min_weight': 2}}
+    
+    detector.user_dict = mock_ud
+    ok, reason = detector.should_convert("hello", "en")
+    assert ok is True
+    assert "User dict override" in reason
+
+def test_user_dict_negative_protection():
+    # word "ghbdtn" is generic typo, normally converted
+    detector = AutoDetector(dictionary=DictionaryService(), ngrams=NgramAnalyzer())
+    ok, _ = detector.should_convert("ghbdtn", "en")
+    assert ok is True  # baseline
+    
+    mock_ud = MagicMock(spec=UserDictionary)
+    mock_ud.is_protected.return_value = False
+    mock_ud.get_weight.return_value = -3  # <= -2
+    mock_ud.data = {'settings': {'min_weight': 2}}
+    
+    detector.user_dict = mock_ud
+    ok, reason = detector.should_convert("ghbdtn", "en")
+    assert ok is False
+    assert "user_dict: weight=" in reason
+

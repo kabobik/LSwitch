@@ -71,6 +71,8 @@ class LSwitchApp:
     can inject mocks without touching real X11 / evdev resources.
     """
 
+    MANUAL_WEIGHT_STEP = 2
+
     def __init__(
         self,
         headless: bool = False,
@@ -235,6 +237,14 @@ class LSwitchApp:
             self.state_manager.state.name,
             self.state_manager.context.chars_in_buffer,
         )
+
+        # If user rolls over by typing another non-modifier key before releasing space,
+        # we flush/cancel the pending space so it doesn't get inserted *after* the new letter.
+        if getattr(self, '_pending_auto_space', False):
+            if data.code not in MODIFIER_KEYS and data.code != KEY_SPACE:
+                self._pending_auto_space = False
+                logger.debug("Canceled pending auto-space due to rollover of key %d", data.code)
+
         if data.code in SHIFT_KEYS:
             self.state_manager.on_shift_down()
         elif data.code in MODIFIER_KEYS:
@@ -290,10 +300,18 @@ class LSwitchApp:
 
     def _on_key_release(self, event):
         from lswitch.core.event_manager import (
-            SHIFT_KEYS, NAVIGATION_KEYS, KEY_BACKSPACE, KEY_ENTER,
+            SHIFT_KEYS, NAVIGATION_KEYS, KEY_BACKSPACE, KEY_ENTER, KEY_SPACE,
         )
 
         data = event.data
+        if data.code == KEY_SPACE and getattr(self, '_pending_auto_space', False):
+            self._pending_auto_space = False
+            try:
+                if self.virtual_kb:
+                    self.virtual_kb.tap_key(KEY_SPACE)
+            except Exception as exc:
+                logger.error("Failed to inject deferred auto-space: %s", exc)
+
         if data.code in SHIFT_KEYS:
             is_double = self.state_manager.on_shift_up()
             if is_double:
@@ -444,18 +462,31 @@ class LSwitchApp:
         # Only relevant for Case B (manual conversion); Case A buffer is already empty.
         manual_word: str = ""
         manual_lang: str = ""
-        if self.user_dict and self.state_manager.context.chars_in_buffer > 0:
+        chars_in_buffer = self.state_manager.context.chars_in_buffer
+        if self.user_dict and chars_in_buffer > 0:
             try:
                 layout_info = self.xkb.get_current_layout() if self.xkb else None
                 manual_lang = self._layout_to_lang(layout_info)
                 manual_word, _ = self._extract_last_word_events(layout_info)
             except Exception:
                 pass
+        elif self.user_dict and chars_in_buffer == 0 and self._selection_valid and self._last_auto_marker is None:
+            try:
+                from lswitch.core.text_converter import detect_language
+                sel_obj = self.selection.get_selection() if self.selection else None
+                if sel_obj and sel_obj.text:
+                    sel_text = sel_obj.text.strip()
+                    # Only learn single words, ignore multi-word selections
+                    if sel_text and " " not in sel_text and "\n" not in sel_text and "\t" not in sel_text:
+                        manual_word = sel_text
+                        manual_lang = "en" if detect_language(sel_text) == "en" else "ru"
+            except Exception as e:
+                logger.debug("Selection word extraction failed: %s", e)
 
         # --- Case A: undo of recent auto-conversion → penalise ---
         if self._last_auto_marker is not None:
             marker = self._last_auto_marker
-            if self.user_dict:
+            if self.user_dict and chars_in_buffer == 0:
                 self.user_dict.add_correction(
                     marker['word'], marker['lang'], debug=self.debug,
                 )
@@ -463,14 +494,40 @@ class LSwitchApp:
                     "Correction: '%s' (%s) — weight -1",
                     marker['word'], marker['lang'],
                 )
+            
+            # Undo auto-conversion (Case A undo block)
+            if chars_in_buffer == 0 and 'word_events' in marker:
+                from lswitch.core.event_manager import KEY_BACKSPACE, KEY_SPACE
+                try:
+                    self.virtual_kb.tap_key(KEY_BACKSPACE, n_times=marker['converted_len'] + 1)
+                    if self.xkb:
+                        target = next((
+                            l for l in self.xkb.get_layouts()
+                            if l.name.lower().startswith(marker['lang'])
+                        ), None)
+                        if target:
+                            self.xkb.switch_layout(target=target)
+                    import time as _time_mod
+                    _time_mod.sleep(0.03)
+                    self.virtual_kb.replay_events(marker['word_events'])
+                    self.virtual_kb.tap_key(KEY_SPACE)
+                except Exception as exc:
+                    logger.error("Undo auto-conversion failed: %s", exc)
+                
+                self.state_manager.on_conversion_complete()
+                self._last_auto_marker = None
+                return
+
             self._last_auto_marker = None
 
         # --- Case B: pure manual conversion → confirm this word needs switching ---
         elif manual_word and manual_lang and self.user_dict:
-            self.user_dict.add_confirmation(manual_word, manual_lang, debug=self.debug)
+            self.user_dict.add_confirmation(
+                manual_word, manual_lang, debug=self.debug, weight_step=self.MANUAL_WEIGHT_STEP
+            )
             logger.info(
-                "Manual conversion: '%s' (%s) — weight +1",
-                manual_word, manual_lang,
+                "Manual conversion: '%s' (%s) — weight +%d",
+                manual_word, manual_lang, self.MANUAL_WEIGHT_STEP,
             )
 
         try:
@@ -499,13 +556,23 @@ class LSwitchApp:
                         self.xkb.get_current_layout() if self.xkb else None
                     )
                     if last_word_events and len(last_word_events) < saved_count:
+                        # fix-1B: include trailing spaces for correct backspace count
+                        from lswitch.core.event_manager import KEY_SPACE as _KS
+                        trailing = []
+                        for ev in reversed(saved_events):
+                            if ev.code == _KS:
+                                trailing.append(ev)
+                            else:
+                                break
+                        trailing.reverse()
+                        trimmed = last_word_events + trailing
                         logger.debug(
-                            "DoConversion: trim buffer to last word → %d events (was %d)",
-                            len(last_word_events), saved_count,
+                            "DoConversion: trim buffer to last word → %d events (was %d, trailing_spaces=%d)",
+                            len(trimmed), saved_count, len(trailing),
                         )
-                        saved_events = last_word_events
-                        saved_count = len(last_word_events)
-                        self.state_manager.context.event_buffer = list(last_word_events)
+                        saved_events = trimmed
+                        saved_count = len(trimmed)
+                        self.state_manager.context.event_buffer = list(trimmed)
                         self.state_manager.context.chars_in_buffer = saved_count
                 except Exception as exc:
                     logger.debug("DoConversion: trim skipped: %s", exc)
@@ -559,6 +626,12 @@ class LSwitchApp:
 
         ctx = self.state_manager.context
         if ctx.chars_in_buffer == 0:
+            return False
+
+        # Guard: if buffer ends with space(s), the last word was already
+        # evaluated on a previous space press — skip auto-conversion.
+        from lswitch.core.event_manager import KEY_SPACE as _KS_GUARD
+        if ctx.event_buffer and ctx.event_buffer[-1].code == _KS_GUARD:
             return False
 
         # Buffer warmup: don't activate until enough chars have been typed
@@ -641,9 +714,13 @@ class LSwitchApp:
 
         word_events: list = []
         chars: list[str] = []
+        skipping_trailing_spaces = True
         for ev in reversed(self.state_manager.context.event_buffer):
             if ev.code == KEY_SPACE:
+                if skipping_trailing_spaces:
+                    continue
                 break
+            skipping_trailing_spaces = False
             # Prefer actual XKB mapping for the current layout
             if current_layout is not None and self.xkb is not None:
                 ch = self.xkb.keycode_to_char(ev.code, current_layout)
@@ -684,10 +761,14 @@ class LSwitchApp:
         The Space key was already delivered to the active application before LSwitch processed
         it (passive monitoring), so we must also delete that extra space character via backspace.
         """
+        import time as _time_mod
+        t_start = _time_mod.perf_counter()
+        
         from lswitch.core.event_manager import KEY_BACKSPACE, KEY_SPACE
         from lswitch.core.states import State
 
         ctx = self.state_manager.context
+        conversion_ok = False
 
         try:
             # Find target layout
@@ -708,23 +789,35 @@ class LSwitchApp:
             if target and self.xkb:
                 self.xkb.switch_layout(target=target)
 
+            _time_mod.sleep(0.03)
+
             # Replay original keycodes in the new layout (produces converted text)
             self.virtual_kb.replay_events(word_events)
+            
+            # Дать приложению переварить введенный текст перед финальным пробелом
+            _time_mod.sleep(0.01)
 
-            # Re-add the space
-            self.virtual_kb.tap_key(KEY_SPACE)
+            # We DO NOT tap_key(KEY_SPACE) here, because the physical Space key
+            # is almost certainly still held down by the user, and X11/Wayland
+            # input merging would eat the virtual press event. Instead, we
+            # defer sending it until the physical release event arrives.
+            conversion_ok = True
 
         except Exception as exc:
             logger.error("Auto-conversion at space failed: %s", exc)
         finally:
+            self._pending_auto_space = True
+
             # Save marker BEFORE reset so correction can be detected later
             import time as _time
-            if orig_word:
+            if orig_word and conversion_ok:
                 self._last_auto_marker = {
                     'word': orig_word,
                     'direction': direction,
                     'lang': orig_lang,
                     'time': _time.time(),
+                    'word_events': list(word_events),
+                    'converted_len': len(word_events),
                 }
             ctx.reset()
             ctx.state = State.IDLE

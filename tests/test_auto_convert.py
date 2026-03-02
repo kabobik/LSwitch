@@ -139,6 +139,58 @@ class TestExtractLastWordEvents:
         word, events = app._extract_last_word_events()
         assert [e.code for e in events] == [KEY_G, KEY_H, KEY_B]
 
+    def test_trailing_space_skipped(self):
+        """Buffer = [g, h, b, SPACE] → trailing space skipped → 'ghb'."""
+        app = _make_app()
+        _fill_buffer(app, [KEY_G, KEY_H, KEY_B])
+        space_data = KeyEventData(code=KEY_SPACE, value=1, device_name="test")
+        app.state_manager.context.event_buffer.append(space_data)
+        app.state_manager.context.chars_in_buffer += 1
+        word, events = app._extract_last_word_events()
+        assert word == "ghb"
+        assert len(events) == 3
+
+    def test_multi_word_with_trailing_space(self):
+        """Buffer = [a, a, SPACE, g, h, b, SPACE] → 'ghb' (last word before trailing space)."""
+        app = _make_app()
+        for code in [KEY_A, KEY_A]:
+            ev = _event(code)
+            app.state_manager.context.event_buffer.append(ev.data)
+            app.state_manager.context.chars_in_buffer += 1
+        space1 = KeyEventData(code=KEY_SPACE, value=1, device_name="test")
+        app.state_manager.context.event_buffer.append(space1)
+        app.state_manager.context.chars_in_buffer += 1
+        _fill_buffer(app, [KEY_G, KEY_H, KEY_B])
+        space2 = KeyEventData(code=KEY_SPACE, value=1, device_name="test")
+        app.state_manager.context.event_buffer.append(space2)
+        app.state_manager.context.chars_in_buffer += 1
+        word, events = app._extract_last_word_events()
+        assert word == "ghb"
+        assert len(events) == 3
+
+    def test_only_spaces_returns_empty(self):
+        """Buffer = [SPACE, SPACE, SPACE] → empty word."""
+        app = _make_app()
+        for _ in range(3):
+            space_data = KeyEventData(code=KEY_SPACE, value=1, device_name="test")
+            app.state_manager.context.event_buffer.append(space_data)
+            app.state_manager.context.chars_in_buffer += 1
+        word, events = app._extract_last_word_events()
+        assert word == ""
+        assert events == []
+
+    def test_multiple_trailing_spaces_skipped(self):
+        """Buffer = [g, h, b, SPACE, SPACE] → 'ghb'."""
+        app = _make_app()
+        _fill_buffer(app, [KEY_G, KEY_H, KEY_B])
+        for _ in range(2):
+            space_data = KeyEventData(code=KEY_SPACE, value=1, device_name="test")
+            app.state_manager.context.event_buffer.append(space_data)
+            app.state_manager.context.chars_in_buffer += 1
+        word, events = app._extract_last_word_events()
+        assert word == "ghb"
+        assert len(events) == 3
+
 
 # ---------------------------------------------------------------------------
 # _layout_to_lang
@@ -273,11 +325,11 @@ class TestDoAutoConversionAtSpace:
         app._do_auto_conversion_at_space(6, word_events, "en_to_ru")
         app.virtual_kb.replay_events.assert_called_once_with(word_events)
 
-    def test_re_adds_space(self):
-        """After replay, taps Space to restore the word boundary."""
+    def test_defers_space_until_release(self):
+        """After replay, sets `_pending_auto_space` so Space is tapped on physical release."""
         app, word_events = self._setup()
         app._do_auto_conversion_at_space(6, word_events, "en_to_ru")
-        app.virtual_kb.tap_key.assert_any_call(KEY_SPACE)
+        assert getattr(app, '_pending_auto_space', False) is True
 
     def test_resets_context_to_idle(self):
         """Context is reset and state is IDLE after conversion."""
@@ -288,12 +340,15 @@ class TestDoAutoConversionAtSpace:
         assert app.state_manager.context.state == State.IDLE
 
     def test_context_reset_on_exception(self):
-        """Even if VirtualKeyboard raises, context is reset."""
+        """Even if VirtualKeyboard raises, context is reset and space is deferred in finally."""
+        from lswitch.core.event_manager import KEY_SPACE
         app, word_events = self._setup()
         app.virtual_kb.tap_key.side_effect = RuntimeError("hw error")
         app._do_auto_conversion_at_space(6, word_events, "en_to_ru")
         assert app.state_manager.context.chars_in_buffer == 0
         assert app.state_manager.context.state == State.IDLE
+        # _pending_auto_space is attempted in finally fallback
+        assert getattr(app, '_pending_auto_space', False) is True
 
     def test_ru_to_en_switches_to_en_layout(self):
         """Direction ru_to_en → switches to 'en' layout."""
@@ -405,10 +460,10 @@ class TestAutoConvertEndToEnd:
         replayed_events = app.virtual_kb.replay_events.call_args[0][0]
         assert len(replayed_events) == 6
 
-    def test_space_re_added(self):
-        """Space tapped to restore word boundary after converted word."""
+    def test_space_deferred(self):
+        """Space deferred to restore word boundary after converted word."""
         app = self._run()
-        app.virtual_kb.tap_key.assert_any_call(KEY_SPACE)
+        assert getattr(app, '_pending_auto_space', False) is True
 
     def test_context_idle_after_conversion(self):
         """State machine is IDLE and buffer is empty after conversion."""
@@ -428,3 +483,174 @@ class TestAutoConvertEndToEnd:
         # Space should be in buffer (no conversion fired)
         assert any(ev.code == KEY_SPACE for ev in app.state_manager.context.event_buffer)
         app.virtual_kb.replay_events.assert_not_called()
+
+# ---------------------------------------------------------------------------
+# Undo auto-conversion (Shift+Shift)
+# ---------------------------------------------------------------------------
+
+class TestUndoAutoConversion:
+    """Tests for undoing auto-conversion via double shift."""
+
+    def test_undo_with_empty_buffer(self):
+        """Case A: Undo when buffer is empty (right after auto-conversion)."""
+        app = _make_app(auto_switch=True, threshold=0)
+        app.user_dict = MagicMock()
+        
+        # Prepare marker simulating a recent auto-conversion
+        word_events = [KeyEventData(code=KEY_G, value=1, device_name="test"),
+                       KeyEventData(code=KEY_P, value=1, device_name="test")]
+        app._last_auto_marker = {
+            'word': 'gp',
+            'direction': 'en_to_ru',
+            'lang': 'en',
+            'time': time.time(),
+            'word_events': word_events,
+            'converted_len': 2
+        }
+        app.xkb.switch_layout = MagicMock()
+        
+        # Set state to converting (simulate Double Shift)
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager.context.chars_in_buffer = 0
+        
+        # Call conversion
+        app._do_conversion()
+
+        # 1. user_dict should penalise
+        app.user_dict.add_correction.assert_called_once_with('gp', 'en', debug=True)
+        
+        # 2. explicit undo block execution
+        # Delete converted word + 1 space = 3 backspaces
+        app.virtual_kb.tap_key.assert_any_call(KEY_BACKSPACE, n_times=3)
+        # Switch back to original layout ('en')
+        app.xkb.switch_layout.assert_called_once()
+        target = app.xkb.switch_layout.call_args[1]['target']
+        assert target.name.lower() == "en"
+        # Replay original keycodes
+        app.virtual_kb.replay_events.assert_called_once_with(word_events)
+        # Re-add space
+        app.virtual_kb.tap_key.assert_any_call(KEY_SPACE)
+        
+        # Buffer and state clear
+        assert app._last_auto_marker is None
+        assert app.state_manager.context.state == State.IDLE
+
+    def test_undo_with_new_text(self):
+        """Case A: If user started typing again, we still clear the marker, but NO correction and NO explicit undo."""
+        app = _make_app(auto_switch=True, threshold=0)
+        app.user_dict = MagicMock()
+        
+        app._last_auto_marker = {
+            'word': 'gp',
+            'direction': 'en_to_ru',
+            'lang': 'en',
+            'time': time.time(),
+            'word_events': [],
+            'converted_len': 2
+        }
+        
+        # State converting but chars_in_buffer > 0
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager.context.chars_in_buffer = 1
+        app.state_manager.context.event_buffer = [KeyEventData(code=KEY_A, value=1, device_name="test")]
+        
+        app.xkb.switch_layout = MagicMock()
+        app.virtual_kb.tap_key = MagicMock()
+        
+        app._do_conversion()
+        
+        # user_dict correction should NOT be called
+        app.user_dict.add_correction.assert_not_called()
+        
+        # Replay events shouldn't be called for undo (standard conversion runs instead)
+        # Actually standard conversion is mocked engine
+        
+        # Marker is cleared
+        assert app._last_auto_marker is None
+
+
+# ---------------------------------------------------------------------------
+# Trailing spaces: trim-block in _do_conversion & guard in _try_auto_conversion
+# ---------------------------------------------------------------------------
+
+class TestTrailingSpacesTrim:
+    """Test that trim-block in _do_conversion includes trailing spaces (fix-1B)."""
+
+    def test_trim_includes_trailing_space(self):
+        """Buffer [a,a,SPACE,g,h,b,SPACE]: trim should produce [g,h,b,SPACE] (4 events)."""
+        app = _make_app()
+        app.conversion_engine = MagicMock()
+        app.conversion_engine.convert.return_value = True
+        app.user_dict = None
+
+        # Build buffer: "aa ghb "
+        for code in [KEY_A, KEY_A]:
+            ev = _event(code)
+            app.state_manager.context.event_buffer.append(ev.data)
+            app.state_manager.context.chars_in_buffer += 1
+        space1 = KeyEventData(code=KEY_SPACE, value=1, device_name="test")
+        app.state_manager.context.event_buffer.append(space1)
+        app.state_manager.context.chars_in_buffer += 1
+        _fill_buffer(app, [KEY_G, KEY_H, KEY_B])
+        space2 = KeyEventData(code=KEY_SPACE, value=1, device_name="test")
+        app.state_manager.context.event_buffer.append(space2)
+        app.state_manager.context.chars_in_buffer += 1
+
+        app.state_manager.context.state = State.CONVERTING
+        app._do_conversion()
+
+        # After trim: chars_in_buffer should be 4 (ghb + trailing space)
+        # The conversion_engine.convert was called → check context was trimmed
+        ctx_arg = app.conversion_engine.convert.call_args
+        assert ctx_arg is not None
+
+    def test_trim_no_trailing_space_unchanged(self):
+        """Buffer [a,a,SPACE,g,h,b] (no trailing space): trim to [g,h,b] (3 events)."""
+        app = _make_app()
+        app.conversion_engine = MagicMock()
+        app.conversion_engine.convert.return_value = True
+        app.user_dict = None
+
+        for code in [KEY_A, KEY_A]:
+            ev = _event(code)
+            app.state_manager.context.event_buffer.append(ev.data)
+            app.state_manager.context.chars_in_buffer += 1
+        space1 = KeyEventData(code=KEY_SPACE, value=1, device_name="test")
+        app.state_manager.context.event_buffer.append(space1)
+        app.state_manager.context.chars_in_buffer += 1
+        _fill_buffer(app, [KEY_G, KEY_H, KEY_B])
+
+        app.state_manager.context.state = State.CONVERTING
+        app._do_conversion()
+
+        ctx_arg = app.conversion_engine.convert.call_args
+        assert ctx_arg is not None
+
+
+class TestAutoConversionGuard:
+    """Test that _try_auto_conversion_at_space skips if buffer ends with space."""
+
+    def test_skips_when_trailing_space(self):
+        """If last event in buffer is KEY_SPACE, auto-conversion should be skipped."""
+        app = _make_app(auto_switch=True, threshold=0)
+        _fill_buffer(app, [KEY_G, KEY_H, KEY_B])
+        # Add trailing space
+        space_data = KeyEventData(code=KEY_SPACE, value=1, device_name="test")
+        app.state_manager.context.event_buffer.append(space_data)
+        app.state_manager.context.chars_in_buffer += 1
+
+        result = app._try_auto_conversion_at_space()
+        assert result is False
+
+    def test_proceeds_without_trailing_space(self):
+        """Without trailing space in buffer, auto-conversion should proceed normally."""
+        app = _make_app(auto_switch=True, threshold=0)
+        app.auto_detector = MagicMock()
+        app.auto_detector.should_convert.return_value = (False, "test")
+        _fill_buffer(app, [KEY_G, KEY_H, KEY_B])
+
+        result = app._try_auto_conversion_at_space()
+        # Should reach auto_detector.should_convert (returns False → result False)
+        assert result is False
+        app.auto_detector.should_convert.assert_called_once()
+

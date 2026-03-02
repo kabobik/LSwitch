@@ -37,3 +37,10 @@ def test_persistence(tmp_path):
 
     d2 = UserDictionary(path=path)
     assert d2.get_weight("test", "en") == -1
+
+
+def test_add_confirmation_weight_step(tmp_dict):
+    tmp_dict.add_confirmation("hello", "en", weight_step=2)
+    assert tmp_dict.get_weight("hello", "en") == 2
+    tmp_dict.add_confirmation("hello", "en", weight_step=3)
+    assert tmp_dict.get_weight("hello", "en") == 5

@@ -63,11 +63,12 @@ class UserDictionary:
             logger.debug("UserDict correction: %s weight → %d, protected for %.1fs", key, entry["weight"], timeout)
         self.flush()
 
-    def add_confirmation(self, word: str, lang: str, debug: bool = False) -> None:
-        """Confirm auto-conversion was correct (+1 weight)."""
+    def add_confirmation(self, word: str, lang: str, debug: bool = False, weight_step: int = 1) -> None:
+        """Confirm auto-conversion was correct (+ weight_step)."""
+        weight_step = max(1, weight_step)
         key = self._key(word, lang)
         entry = self.data["words"].setdefault(key, {"weight": 0})
-        entry["weight"] += 1
+        entry["weight"] += weight_step
         if debug:
             logger.debug("UserDict confirmation: %s weight → %d", key, entry["weight"])
         self.flush()
