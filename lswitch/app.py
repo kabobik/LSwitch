@@ -931,6 +931,21 @@ class LSwitchApp:
         t.start()
 
         try:
+            from PyQt5.QtCore import QTimer
+            import signal
+            
+            # Позволяем Python-обработчику сигналов ловить Ctrl+C
+            def sigint_handler(signum, frame):
+                logger.info("Получен SIGINT (Ctrl+C). Завершение...")
+                qt_app.quit()
+            
+            signal.signal(signal.SIGINT, sigint_handler)
+            
+            # Устанавливаем таймер для периодической передачи управления Python (иначе Qt глушит сигналы)
+            timer = QTimer()
+            timer.timeout.connect(lambda: None)
+            timer.start(500)
+            
             qt_app.exec_()
         finally:
             tray.cleanup()
