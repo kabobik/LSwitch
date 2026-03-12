@@ -51,11 +51,12 @@ class UserDictionary:
         protected_until = entry.get("protected_until", 0)
         return time.time() < protected_until
 
-    def add_correction(self, word: str, lang: str, debug: bool = False) -> None:
-        """Penalise auto-conversion for this word (-1 weight) and set protection."""
+    def add_correction(self, word: str, lang: str, debug: bool = False, weight_step: int = 2) -> None:
+        """Penalise auto-conversion for this word (-weight_step weight) and set protection."""
+        weight_step = max(1, weight_step)
         key = self._key(word, lang)
         entry = self.data["words"].setdefault(key, {"weight": 0})
-        entry["weight"] -= 1
+        entry["weight"] -= weight_step
         # Temporarily protect word from auto-conversion
         timeout = self.data["settings"].get("correction_timeout", 5.0)
         entry["protected_until"] = time.time() + timeout

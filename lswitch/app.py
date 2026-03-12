@@ -462,6 +462,7 @@ class LSwitchApp:
         # Only relevant for Case B (manual conversion); Case A buffer is already empty.
         manual_word: str = ""
         manual_lang: str = ""
+        is_selection_conversion = False
         chars_in_buffer = self.state_manager.context.chars_in_buffer
         if self.user_dict and chars_in_buffer > 0:
             try:
@@ -480,6 +481,7 @@ class LSwitchApp:
                     if sel_text and " " not in sel_text and "\n" not in sel_text and "\t" not in sel_text:
                         manual_word = sel_text
                         manual_lang = "en" if detect_language(sel_text) == "en" else "ru"
+                        is_selection_conversion = True
             except Exception as e:
                 logger.debug("Selection word extraction failed: %s", e)
 
@@ -491,7 +493,7 @@ class LSwitchApp:
                     marker['word'], marker['lang'], debug=self.debug,
                 )
                 logger.info(
-                    "Correction: '%s' (%s) — weight -1",
+                    "Correction: '%s' (%s) — weight -2",
                     marker['word'], marker['lang'],
                 )
             
@@ -522,13 +524,25 @@ class LSwitchApp:
 
         # --- Case B: pure manual conversion → confirm this word needs switching ---
         elif manual_word and manual_lang and self.user_dict:
-            self.user_dict.add_confirmation(
-                manual_word, manual_lang, debug=self.debug, weight_step=self.MANUAL_WEIGHT_STEP
-            )
-            logger.info(
-                "Manual conversion: '%s' (%s) — weight +%d",
-                manual_word, manual_lang, self.MANUAL_WEIGHT_STEP,
-            )
+            if is_selection_conversion:
+                from lswitch.core.text_converter import convert_text
+                target_lang = "ru" if manual_lang == "en" else "en"
+                converted_word = convert_text(manual_word, direction=f"{manual_lang}_to_{target_lang}")
+                self.user_dict.add_correction(
+                    converted_word, target_lang, debug=self.debug, weight_step=self.MANUAL_WEIGHT_STEP
+                )
+                logger.info(
+                    "Selection manual conversion: '%s' (%s) -> penalizing result '%s' (%s) — weight -%d",
+                    manual_word, manual_lang, converted_word, target_lang, self.MANUAL_WEIGHT_STEP
+                )
+            else:
+                self.user_dict.add_confirmation(
+                    manual_word, manual_lang, debug=self.debug, weight_step=self.MANUAL_WEIGHT_STEP
+                )
+                logger.info(
+                    "Manual conversion: '%s' (%s) — weight +%d",
+                    manual_word, manual_lang, self.MANUAL_WEIGHT_STEP,
+                )
 
         try:
             # Save buffer before convert (reset() will clear it)
