@@ -156,7 +156,10 @@ class LSwitchApp:
             self.user_dict = UserDictionary()
 
         self.auto_detector = AutoDetector(
-            dictionary=dictionary, ngrams=ngrams, user_dict=self.user_dict,
+            dictionary=dictionary, 
+            ngrams=ngrams, 
+            user_dict=self.user_dict,
+            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
         )
 
         self.conversion_engine = ConversionEngine(

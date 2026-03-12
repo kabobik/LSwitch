@@ -96,9 +96,7 @@ def test_user_dict_positive_override():
     assert ok is False  # baseline
     
     mock_ud = MagicMock(spec=UserDictionary)
-    mock_ud.is_protected.return_value = False
     mock_ud.get_weight.return_value = 5  # >= default 2
-    mock_ud.data = {'settings': {'min_weight': 2}}
     
     detector.user_dict = mock_ud
     ok, reason = detector.should_convert("hello", "en")
@@ -112,9 +110,7 @@ def test_user_dict_negative_protection():
     assert ok is True  # baseline
     
     mock_ud = MagicMock(spec=UserDictionary)
-    mock_ud.is_protected.return_value = False
     mock_ud.get_weight.return_value = -3  # <= -2
-    mock_ud.data = {'settings': {'min_weight': 2}}
     
     detector.user_dict = mock_ud
     ok, reason = detector.should_convert("ghbdtn", "en")

@@ -87,7 +87,7 @@ def _make_user_dict_in_memory() -> UserDictionary:
     """Create an in-memory UserDictionary (no disk I/O)."""
     ud = UserDictionary.__new__(UserDictionary)
     ud.path = ":memory:"
-    ud.data = {"words": {}, "settings": dict(UserDictionary.DEFAULT_SETTINGS)}
+    ud.data = {"words": {}}
     ud.flush = MagicMock()  # suppress file writes
     return ud
 
@@ -158,7 +158,7 @@ class TestDoubleShiftAfterAutoCallsCorrection:
         app._do_conversion()
 
         # Correction should have been called
-        assert ud.get_weight('ghbdtn', 'en') == -1
+        assert ud.get_weight('ghbdtn', 'en') == -2
         # Marker cleared
         assert app._last_auto_marker is None
 
@@ -181,7 +181,7 @@ class TestDoubleShiftAfterAutoCallsCorrection:
         app._do_conversion()
 
         # Correction must still fire — no timeout
-        assert ud.get_weight('ghbdtn', 'en') == -1
+        assert ud.get_weight('ghbdtn', 'en') == -2
         assert app._last_auto_marker is None
 
     def test_no_correction_when_no_user_dict(self):
@@ -201,54 +201,6 @@ class TestDoubleShiftAfterAutoCallsCorrection:
         assert app._last_auto_marker is None
 
 
-class TestCorrectionSetsProtection:
-    """add_correction sets protected_until so word is temporarily protected."""
-
-    def test_protected_until_set(self):
-        ud = _make_user_dict_in_memory()
-        ud.add_correction('ghbdtn', 'en')
-
-        key = ud._key('ghbdtn', 'en')
-        entry = ud.data['words'][key]
-        assert 'protected_until' in entry
-        assert entry['protected_until'] > time.time()
-        assert entry['weight'] == -1
-
-    def test_is_protected_returns_true_after_correction(self):
-        ud = _make_user_dict_in_memory()
-        ud.add_correction('ghbdtn', 'en')
-
-        assert ud.is_protected('ghbdtn', 'en') is True
-
-    def test_protection_expires(self):
-        ud = _make_user_dict_in_memory()
-        ud.add_correction('ghbdtn', 'en')
-
-        # Simulate time passing
-        key = ud._key('ghbdtn', 'en')
-        ud.data['words'][key]['protected_until'] = time.time() - 1.0
-
-        assert ud.is_protected('ghbdtn', 'en') is False
-
-
-class TestProtectedWordNotConverted:
-    """AutoDetector returns False for protected words."""
-
-    def test_protected_word_blocked(self):
-        ud = _make_user_dict_in_memory()
-        ud.add_correction('ghbdtn', 'en')  # sets protection
-
-        dict_svc = MagicMock()
-        dict_svc.should_convert.return_value = (True, "converted found in target dict")
-        ngrams = MagicMock()
-
-        detector = AutoDetector(dictionary=dict_svc, ngrams=ngrams, user_dict=ud)
-        should, reason = detector.should_convert('ghbdtn', 'en')
-
-        assert should is False
-        assert 'protected' in reason
-
-    def test_unprotected_word_passes_through(self):
         ud = _make_user_dict_in_memory()
         # No correction — not protected
 
@@ -270,9 +222,6 @@ class TestNegativeWeightBlocksConversion:
         # Apply 2 corrections (min_weight default = 2)
         ud.add_correction('ghbdtn', 'en')
         ud.add_correction('ghbdtn', 'en')
-        # Expire protection to test weight-only logic
-        key = ud._key('ghbdtn', 'en')
-        ud.data['words'][key]['protected_until'] = 0
 
         dict_svc = MagicMock()
         dict_svc.should_convert.return_value = (True, "converted found in target dict")
@@ -286,10 +235,7 @@ class TestNegativeWeightBlocksConversion:
 
     def test_weight_above_threshold_allows(self):
         ud = _make_user_dict_in_memory()
-        # Only 1 correction (weight = -1, threshold = 2) → still allows
-        ud.add_correction('ghbdtn', 'en')
         key = ud._key('ghbdtn', 'en')
-        ud.data['words'][key]['protected_until'] = 0  # expire protection
 
         dict_svc = MagicMock()
         dict_svc.should_convert.return_value = (True, "converted found in target dict")

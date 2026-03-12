@@ -23,10 +23,12 @@ class AutoDetector:
     """
 
     def __init__(self, dictionary: "DictionaryService", ngrams: "NgramAnalyzer",
-                 user_dict: "UserDictionary | None" = None):
+                 user_dict: "UserDictionary | None" = None,
+                 user_dict_min_weight: int = 2):
         self.dictionary = dictionary
         self.ngrams = ngrams
         self.user_dict = user_dict
+        self.user_dict_min_weight = user_dict_min_weight
 
     def should_convert(self, word: str | None, current_layout: str) -> tuple[bool, str]:
         """Return (should_convert, reason).
@@ -66,11 +68,9 @@ class AutoDetector:
         # Priority 0: UserDictionary override & protection
         if self.user_dict:
             w_lower = word_clean.lower()
-            if self.user_dict.is_protected(w_lower, current_layout):
-                return (False, "user_dict: temporarily protected")
             
             weight = self.user_dict.get_weight(w_lower, current_layout)
-            min_w = self.user_dict.data.get('settings', {}).get('min_weight', 2)
+            min_w = self.user_dict_min_weight
             
             if weight >= min_w:
                 return (True, "User dict override")

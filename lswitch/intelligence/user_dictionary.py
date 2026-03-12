@@ -18,60 +18,40 @@ DEFAULT_PATH = os.path.expanduser("~/.config/lswitch/user_dict.json")
 
 
 class UserDictionary:
-    """Stores word weights: >0 = prefer EN, <0 = prefer RU.
-
-    |weight| >= threshold triggers auto-conversion suppression.
-    """
-
-    DEFAULT_SETTINGS = {
-        "min_weight": 2,
-        "correction_timeout": 5.0,
-        "threshold": 5,
-    }
+    """Stores word weights: >0 = prefer EN, <0 = prefer RU."""
 
     def __init__(self, path: str = DEFAULT_PATH):
         self.path = path
         self.data: dict = load_json(path, {
             "words": {},
-            "settings": dict(self.DEFAULT_SETTINGS),
         })
         if "words" not in self.data:
             self.data["words"] = {}
-        if "settings" not in self.data:
-            self.data["settings"] = dict(self.DEFAULT_SETTINGS)
 
     def get_weight(self, word: str, lang: str) -> int:
         key = self._key(word, lang)
-        return self.data["words"].get(key, {}).get("weight", 0)
-
-    def is_protected(self, word: str, lang: str) -> bool:
-        """Return True if the word is temporarily protected from auto-conversion."""
-        key = self._key(word, lang)
-        entry = self.data["words"].get(key, {})
-        protected_until = entry.get("protected_until", 0)
-        return time.time() < protected_until
+        return int(self.data["words"].get(key, 0))
 
     def add_correction(self, word: str, lang: str, debug: bool = False, weight_step: int = 2) -> None:
-        """Penalise auto-conversion for this word (-weight_step weight) and set protection."""
+        """Penalise auto-conversion for this word (-weight_step weight)."""
         weight_step = max(1, weight_step)
         key = self._key(word, lang)
-        entry = self.data["words"].setdefault(key, {"weight": 0})
-        entry["weight"] -= weight_step
-        # Temporarily protect word from auto-conversion
-        timeout = self.data["settings"].get("correction_timeout", 5.0)
-        entry["protected_until"] = time.time() + timeout
+        current = self.get_weight(word, lang)
+        new_weight = current - weight_step
+        self.data["words"][key] = new_weight
         if debug:
-            logger.debug("UserDict correction: %s weight → %d, protected for %.1fs", key, entry["weight"], timeout)
+            logger.debug("UserDict correction: %s weight → %d", key, new_weight)
         self.flush()
 
     def add_confirmation(self, word: str, lang: str, debug: bool = False, weight_step: int = 1) -> None:
         """Confirm auto-conversion was correct (+ weight_step)."""
         weight_step = max(1, weight_step)
         key = self._key(word, lang)
-        entry = self.data["words"].setdefault(key, {"weight": 0})
-        entry["weight"] += weight_step
+        current = self.get_weight(word, lang)
+        new_weight = current + weight_step
+        self.data["words"][key] = new_weight
         if debug:
-            logger.debug("UserDict confirmation: %s weight → %d", key, entry["weight"])
+            logger.debug("UserDict confirmation: %s weight → %d", key, new_weight)
         self.flush()
 
     def flush(self) -> None:
