@@ -2,7 +2,6 @@
 name: research-agent
 description: Исследователь кода — глубокий анализ, поиск паттернов, изучение архитектуры (только чтение)
 argument-hint: Что нужно исследовать в коде
-model: Claude Opus 4.6 (copilot)
 tools:
   search/codebase, search/textSearch, search/fileSearch, search/usages, search/listDirectory, read/readFile, read/problems, web/fetch
 ---
