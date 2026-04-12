@@ -1,0 +1,89 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(python3 -c "exec(open('__version__.py').read()); print(__version__)")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+      
+      - name: Check if release exists
+        id: tag_check
+        run: |
+          git fetch --tags origin
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "Release v${{ steps.version.outputs.version }} already exists, skipping"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Set up Python
+        if: steps.tag_check.outputs.skip == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install build dependencies
+        if: steps.tag_check.outputs.skip == 'false'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential fakeroot dpkg-dev
+      
+      - name: Build DEB package
+        if: steps.tag_check.outputs.skip == 'false'
+        run: |
+          chmod +x scripts/build-deb.sh
+          bash scripts/build-deb.sh
+      
+      - name: Verify DEB package
+        if: steps.tag_check.outputs.skip == 'false'
+        run: |
+          ls -lh build/ || ls -la
+          find build -name "*.deb" -type f
+      
+      - name: Create Release
+        if: steps.tag_check.outputs.skip == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: LSwitch v${{ steps.version.outputs.version }}
+          files: build/lswitch_*.deb
+          body: |
+            # LSwitch v${{ steps.version.outputs.version }}
+            
+            ## Installation
+            
+            ### Via DEB package (Ubuntu/Debian)
+            ```bash
+            sudo dpkg -i lswitch_${{ steps.version.outputs.version }}_all.deb
+            ```
+            
+            ### Via pip
+            ```bash
+            pip install lswitch
+            ```
+            
+            See [README.md](https://github.com/${{ github.repository }}/blob/master/README.md) for full installation instructions.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
