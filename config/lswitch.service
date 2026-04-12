@@ -2,6 +2,8 @@
 Description=LSwitch - Layout Switcher (evdev)
 Documentation=https://github.com/kabobik/lswitch
 After=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -10,8 +12,6 @@ Restart=on-failure
 RestartSec=5s
 Environment="PYTHONUNBUFFERED=1"
 Environment="XAUTHORITY=%h/.Xauthority"
-# DISPLAY наследуется из user session, но на всякий случай:
-ImportEnvironment=DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS
 
 StandardOutput=journal
 StandardError=journal

@@ -42,6 +42,11 @@ def parse_args():
         help="Enable trace output (all raw events, ignored transitions; implies --debug)",
     )
     parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="Stop existing instance before starting (safe restart)",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -54,5 +59,5 @@ def main():
     debug = args.debug or args.trace  # --trace implies --debug
     _setup_logging(debug=debug, trace=args.trace)
     from lswitch.app import LSwitchApp
-    app = LSwitchApp(headless=args.headless, debug=debug)
+    app = LSwitchApp(headless=args.headless, debug=debug, replace=args.replace)
     app.run()

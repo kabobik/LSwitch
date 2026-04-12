@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import signal
-import subprocess
-import threading
-
 from PyQt5.QtWidgets import QMenu, QAction
 from PyQt5.QtGui import QIcon
 
@@ -60,23 +55,10 @@ class ContextMenu:
 
         menu.addSeparator()
 
-        # Service status (disabled, informational)
-        self._status_action = QAction(f"{t('status')}: {t('status_unknown')}", menu)
+        # Status (informational — shows this process is running)
+        self._status_action = QAction(f"{t('status')}: active", menu)
         self._status_action.setEnabled(False)
         menu.addAction(self._status_action)
-
-        # Service control actions
-        start_action = QAction(t('start'), menu)
-        start_action.triggered.connect(lambda: threading.Thread(target=self._systemctl, args=("start",), daemon=True).start())
-        menu.addAction(start_action)
-
-        stop_action = QAction(t('stop'), menu)
-        stop_action.triggered.connect(lambda: threading.Thread(target=self._systemctl, args=("stop",), daemon=True).start())
-        menu.addAction(stop_action)
-
-        restart_action = QAction(t('restart'), menu)
-        restart_action.triggered.connect(lambda: threading.Thread(target=self._systemctl, args=("restart",), daemon=True).start())
-        menu.addAction(restart_action)
 
         menu.addSeparator()
 
@@ -103,14 +85,13 @@ class ContextMenu:
         return menu
 
     def update_status(self) -> None:
-        """Refresh the service status label."""
+        """Refresh the status label (always active — we ARE the process)."""
         if self._status_action is None:
             return
-        status = self._get_service_status()
-        self._status_action.setText(f"{t('status')}: {status}")
+        self._status_action.setText(f"{t('status')}: active")
 
     def toggle_auto_switch(self) -> None:
-        """Toggle auto_switch config, save, and SIGHUP daemon."""
+        """Toggle auto_switch config, save, and notify via event bus."""
         if self.config is None:
             return
         current = self.config.get("auto_switch", False)
@@ -119,7 +100,6 @@ class ContextMenu:
         self.config.save()
         if hasattr(self, '_auto_switch_action'):
             self._auto_switch_action.setChecked(new_val)
-        threading.Thread(target=self._sighup_daemon, daemon=True).start()
 
         if self.event_bus is not None:
             import time
@@ -138,58 +118,12 @@ class ContextMenu:
         self.config.save()
         if hasattr(self, '_user_dict_action'):
             self._user_dict_action.setChecked(new_val)
-        threading.Thread(target=self._sighup_daemon, daemon=True).start()
 
         if self.event_bus is not None:
             import time
             self.event_bus.publish(
                 Event(type=EventType.CONFIG_CHANGED, data={"user_dict_enabled": new_val}, timestamp=time.time())
             )
-
-    def update_status_async(self) -> None:
-        """Refresh service status in a background thread to avoid blocking the GUI."""
-        def _worker():
-            status = self._get_service_status()
-            if self._status_action is not None:
-                self._status_action.setText(f"{t('status')}: {status}")
-        threading.Thread(target=_worker, daemon=True).start()
-
-    @staticmethod
-    def _get_service_status() -> str:
-        try:
-            result = subprocess.run(
-                ["systemctl", "--user", "is-active", "lswitch.service"],
-                capture_output=True, text=True, timeout=3,
-            )
-            return result.stdout.strip() or "unknown"
-        except Exception:
-            return "unknown"
-
-    @staticmethod
-    def _systemctl(action: str) -> None:
-        try:
-            subprocess.run(
-                ["systemctl", "--user", action, "lswitch.service"],
-                capture_output=True, text=True, timeout=5,
-            )
-        except Exception:
-            pass
-
-    @staticmethod
-    def _sighup_daemon() -> None:
-        """Send SIGHUP to the running lswitch daemon to reload config."""
-        try:
-            result = subprocess.run(
-                ["systemctl", "--user", "show", "-p", "MainPID", "lswitch.service"],
-                capture_output=True, text=True, timeout=3,
-            )
-            for line in result.stdout.splitlines():
-                if line.startswith("MainPID="):
-                    pid = int(line.split("=")[1])
-                    if pid > 0:
-                        os.kill(pid, signal.SIGHUP)
-        except Exception:
-            pass
 
     @staticmethod
     def _show_about() -> None:

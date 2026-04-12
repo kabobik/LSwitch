@@ -7,6 +7,7 @@ can run in headless CI environments without a display server.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -335,10 +336,10 @@ class TestContextMenu:
     def test_build_has_actions(self, config_mgr, event_bus_ui):
         cm = ContextMenu(config=config_mgr, event_bus=event_bus_ui)
         menu = cm.build()
-        # At least: title, auto_switch, user_dict, status, start, stop, restart, about, quit
+        # At least: title, auto_switch, user_dict, status, about, quit
         # (Plus separators)
         non_sep = [a for a in menu._actions if a != "---separator---"]
-        assert len(non_sep) >= 9
+        assert len(non_sep) >= 6
 
     def test_toggle_auto_switch(self, config_mgr, event_bus_ui):
         cm = ContextMenu(config=config_mgr, event_bus=event_bus_ui)
@@ -356,11 +357,7 @@ class TestContextMenu:
         assert len(received) == 1
         assert received[0].type == EventType.APP_QUIT
 
-    @patch("lswitch.ui.context_menu.subprocess")
-    def test_update_status(self, mock_subprocess, config_mgr, event_bus_ui):
-        mock_result = MagicMock()
-        mock_result.stdout = "active\n"
-        mock_subprocess.run.return_value = mock_result
+    def test_update_status(self, config_mgr, event_bus_ui):
         cm = ContextMenu(config=config_mgr, event_bus=event_bus_ui)
         cm.build()
         cm.update_status()
@@ -626,30 +623,12 @@ class TestGetAdapterKDE:
 
 
 # ===========================================================================
-# GAP #8: subprocess error in systemctl does not crash
+# GAP #8: toggle methods don't crash without event_bus
 # ===========================================================================
 
-class TestSubprocessErrors:
-    @patch("lswitch.ui.context_menu.subprocess")
-    def test_get_service_status_exception(self, mock_subprocess):
-        mock_subprocess.run.side_effect = OSError("systemctl not found")
-        status = ContextMenu._get_service_status()
-        assert status == "unknown"
-
-    @patch("lswitch.ui.context_menu.subprocess")
-    def test_systemctl_exception(self, mock_subprocess):
-        mock_subprocess.run.side_effect = OSError("systemctl not found")
-        # Must not raise
-        ContextMenu._systemctl("start")
-
-    @patch("lswitch.ui.context_menu.subprocess")
-    def test_sighup_daemon_exception(self, mock_subprocess):
-        mock_subprocess.run.side_effect = OSError("systemctl not found")
-        # Must not raise
-        ContextMenu._sighup_daemon()
-
-    @patch("lswitch.ui.context_menu.subprocess")
-    def test_get_service_status_timeout(self, mock_subprocess):
-        mock_subprocess.run.side_effect = subprocess.TimeoutExpired(cmd="systemctl", timeout=3)
-        status = ContextMenu._get_service_status()
-        assert status == "unknown"
+class TestToggleWithNoEventBus:
+    def test_toggle_auto_switch_no_event_bus(self, config_mgr):
+        cm = ContextMenu(config=config_mgr, event_bus=None)
+        cm.build()
+        # Must not raise even with event_bus=None
+        cm.toggle_auto_switch()
