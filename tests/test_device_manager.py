@@ -1,153 +1,282 @@
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+"""Tests for lswitch.input.device_manager — fully mocked evdev."""
+
+from __future__ import annotations
+
+import selectors
 import sys
-import os
-sys.path.insert(0, os.getcwd())
+import types
+from unittest.mock import MagicMock, PropertyMock, patch, call
 
-from lswitch.device_manager import DeviceManager
+import pytest
+
+# ---------------------------------------------------------------------------
+# Build a fake evdev module so we never touch real devices
+# ---------------------------------------------------------------------------
+
+_fake_evdev = types.ModuleType("evdev")
+_fake_ecodes = types.ModuleType("evdev.ecodes")
+
+# Key constants used by DeviceManager
+_fake_ecodes.EV_KEY = 1
+_fake_ecodes.KEY_A = 30
+_fake_ecodes.BTN_LEFT = 0x110
+_fake_ecodes.BTN_RIGHT = 0x111
+
+_fake_evdev.ecodes = _fake_ecodes
+_fake_evdev.InputDevice = MagicMock  # will be patched per-test
+_fake_evdev.list_devices = MagicMock(return_value=[])
+
+# Inject into sys.modules BEFORE importing device_manager
+sys.modules.setdefault("evdev", _fake_evdev)
+sys.modules.setdefault("evdev.ecodes", _fake_ecodes)
+
+from lswitch.input.device_manager import DeviceManager  # noqa: E402
 
 
-class TestDeviceManager:
-    """Tests for DeviceManager class."""
-    
-    def test_device_count_starts_at_zero(self):
-        """Test that device_count starts at 0."""
-        dm = DeviceManager(debug=False)
-        assert dm.device_count == 0
-        dm.close()
-    
-    def test_set_virtual_kb_name(self):
-        """Test setting virtual keyboard name for filtering."""
-        dm = DeviceManager(debug=False)
-        dm.set_virtual_kb_name('LSwitch')
-        assert dm._virtual_kb_name == 'LSwitch'
-        dm.close()
-    
-    def test_is_suitable_device_filters_virtual_kb(self):
-        """Test that _is_suitable_device filters virtual keyboard."""
-        dm = DeviceManager(debug=False)
-        dm.set_virtual_kb_name('LSwitch')
-        
-        mock_device = MagicMock()
-        mock_device.name = 'LSwitch Virtual Keyboard'
-        mock_device.capabilities.return_value = {1: [30]}  # Has KEY_A
-        
-        result = dm._is_suitable_device(mock_device)
-        assert result is False
-        dm.close()
-    
-    def test_is_suitable_device_accepts_keyboard(self):
-        """Test that _is_suitable_device accepts keyboards."""
-        dm = DeviceManager(debug=False)
-        
-        mock_device = MagicMock()
-        mock_device.name = 'Real Keyboard'
-        mock_device.capabilities.return_value = {1: [30]}  # EV_KEY with KEY_A
-        
-        result = dm._is_suitable_device(mock_device)
-        assert result is True
-        dm.close()
-    
-    def test_is_suitable_device_accepts_mouse(self):
-        """Test that _is_suitable_device accepts mice."""
-        dm = DeviceManager(debug=False)
-        
-        mock_device = MagicMock()
-        mock_device.name = 'Mouse'
-        mock_device.capabilities.return_value = {1: [272]}  # EV_KEY with BTN_LEFT
-        
-        result = dm._is_suitable_device(mock_device)
-        assert result is True
-        dm.close()
-    
-    def test_is_suitable_device_rejects_no_ev_key(self):
-        """Test that _is_suitable_device rejects devices without EV_KEY."""
-        dm = DeviceManager(debug=False)
-        
-        mock_device = MagicMock()
-        mock_device.name = 'Touchpad'
-        mock_device.capabilities.return_value = {2: [0, 1]}  # EV_REL only
-        
-        result = dm._is_suitable_device(mock_device)
-        assert result is False
-        dm.close()
-    
-    def test_remove_device_nonexistent(self):
-        """Test removing non-existent device returns False."""
-        dm = DeviceManager(debug=False)
-        result = dm.remove_device('/dev/input/event999')
-        assert result is False
-        dm.close()
-    
-    def test_remove_device_existing(self):
-        """Test removing existing device."""
-        dm = DeviceManager(debug=False)
-        
-        mock_device = MagicMock()
-        mock_device.name = 'Test Device'
-        mock_device.path = '/dev/input/event99'
-        
-        dm.devices['/dev/input/event99'] = mock_device
-        
-        result = dm.remove_device('/dev/input/event99')
-        
-        assert result is True
-        assert dm.device_count == 0
-        mock_device.close.assert_called_once()
-        dm.close()
-    
-    def test_callbacks_on_remove(self):
-        """Test that on_device_removed callback is called."""
-        removed = []
-        dm = DeviceManager(
-            debug=False,
-            on_device_removed=lambda d: removed.append(d.name)
-        )
-        
-        mock_device = MagicMock()
-        mock_device.name = 'Disconnected Device'
-        mock_device.path = '/dev/input/event50'
-        
-        dm.devices['/dev/input/event50'] = mock_device
-        dm.remove_device('/dev/input/event50')
-        
-        assert 'Disconnected Device' in removed
-        dm.close()
-    
-    def test_handle_read_error_removes_device(self):
-        """Test that handle_read_error removes the device."""
-        dm = DeviceManager(debug=False)
-        
-        mock_device = MagicMock()
-        mock_device.name = 'Failing Device'
-        mock_device.path = '/dev/input/event77'
-        
-        dm.devices['/dev/input/event77'] = mock_device
-        dm.handle_read_error(mock_device, OSError("Device unplugged"))
-        
-        assert dm.device_count == 0
-        dm.close()
-    
-    def test_context_manager(self):
-        """Test context manager protocol."""
-        with DeviceManager(debug=False) as dm:
-            assert dm is not None
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_device(
+    name: str = "Test Keyboard",
+    path: str = "/dev/input/event0",
+    has_ev_key: bool = True,
+    has_key_a: bool = True,
+    has_btn_left: bool = False,
+) -> MagicMock:
+    """Create a mock evdev.InputDevice."""
+    dev = MagicMock()
+    dev.name = name
+    dev.path = path
+    dev.fd = 42  # selectors needs a fileno-like attribute
+
+    keys: list[int] = []
+    if has_key_a:
+        keys.append(_fake_ecodes.KEY_A)
+    if has_btn_left:
+        keys.append(_fake_ecodes.BTN_LEFT)
+
+    caps: dict = {}
+    if has_ev_key:
+        caps[_fake_ecodes.EV_KEY] = keys
+
+    dev.capabilities.return_value = caps
+    dev.read.return_value = []
+    dev.close.return_value = None
+    # Make fileno() work for DefaultSelector
+    dev.fileno.return_value = id(dev) % (2**31)
+    return dev
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestScanDevices:
+    def test_finds_suitable_device(self):
+        dev = _make_device(path="/dev/input/event0")
+        with patch.object(_fake_evdev, "list_devices", return_value=["/dev/input/event0"]), \
+             patch.object(_fake_evdev, "InputDevice", return_value=dev):
+            dm = DeviceManager()
+            # Patch selector to avoid real fd registration
+            dm.selector = MagicMock()
+            count = dm.scan_devices()
+            assert count == 1
+            assert "/dev/input/event0" in dm.devices
+
+    def test_skips_device_without_ev_key(self):
+        dev = _make_device(has_ev_key=False, path="/dev/input/event1")
+        with patch.object(_fake_evdev, "list_devices", return_value=["/dev/input/event1"]), \
+             patch.object(_fake_evdev, "InputDevice", return_value=dev):
+            dm = DeviceManager()
+            dm.selector = MagicMock()
+            count = dm.scan_devices()
+            assert count == 0
             assert dm.device_count == 0
-    
-    def test_udev_not_started_without_pyudev(self):
-        """Test that udev monitor gracefully handles missing pyudev."""
-        with patch.object(
-            sys.modules['lswitch.device_manager'], 
-            'PYUDEV_AVAILABLE', 
-            False
-        ):
-            dm = DeviceManager(debug=True)
-            result = dm.start_udev_monitor()
-            assert result is False
-            dm.close()
-    
-    def test_stop_udev_monitor_without_start(self):
-        """Test stopping udev monitor when not started."""
-        dm = DeviceManager(debug=False)
-        dm.stop_udev_monitor()  # Should not raise
+
+    def test_skips_device_without_key_a_or_btn(self):
+        dev = _make_device(has_key_a=False, has_btn_left=False, path="/dev/input/event2")
+        with patch.object(_fake_evdev, "list_devices", return_value=["/dev/input/event2"]), \
+             patch.object(_fake_evdev, "InputDevice", return_value=dev):
+            dm = DeviceManager()
+            dm.selector = MagicMock()
+            count = dm.scan_devices()
+            assert count == 0
+
+    def test_accepts_mouse_device(self):
+        dev = _make_device(name="Mouse", has_key_a=False, has_btn_left=True, path="/dev/input/event3")
+        with patch.object(_fake_evdev, "list_devices", return_value=["/dev/input/event3"]), \
+             patch.object(_fake_evdev, "InputDevice", return_value=dev):
+            dm = DeviceManager()
+            dm.selector = MagicMock()
+            count = dm.scan_devices()
+            assert count == 1
+
+
+class TestIsSuitableDevice:
+    def test_filters_virtual_kb_by_name(self):
+        dm = DeviceManager()
+        dm.set_virtual_kb_name("LSwitch Virtual Keyboard")
+        dev = _make_device(name="LSwitch Virtual Keyboard")
+        assert dm._is_suitable_device(dev) is False
+
+    def test_filters_via_device_filter(self):
+        """device_filter excludes names containing 'virtual', 'lswitch', 'uinput'."""
+        dm = DeviceManager()
+        dev = _make_device(name="Some Virtual Device")
+        assert dm._is_suitable_device(dev) is False
+
+    def test_accepts_real_keyboard(self):
+        dm = DeviceManager()
+        dev = _make_device(name="AT Translated Set 2 keyboard")
+        assert dm._is_suitable_device(dev) is True
+
+
+class TestRemoveDevice:
+    def test_remove_existing_device(self):
+        dm = DeviceManager()
+        dm.selector = MagicMock()
+        dev = _make_device(path="/dev/input/event0")
+        dm.devices["/dev/input/event0"] = dev
+
+        result = dm.remove_device("/dev/input/event0")
+        assert result is True
+        assert "/dev/input/event0" not in dm.devices
+        dev.close.assert_called_once()
+
+    def test_remove_nonexistent_device(self):
+        dm = DeviceManager()
+        result = dm.remove_device("/dev/input/event99")
+        assert result is False
+
+    def test_remove_calls_on_device_removed(self):
+        callback = MagicMock()
+        dm = DeviceManager(on_device_removed=callback)
+        dm.selector = MagicMock()
+        dev = _make_device(path="/dev/input/event0")
+        dm.devices["/dev/input/event0"] = dev
+
+        dm.remove_device("/dev/input/event0")
+        callback.assert_called_once_with(dev)
+
+
+class TestGetEvents:
+    def test_yields_events_from_device(self):
+        dm = DeviceManager()
+
+        ev1 = MagicMock()
+        ev2 = MagicMock()
+        dev = _make_device()
+        dev.read.return_value = [ev1, ev2]
+
+        key = MagicMock()
+        key.fileobj = dev
+
+        dm.selector = MagicMock()
+        dm.selector.select.return_value = [(key, selectors.EVENT_READ)]
+
+        events = list(dm.get_events(timeout=0.01))
+        assert len(events) == 2
+        assert events[0] == (dev, ev1)
+        assert events[1] == (dev, ev2)
+
+    def test_handles_read_error_gracefully(self):
+        dm = DeviceManager()
+        dm.selector = MagicMock()
+
+        dev = _make_device(path="/dev/input/event0")
+        dev.read.side_effect = OSError("device disconnected")
+        dm.devices["/dev/input/event0"] = dev
+
+        key = MagicMock()
+        key.fileobj = dev
+        dm.selector.select.return_value = [(key, selectors.EVENT_READ)]
+
+        events = list(dm.get_events(timeout=0.01))
+        assert events == []
+        # Device should have been removed
+        assert "/dev/input/event0" not in dm.devices
+
+
+class TestCallbacks:
+    def test_on_device_added_called(self):
+        callback = MagicMock()
+        dm = DeviceManager(on_device_added=callback)
+        dm.selector = MagicMock()
+
+        dev = _make_device(path="/dev/input/event0")
+        with patch.object(_fake_evdev, "InputDevice", return_value=dev):
+            dm._try_add_device("/dev/input/event0")
+
+        callback.assert_called_once_with(dev)
+
+    def test_on_device_removed_called(self):
+        callback = MagicMock()
+        dm = DeviceManager(on_device_removed=callback)
+        dm.selector = MagicMock()
+
+        dev = _make_device(path="/dev/input/event0")
+        dm.devices["/dev/input/event0"] = dev
+        dm.remove_device("/dev/input/event0")
+
+        callback.assert_called_once_with(dev)
+
+    def test_callback_exception_does_not_propagate(self):
+        callback = MagicMock(side_effect=RuntimeError("boom"))
+        dm = DeviceManager(on_device_added=callback)
+        dm.selector = MagicMock()
+
+        dev = _make_device(path="/dev/input/event0")
+        with patch.object(_fake_evdev, "InputDevice", return_value=dev):
+            result = dm._try_add_device("/dev/input/event0")
+
+        assert result is True  # should succeed despite callback error
+
+
+class TestClose:
+    def test_close_does_not_crash(self):
+        dm = DeviceManager()
+        dm.selector = MagicMock()
+        dm.close()  # should not raise
+
+    def test_close_cleans_up_devices(self):
+        dm = DeviceManager()
+        dm.selector = MagicMock()
+        dev = _make_device(path="/dev/input/event0")
+        dm.devices["/dev/input/event0"] = dev
+
         dm.close()
+        assert dm.device_count == 0
+        dev.close.assert_called_once()
+
+
+class TestContextManager:
+    def test_context_manager_calls_close(self):
+        dm = DeviceManager()
+        dm.selector = MagicMock()
+        dm.close = MagicMock()
+
+        with dm:
+            pass
+
+        dm.close.assert_called_once()
+
+    def test_context_manager_returns_self(self):
+        dm = DeviceManager()
+        dm.selector = MagicMock()
+
+        with dm as ctx:
+            assert ctx is dm
+
+        dm.close()
+
+
+class TestDeviceCount:
+    def test_device_count_property(self):
+        dm = DeviceManager()
+        assert dm.device_count == 0
+        dm.devices["a"] = MagicMock()
+        dm.devices["b"] = MagicMock()
+        assert dm.device_count == 2

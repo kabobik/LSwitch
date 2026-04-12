@@ -1,8 +1,8 @@
-# LSwitch - Быстрый переключатель раскладки клавиатуры
+# LSwitch — переключатель раскладки клавиатуры
 
 Перехватчик событий клавиатуры на уровне ядра (evdev) для быстрого преобразования текста между английской и русской раскладками через двойное нажатие Shift.
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-Linux-green.svg)](https://www.linux.org/)
 
@@ -18,14 +18,13 @@ git clone https://github.com/kabobik/lswitch.git && cd lswitch && bash scripts/i
 ## Возможности
 
 - ✅ **Конвертация текста по двойному Shift** — нажми Shift дважды быстро, и текст конвертируется
-- ✅ **Работает везде** — X11, Wayland (XWayland), консоль (tty), все приложения
-- ✅ **Перехват на уровне ядра** — через `/dev/input/`, максимальная скорость
-- ✅ **Конвертация слова или выделения** — последнее слово ИЛИ выделенный пользователем текст
+- ✅ **Перехват на уровне ядра** — через `/dev/input/`, работает во всех приложениях
+- ✅ **Конвертация слова или выделения** — последнее напечатанное слово ИЛИ выделенный текст
 - ✅ **EN ⟷ RU** — английский ↔ русский
-- ✅ **GUI панель управления** — удобный интерфейс (PyQt5)
+- ✅ **Автоопределение раскладки** — по n-граммам и словарю
+- ✅ **Самообучающийся словарь** — учится на истории ошибок пользователя
+- ✅ **GUI иконка в трее** — статус и управление через PyQt5
 - ✅ **systemd демон** — автозапуск при входе в систему
-- ✅ **Самообучающийся словарь** — учится на истории ошибок
-- ✅ **Автоматическая установка** — скрипт проверяет все зависимости
 
 ## Установка
 
@@ -33,17 +32,17 @@ git clone https://github.com/kabobik/lswitch.git && cd lswitch && bash scripts/i
 
 | Компонент | Назначение | Критичность |
 |-----------|-----------|-------------|
-| Python 3.8+ | Основной интерпретатор | **Критично** |
+| Python 3.10+ | Основной интерпретатор | **Критично** |
 | pip3 | Установка Python пакетов | **Критично** |
-| python3-dev | Компиляция evdev | **Критично** |
-| xclip | Работа с буфером обмена | **Критично** |
-| xdotool | Эмуляция клавиш | **Критично** |
-| PyQt5 | GUI панель (lswitch-control) | Для GUI |
+| evdev | Чтение событий клавиатуры из `/dev/input/` | **Критично** |
+| python-xlib | Определение раскладки, X11 | **Критично** |
+| pyudev | Мониторинг hot-plug устройств | **Критично** |
+| PyQt5 | Иконка в системном трее | Рекомендуется |
 | systemd | Управление демоном | Рекомендуется |
 
-**Display Server:** X11 (основной), Wayland (ограниченная поддержка через XWayland)
+**Display Server:** X11 (основной), Wayland через XWayland
 
-### Быстрая установка (рекомендуется)
+### Установка из исходников
 
 ```bash
 git clone https://github.com/kabobik/lswitch.git
@@ -52,344 +51,212 @@ bash scripts/install.sh
 ```
 
 Скрипт автоматически:
-- ✅ Проверит Python 3.8+ и все зависимости
-- ✅ Обнаружит существующую установку (безопасная переустановка)
-- ✅ Установит системные пакеты (xclip, xdotool, python3-dev)
-- ✅ Установит Python пакет с GUI (PyQt5)
-- ✅ Скопирует systemd unit, udev-правила, .desktop файл
-- ✅ Добавит вас в группу `input` (для доступа к /dev/input)
-- ✅ Предложит включить автозапуск
+- Проверит Python 3.10+ и все зависимости
+- Установит недостающие пакеты через apt
+- Скопирует приложение в `~/.local/share/lswitch/`
+- Создаст команду `lswitch` в `~/.local/bin/`
+- Установит systemd unit, udev правила, иконку, ярлык в меню
+- Предложит включить автозапуск
 
-⚠️ **ВАЖНО:** После **первой** установки **перелогиньтесь** (выйти и войти заново) для применения прав доступа к группе input.
+⚠️ **После первой установки перелогиньтесь** — права группы `input` применяются только после logout.
 
-> **Переустановка:** Скрипт безопасен для повторного запуска. При переустановке он автоматически остановит демон, обновит файлы и перезапустит сервис.
+### Установка через .deb (Ubuntu/Debian)
 
-### Проверка зависимостей
-
-После установки можно проверить, что всё на месте:
+Скачайте `.deb` из [Releases](https://github.com/kabobik/lswitch/releases) или соберите сами:
 
 ```bash
-python3 scripts/check_dependencies.py
+bash scripts/build-deb.sh
+sudo dpkg -i build/lswitch_2.0.0_all.deb
+sudo apt install -f  # если нужны зависимости
 ```
 
-Скрипт проверит:
-- ✅ Python и его версию (>= 3.8)
-- ✅ Python пакеты (evdev, python-xlib, PyQt5)
-- ✅ Системные утилиты (xclip, xdotool)
-- ✅ Команды (lswitch, lswitch-control)
-- ✅ Группу input
-- ✅ Display server (X11/Wayland)
+### Удаление
 
-### Ручная установка
+```bash
+# Если ставили через install.sh:
+bash scripts/install.sh --remove
 
-Если предпочитаете установить вручную, см. [docs/INSTALL.md](docs/INSTALL.md)
+# Если ставили через .deb:
+sudo apt remove lswitch
+```
 
 ## Использование
 
-### Запуск GUI (рекомендуется)
+### GUI
 
-После установки запустите:
+После запуска иконка LSwitch появляется в системном трее. Правая кнопка мыши — меню управления:
+- Переключить авто-конвертацию
+- Переключить самообучающийся словарь
+- Статус systemd сервиса / старт / стоп / рестарт
+- Debug Monitor (если `"debug": true` в конфиге)
 
-```bash
-lswitch-control
-```
-
-Или найдите в меню приложений: **Приложения → LSwitch Control**
-
-**Возможности GUI:**
-- Включение/выключение сервиса
-- Настройка параметров
-- Просмотр логов
-- Информация о системе
-
-### Управление демоном (systemd)
+### Управление сервисом
 
 ```bash
-# Запустить
-systemctl --user start lswitch
-
-# Включить автозапуск
-systemctl --user enable lswitch
-
-# Запустить и включить автозапуск
-systemctl --user enable --now lswitch
-
-# Проверить статус
-systemctl --user status lswitch
-
-# Просмотр логов
-journalctl --user-unit=lswitch -f
-```
-
-**Или через Makefile:**
-```bash
-make enable   # Автозапуск + старт
-make status   # Статус
-make logs     # Логи
-make stop     # Остановить
+systemctl --user enable --now lswitch  # автозапуск + старт
+systemctl --user disable lswitch       # отключить автозапуск
+systemctl --user start lswitch         # запустить
+systemctl --user stop lswitch          # остановить
+systemctl --user restart lswitch       # перезапустить
+systemctl --user status lswitch        # статус
+journalctl --user-unit=lswitch -f      # следить за логами
 ```
 
 ### Запуск вручную (для отладки)
 
 ```bash
-# Обычный запуск
-lswitch
-
-# С отладочными сообщениями
-lswitch --debug
+lswitch           # запуск с GUI
+lswitch --headless  # без GUI (headless daemon)
+lswitch --debug   # с отладочными сообщениями
+lswitch --trace   # с трассировкой всех событий
+lswitch --replace # остановить предыдущий экземпляр и запустить новый
 ```
+
+> **Защита от двойного запуска:** LSwitch использует PID lock — если экземпляр уже работает, второй не запустится. Для замены используйте `--replace`.
 
 ## Как это работает
 
-1. **Перехват события:** Программа слушает событие "нажимание Shift" через `/dev/input/`
-2. **Детектор двойного клика:** Ждёт второго нажатия Shift в течение 0.3 сек
-3. **Получение текста:** Извлекает последнее слово (или выделенный текст) из буфера обмена
-4. **Конвертация:** Преобразует текст через словарь (EN ↔ RU)
-5. **Вставка:** Удаляет оригинальный текст (Backspace) и вставляет конвертированный (Ctrl+V)
-6. **Переключение раскладки:** Автоматически переключает раскладку (Alt+Shift)
+1. **Перехват:** Демон слушает все события клавиатуры через `/dev/input/` (evdev)
+2. **Детектор двойного Shift:** При двух нажатиях Shift с интервалом < `double_click_timeout` сек — срабатывание
+3. **Получение текста:** Извлекает последнее слово из внутреннего буфера событий ИЛИ выделение (X11 PRIMARY)
+4. **Конвертация:** Посимвольное преобразование EN ↔ RU через таблицу маппинга
+5. **Вставка:** Удаляет оригинал (Backspace × N) и «перепечатывает» конвертированный текст через виртуальную клавиатуру
+6. **Переключение раскладки:** Посылает `layout_switch_key` если `switch_layout_after_convert: true`
 
 ## Примеры
 
-| Введи | Двойной Shift | Результат |
-|------|---|---|
-| `ghbdtn` | → | `привет` (+ раскладка на RU) |
-| `привет` | → | `ghbdtn` (+ раскладка на EN) |
-| `ghbdtn vbh` (выделено) | → | `привет мир` (+ раскладка на RU) |
-| `Руддщ цщкдв` (выделено) | → | `Hello world` (+ раскладка на EN) |
+| Введи (не та раскладка) | Двойной Shift | Результат |
+|---|---|---|
+| `ghbdtn` | → | `привет` (+ переключает на RU) |
+| `привет` | → | `ghbdtn` (+ переключает на EN) |
+| `ghbdtn vbh` (выделено) | → | `привет мир` |
+| `Hello world` (выделено) | → | `Руддщ цщкдв` |
 
 ## Конфигурация
 
-Конфиг находится в `~/.config/lswitch/config.json` (создаётся автоматически при первом запуске):
+Конфиг: `~/.config/lswitch/config.json` (создаётся автоматически при первом запуске).
 
 ```json
 {
-  "double_shift_timeout": 0.3,
+  "double_click_timeout": 0.3,
   "switch_layout_after_convert": true,
-  "repair_enabled": false,
+  "layout_switch_key": "Alt_L+Shift_L",
   "debug": false,
-  "layouts": ["en", "ru"],
-  "conversion_rules": "en->ru",
-  "keyboard_layout_switch_key": "Alt_L+Shift_L"
+  "auto_switch": false,
+  "auto_switch_threshold": 40,
+  "user_dict_enabled": true,
+  "user_dict_min_weight": 2,
+  "app_policies": {
+    "Code": "retype",
+    "Firefox": "selection"
+  }
 }
 ```
 
 **Параметры:**
-- `double_shift_timeout` — максимальное время между двумя нажатиями Shift (сек)
-- `switch_layout_after_convert` — автоматически переключать раскладку после конвертации
-- `repair_enabled` — включить попытки восстановления при ошибках (обычно `false`)
-- `debug` — выводить отладочные сообщения
-- `keyboard_layout_switch_key` — комбинация для переключения раскладки (Alt+Shift, Ctrl+Shift, Win+Space)
+- `double_click_timeout` — максимальный интервал между двумя Shift (сек)
+- `switch_layout_after_convert` — переключать раскладку после конвертации
+- `layout_switch_key` — комбинация переключения раскладки (`Alt_L+Shift_L`, `Ctrl_L+Shift_L`)
+- `debug` — отладочные сообщения + пункт Debug Monitor в трее
+- `auto_switch` — автоматически определять и конвертировать раскладку
+- `auto_switch_threshold` — порог уверенности авто-детектора (%)
+- `user_dict_enabled` — самообучающийся словарь
+- `app_policies` — режим конвертации по имени окна: `"retype"` или `"selection"`
 
-После изменения конфига перезапустите сервис:
+После изменения конфига:
 ```bash
-systemctl --user restart lswitch
+make restart
+# или SIGHUP для перезагрузки без рестарта:
+systemctl --user kill -s HUP lswitch
 ```
 
 ## Архитектура
 
 ```
 lswitch/
-├── core.py              # Основной цикл обработки событий
-├── cli.py               # Интерфейс командной строки
+├── app.py               # Точка входа и главный цикл
+├── cli.py               # Аргументы командной строки
+├── config.py            # Загрузка и сохранение конфига
 │
-├── adapters/            # Адаптеры для DE
-│   ├── x11.py          # X11 clipboard/selection
-│   ├── kde.py          # KDE Plasma GUI
-│   ├── cinnamon.py     # Linux Mint Cinnamon GUI
-│   └── base.py         # Базовый класс
+├── core/                # Ядро: состояния, события, конвертация
+│   ├── state_manager.py # FSM состояний (IDLE/TYPING/CONVERTING...)
+│   ├── event_manager.py # Маршрутизация evdev событий
+│   ├── event_bus.py     # Внутренняя шина событий
+│   ├── conversion_engine.py  # Движок конвертации текста
+│   └── text_converter.py     # Посимвольная конвертация EN ↔ RU
 │
-├── utils/              # Утилиты
-│   ├── keyboard.py     # evdev, виртуальная клавиатура
-│   ├── buffer.py       # Буфер последних слов
-│   └── desktop.py      # Определение DE
+├── input/               # Работа с устройствами ввода
+│   ├── device_manager.py  # Сканирование и hot-plug /dev/input/
+│   ├── virtual_keyboard.py # Виртуальная клавиатура (uinput)
+│   └── key_mapper.py    # Маппинг keycode → символ
 │
-├── conversion.py       # Движок конвертации (EN ↔ RU)
-├── selection.py        # Работа с выделениями
-├── dictionary.py       # Словарь слов
-├── ngrams.py          # N-грамм анализ для автоисправления
-└── user_dictionary.py # Пользовательский словарь
+├── intelligence/        # Умные функции
+│   ├── auto_detector.py     # Авто-определение раскладки
+│   ├── ngram_analyzer.py    # N-грамм анализ
+│   ├── dictionary_service.py # Словарный сервис
+│   └── user_dictionary.py   # Пользовательский словарь
+│
+├── platform/            # Платформо-зависимый код
+│   ├── clipboard.py         # Работа с буфером обмена
+│   └── selection_adapter.py # X11 PRIMARY selection
+│
+└── ui/                  # Графический интерфейс
+    ├── tray_icon.py     # Иконка в системном трее
+    ├── context_menu.py  # Меню трея
+    ├── debug_monitor.py # Окно отладки (real-time буфер и состояние)
+    └── config_dialog.py # Диалог настроек
 ```
-
-Подробнее: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Тестирование
 
-Проект покрыт автоматическими тестами для обеспечения стабильности.
-
 ```bash
-# Запуск всех тестов
-pytest -v
-
-# Запуск конкретного теста
-pytest tests/test_conversion.py -v
-
-# С покрытием кода
-pytest --cov=lswitch tests/
-
-# Быстрые тесты (без медленных)
-pytest -v -m "not slow"
+pytest tests/ -v             # все тесты
+pytest tests/ --cov=lswitch  # с покрытием кода
+pytest tests/test_conversion_engine.py -v  # конкретный модуль
 ```
 
-**Или через Makefile:**
-```bash
-make test        # Запуск тестов
-make test-cov    # С покрытием
-```
-
-📊 **Статус:** 48 тестовых модулей, все проходят ✅
-
-Подробнее: [docs/TESTS.md](docs/TESTS.md)
+📊 **Статус:** 30 тестовых модулей
 
 ## Решение проблем
 
-### Проверка зависимостей
-
-Первый шаг при любых проблемах:
+### PermissionError: `/dev/input/eventX`
 
 ```bash
-python3 scripts/check_dependencies.py
-```
-
-Этот скрипт проверит все зависимости и покажет чёткие инструкции по исправлению.
-
-### Пользователь не в группе input
-
-**Проблема:** `PermissionError: [Errno 13] Permission denied: '/dev/input/event0'`
-
-**Решение:**
-```bash
-# Добавить себя в группу input
 sudo usermod -a -G input $USER
-
-# Перелогиниться (ОБЯЗАТЕЛЬНО!)
-# Изменения групп применяются только после logout
-
-# Проверить
-groups | grep input
+# Затем перелогиниться
 ```
 
-### PyQt5 не установлен
+### Иконка трея не появляется (headless сервер)
 
-**Проблема:** `lswitch-control` не запускается
-
-**Решение:**
+Запустите с `--headless`:
 ```bash
-# Ubuntu/Debian
-sudo apt install python3-pyqt5
-
-# Или через pip
-sudo pip3 install PyQt5
+lswitch --headless
 ```
+
+Или в конфиге выставьте `"debug": false` и убедитесь что `DISPLAY` доступен для systemd unit.
 
 ### Конвертация не работает
 
-1. **Проверьте статус демона:**
-   ```bash
-   systemctl --user status lswitch
-   ```
-
-2. **Посмотрите логи:**
-   ```bash
-   journalctl --user-unit=lswitch -n 50
-   ```
-
-3. **Запустите в режиме отладки:**
-   ```bash
-   lswitch --debug
-   ```
-
-🔗 **Подробнее:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-
-## Документация
-
-- 🚀 [Быстрый старт](docs/QUICKSTART.md) — начало за 5 минут
-- 📖 [Подробная установка](docs/INSTALL.md) — детальные шаги, требования для разных дистрибутивов
-- 🏗️ [Архитектура](docs/ARCHITECTURE.md) — техническое устройство
-- 🔧 [Права доступа](docs/PERMISSIONS.md) — настройка evdev и группы input
-- 🐛 [Решение проблем](docs/TROUBLESHOOTING.md) — FAQ и диагностика
-- 📝 [История изменений](docs/CHANGELOG.md) — что нового
-- 📊 [Тестирование](docs/TESTS.md) — запуск тестов
-
-**Скрипты:**
-- `scripts/install.sh` — автоматическая установка с проверками
-- `scripts/check_dependencies.py` — проверка всех зависимостей
-- `scripts/uninstall.sh` — полное удаление из системы
+```bash
+make status                          # статус сервиса
+make logs                            # логи в реальном времени
+lswitch --debug                      # запуск с отладкой вручную
+```
 
 ## Разработка
-
-### Локальный запуск
 
 ```bash
 git clone https://github.com/kabobik/lswitch.git
 cd lswitch
 
-# Установить зависимости (базовые + GUI + dev)
+# Установить в editable режиме (для разработки)
 pip install -e ".[gui,dev]"
 
-# Проверить зависимости
-python3 scripts/check_dependencies.py
-
 # Запустить тесты
-pytest -v
+pytest tests/ -v
 
-# Запустить приложение в отладке
-lswitch --debug
-
-# Или через make
-make test     # Тесты
-make lint     # Проверка кода
-make install  # Установка
-```
-
-### Структура проекта
-
-```
-lswitch/
-├── core.py              # Основной цикл обработки событий
-├── cli.py               # CLI интерфейс
-├── adapters/            # Адаптеры для Desktop Environment
-│   ├── x11.py          # X11 clipboard/selection
-│   └── base.py         # Базовый класс
-├── handlers/           # Обработчики событий
-├── managers/           # Менеджеры (конфиг, состояние)
-├── processors/         # Обработка текста
-├── utils/              # Утилиты
-├── conversion.py       # Движок конвертации EN ↔ RU
-├── dictionary.py       # Словарь слов
-└── user_dictionary.py  # Пользовательский словарь
-
-scripts/
-├── install.sh              # Автоматическая установка
-├── check_dependencies.py   # Проверка зависимостей
-└── uninstall.sh           # Удаление
-
-tests/                  # 48 тестовых модулей
-docs/                   # Документация
-```
-
-Подробнее: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-
-### Добавление новой раскладки
-
-1. Отредактируйте `lswitch/conversion.py` — добавьте таблицу конвертации
-2. Обновите `lswitch/conversion_maps.py` — добавьте маппинг клавиш
-3. Добавьте тесты в `tests/test_conversion.py`
-4. Обновите документацию
-
-### Тестирование
-
-```bash
-# Все тесты
-make test
-
-# С покрытием
-make test-cov
-
-# Конкретный модуль
-pytest tests/test_conversion.py -v
-
-# В режиме watch (автоперезапуск)
-ptw --runner "pytest -v"
+# Запустить с трассировкой событий
+lswitch --trace
 ```
 
 ## Лицензия
