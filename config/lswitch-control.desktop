@@ -1,17 +1,15 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=LSwitch Control
-Name[ru]=LSwitch Управление
+Name=LSwitch
+Name[ru]=LSwitch
 GenericName=Keyboard Layout Switcher
 GenericName[ru]=Переключатель раскладки клавиатуры
-Comment=Control panel for LSwitch keyboard layout switcher
-Comment[ru]=Панель управления переключателем раскладки LSwitch
+Comment=Keyboard layout switcher with tray icon
+Comment[ru]=Переключатель раскладки с иконкой в трее
 Icon=lswitch
 Exec=lswitch
 Terminal=false
-Categories=Utility;Settings;
-Keywords=keyboard;layout;switch;language;control;
+Categories=Utility;
+Keywords=keyboard;layout;switch;language;tray;
 StartupNotify=false
-X-GNOME-Autostart-enabled=true
-X-KDE-autostart-after=panel

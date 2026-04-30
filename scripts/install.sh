@@ -169,12 +169,12 @@ ENTRY
     chmod +x "$BIN_DIR/$APP_NAME"
     ok "Команда: $BIN_DIR/$APP_NAME"
 
-    # 4. systemd unit
-    info "Установка systemd сервиса..."
+    # 4. systemd unit (optional headless mode)
+    info "Установка опционального systemd headless unit..."
     mkdir -p "$SYSTEMD_DIR"
     cp "$PROJECT_DIR/config/lswitch.service" "$SYSTEMD_DIR/$APP_NAME.service"
     systemctl --user daemon-reload
-    ok "Сервис установлен"
+    ok "Headless unit установлен"
 
     # 5. Иконка
     info "Установка иконки..."
@@ -214,24 +214,21 @@ ENTRY
         echo "       export PATH=\"\$HOME/.local/bin:\$PATH\""
     fi
 
+    if systemctl --user is-enabled "$APP_NAME" >/dev/null 2>&1; then
+        warn "Headless-сервис уже включён. Для GUI-режима отключите его:"
+        echo "       systemctl --user disable --now $APP_NAME"
+    fi
+
     echo ""
     echo "╔══════════════════════════════════════╗"
     echo "║   Установка завершена!               ║"
     echo "╚══════════════════════════════════════╝"
     echo ""
-    echo "  Запуск:       $APP_NAME"
-    echo "  Автозапуск:   systemctl --user enable --now $APP_NAME"
-    echo "  Статус:       systemctl --user status $APP_NAME"
-    echo "  Удаление:     bash scripts/install.sh --remove"
+    echo "  Запуск GUI:           $APP_NAME"
+    echo "  Headless опционально: systemctl --user enable --now $APP_NAME"
+    echo "  Отключить headless:   systemctl --user disable --now $APP_NAME"
+    echo "  Удаление:             bash scripts/install.sh --remove"
     echo ""
-
-    # Предложить включить автозапуск
-    read -rp "Включить автозапуск? [Y/n] " answer
-    answer="${answer:-y}"
-    if [[ "$answer" =~ ^[Yy]$ ]]; then
-        systemctl --user enable --now "$APP_NAME"
-        ok "Автозапуск включён, сервис запущен"
-    fi
 }
 
 # ─── Точка входа ───────────────────────────────────────────────

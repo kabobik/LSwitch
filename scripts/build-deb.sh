@@ -87,7 +87,7 @@ Description: Keyboard layout switcher with auto-conversion
  system tray GUI.
 EOF
 
-# postinst — добавить пользователя в группу input, обновить udev
+# postinst — обновить udev и показать per-user шаги
 cat > "$PKG_DIR/DEBIAN/postinst" << 'EOF'
 #!/bin/sh
 set -e
@@ -104,7 +104,12 @@ echo "LSwitch установлен!"
 echo ""
 echo "  1. Добавьте себя в группу input:  sudo usermod -a -G input \$USER"
 echo "  2. Перелогиньтесь"
-echo "  3. Включите автозапуск: systemctl --user enable --now lswitch"
+echo "  3. Запустите GUI: lswitch"
+echo ""
+echo "  Headless без иконки в трее (опционально):"
+echo "      systemctl --user enable --now lswitch"
+echo ""
+echo "  Не запускайте GUI и headless-сервис одновременно."
 echo ""
 EOF
 chmod +x "$PKG_DIR/DEBIAN/postinst"
