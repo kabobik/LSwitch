@@ -76,8 +76,7 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: $ARCH
-Depends: python3 (>= 3.10), python3-evdev, python3-xlib, python3-pyudev
-Recommends: python3-pyqt6, wl-clipboard
+Depends: python3 (>= 3.10), python3-evdev, python3-xlib, python3-pyudev, python3-pyqt6, wl-clipboard, qt6-wayland
 Maintainer: Anton <anton@localhost>
 Homepage: https://github.com/kabobik/lswitch
 Description: Keyboard layout switcher with auto-conversion

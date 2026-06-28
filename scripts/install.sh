@@ -18,6 +18,7 @@ SYSTEMD_DIR="$HOME/.config/systemd/user"
 DESKTOP_DIR="$HOME/.local/share/applications"
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 UDEV_RULES="/etc/udev/rules.d/99-lswitch.rules"
+CURRENT_USER="${USER:-$(id -un)}"
 
 # Определяем корень проекта
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,6 +35,100 @@ info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
 ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+
+# ─── Дистрибутивы и системные пакеты ───────────────────────────
+detect_pkg_manager() {
+    if command -v apt-get &>/dev/null; then
+        echo "apt"
+    elif command -v pacman &>/dev/null; then
+        echo "pacman"
+    else
+        echo ""
+    fi
+}
+
+package_for_dependency() {
+    local manager="$1"
+    local dep="$2"
+
+    case "$manager:$dep" in
+        apt:evdev)          echo "python3-evdev" ;;
+        apt:xlib)           echo "python3-xlib" ;;
+        apt:pyudev)         echo "python3-pyudev" ;;
+        apt:pyqt6_qtdbus)   echo "python3-pyqt6" ;;
+        apt:wl_clipboard)   echo "wl-clipboard" ;;
+        apt:qt6_wayland)    echo "qt6-wayland" ;;
+
+        pacman:evdev)        echo "python-evdev" ;;
+        pacman:xlib)         echo "python-xlib" ;;
+        pacman:pyudev)       echo "python-pyudev" ;;
+        pacman:pyqt6_qtdbus) echo "python-pyqt6" ;;
+        pacman:wl_clipboard) echo "wl-clipboard" ;;
+        pacman:qt6_wayland)  echo "qt6-wayland" ;;
+    esac
+}
+
+add_unique_pkg() {
+    local -n target_array="$1"
+    local pkg="$2"
+    local existing
+
+    [ -n "$pkg" ] || return 0
+    for existing in "${target_array[@]}"; do
+        [ "$existing" = "$pkg" ] && return 0
+    done
+    target_array+=("$pkg")
+}
+
+add_dep_pkg() {
+    local target_array_name="$1"
+    local manager="$2"
+    local dep="$3"
+    local pkg
+
+    pkg="$(package_for_dependency "$manager" "$dep")"
+    add_unique_pkg "$target_array_name" "$pkg"
+}
+
+install_system_packages() {
+    local manager="$1"
+    shift
+
+    [ "$#" -gt 0 ] || return 0
+
+    case "$manager" in
+        apt)
+            info "Установка системных пакетов через apt: $*"
+            sudo apt-get install -y "$@"
+            ;;
+        pacman)
+            info "Установка системных пакетов через pacman: $*"
+            sudo pacman -S --needed --noconfirm "$@"
+            ;;
+        *)
+            error "Поддерживаются apt и pacman. Установите вручную: $*"
+            exit 1
+            ;;
+    esac
+}
+
+is_wayland_session() {
+    [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]
+}
+
+check_python_import() {
+    local module="$1"
+    python3 -c "import importlib; importlib.import_module('$module')" 2>/dev/null
+}
+
+ensure_input_group() {
+    if getent group input &>/dev/null; then
+        return 0
+    fi
+
+    info "Создание группы input (потребуется пароль)..."
+    sudo groupadd -r input
+}
 
 # ─── Удаление ─────────────────────────────────────────────────
 remove() {
@@ -65,7 +160,10 @@ remove() {
 
 # ─── Проверка зависимостей ─────────────────────────────────────
 check_deps() {
+    local pkg_manager
+    local packages=()
     local missing=()
+    local needs_install=false
 
     # Python 3.10+
     if ! command -v python3 &>/dev/null; then
@@ -84,56 +182,60 @@ check_deps() {
     ok "Python $py_ver"
 
     # Проверяем Python-модули
-    for mod in evdev Xlib pyudev; do
-        if ! python3 -c "import $mod" 2>/dev/null; then
-            missing+=("$mod")
-        fi
-    done
+    pkg_manager="$(detect_pkg_manager)"
 
-    # PyQt6 (не блокируем, но предупреждаем)
-    local has_qt=true
-    if ! python3 -c "import PyQt6" 2>/dev/null; then
-        has_qt=false
+    if ! check_python_import "evdev"; then
+        missing+=("evdev")
+        needs_install=true
+        add_dep_pkg packages "$pkg_manager" "evdev"
+    fi
+    if ! check_python_import "Xlib"; then
+        missing+=("python-xlib")
+        needs_install=true
+        add_dep_pkg packages "$pkg_manager" "xlib"
+    fi
+    if ! check_python_import "pyudev"; then
+        missing+=("pyudev")
+        needs_install=true
+        add_dep_pkg packages "$pkg_manager" "pyudev"
+    fi
+    if ! check_python_import "PyQt6.QtDBus"; then
+        missing+=("PyQt6.QtDBus")
+        needs_install=true
+        add_dep_pkg packages "$pkg_manager" "pyqt6_qtdbus"
     fi
 
-    # Если чего-то не хватает — пробуем apt
     if [ ${#missing[@]} -gt 0 ]; then
         warn "Отсутствуют Python-модули: ${missing[*]}"
+    fi
 
-        if command -v apt &>/dev/null; then
-            info "Попытка установить через apt..."
-            local apt_pkgs=()
-            for mod in "${missing[@]}"; do
-                case "$mod" in
-                    evdev)  apt_pkgs+=("python3-evdev") ;;
-                    Xlib)   apt_pkgs+=("python3-xlib") ;;
-                    pyudev) apt_pkgs+=("python3-pyudev") ;;
-                esac
-            done
-            if [ ${#apt_pkgs[@]} -gt 0 ]; then
-                sudo apt install -y "${apt_pkgs[@]}"
-            fi
-        else
-            error "apt не найден. Установите вручную: ${missing[*]}"
+    if ! command -v wl-copy &>/dev/null || ! command -v wl-paste &>/dev/null; then
+        warn "wl-clipboard не найден — Wayland selection fallback будет недоступен"
+        needs_install=true
+        add_dep_pkg packages "$pkg_manager" "wl_clipboard"
+    fi
+
+    if is_wayland_session; then
+        add_dep_pkg packages "$pkg_manager" "qt6_wayland"
+    fi
+
+    if [ "$needs_install" = true ] && [ -z "$pkg_manager" ]; then
+        error "Не найден поддерживаемый пакетный менеджер. Поддерживаются apt и pacman."
+        exit 1
+    fi
+
+    install_system_packages "$pkg_manager" "${packages[@]}"
+
+    # Повторная проверка после установки пакетов.
+    for mod in evdev Xlib pyudev PyQt6.QtDBus; do
+        if ! check_python_import "$mod"; then
+            error "Python-модуль всё ещё недоступен после установки: $mod"
             exit 1
         fi
-    fi
-
-    if [ "$has_qt" = false ]; then
-        warn "PyQt6 не найден — GUI (иконка в трее) будет недоступен"
-        info "Установить: sudo apt install python3-pyqt6"
-    fi
-
-    if [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
-        if ! command -v wl-copy &>/dev/null || ! command -v wl-paste &>/dev/null; then
-            warn "wl-clipboard не найден — Wayland selection fallback будет недоступен"
-            if command -v apt &>/dev/null; then
-                info "Попытка установить wl-clipboard через apt..."
-                sudo apt install -y wl-clipboard
-            else
-                warn "Установите wl-clipboard вручную для полной поддержки Wayland"
-            fi
-        fi
+    done
+    if ! command -v wl-copy &>/dev/null || ! command -v wl-paste &>/dev/null; then
+        error "wl-copy/wl-paste всё ещё недоступны после установки wl-clipboard"
+        exit 1
     fi
 
     ok "Зависимости в порядке"
@@ -185,6 +287,7 @@ ENTRY
     info "Установка systemd сервиса..."
     mkdir -p "$SYSTEMD_DIR"
     cp "$PROJECT_DIR/config/lswitch.service" "$SYSTEMD_DIR/$APP_NAME.service"
+    sed -i "s|^ExecStart=.*|ExecStart=$BIN_DIR/$APP_NAME --headless|" "$SYSTEMD_DIR/$APP_NAME.service"
     systemctl --user daemon-reload
     ok "Сервис установлен"
 
@@ -201,6 +304,7 @@ ENTRY
     ok "Ярлык установлен"
 
     # 7. udev правила (нужен sudo)
+    ensure_input_group
     if [ ! -f "$UDEV_RULES" ]; then
         info "Установка udev правил (потребуется пароль)..."
         sudo cp "$PROJECT_DIR/config/99-lswitch.rules" "$UDEV_RULES"
@@ -212,9 +316,9 @@ ENTRY
     fi
 
     # 8. Группа input
-    if ! groups "$USER" | grep -qw input; then
+    if ! groups "$CURRENT_USER" | grep -qw input; then
         info "Добавление в группу input (потребуется пароль)..."
-        sudo usermod -a -G input "$USER"
+        sudo usermod -a -G input "$CURRENT_USER"
         warn "Перелогиньтесь для применения прав группы input"
     else
         ok "Пользователь уже в группе input"

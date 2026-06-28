@@ -33,15 +33,15 @@ git clone https://github.com/kabobik/lswitch.git && cd lswitch && bash scripts/i
 | Компонент | Назначение | Критичность |
 |-----------|-----------|-------------|
 | Python 3.10+ | Основной интерпретатор | **Критично** |
-| pip3 | Установка Python пакетов | **Критично** |
 | evdev | Чтение событий клавиатуры из `/dev/input/` | **Критично** |
 | python-xlib | Определение раскладки, X11 | **Критично** |
 | pyudev | Мониторинг hot-plug устройств | **Критично** |
-| PyQt6 | Иконка в системном трее | Рекомендуется |
-| wl-clipboard | Clipboard fallback для Wayland (`wl-copy`/`wl-paste`) | Рекомендуется для Wayland |
+| PyQt6 + QtDBus | GUI и KDE Wayland layout backend | **Критично для Wayland** |
+| wl-clipboard | Clipboard fallback для Wayland (`wl-copy`/`wl-paste`) | **Критично для Wayland** |
+| qt6-wayland | Qt Wayland platform plugin | **Критично для Wayland** |
 | systemd | Управление демоном | Рекомендуется |
 
-**Display Server:** X11 (основной), KDE Wayland в активной разработке
+**Display Server:** X11 и KDE Plasma Wayland
 
 ### Установка из исходников
 
@@ -53,7 +53,7 @@ bash scripts/install.sh
 
 Скрипт автоматически:
 - Проверит Python 3.10+ и все зависимости
-- Установит недостающие пакеты через apt
+- Установит недостающие пакеты через `apt` на Ubuntu/Debian или `pacman` на Arch Linux
 - Скопирует приложение в `~/.local/share/lswitch/`
 - Создаст команду `lswitch` в `~/.local/bin/`
 - Установит systemd unit, udev правила, иконку, ярлык в меню
