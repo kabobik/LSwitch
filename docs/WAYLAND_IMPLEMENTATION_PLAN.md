@@ -24,10 +24,10 @@
 - `lswitch/intelligence/*` - словари, n-gram, auto detector;
 - `lswitch/input/device_manager.py` - чтение evdev устройств;
 - `lswitch/input/virtual_keyboard.py` - UInput replay/tap.
+- `lswitch/app.py` получает готовый `PlatformAdapters` и не ветвится по X11/Wayland.
 
 Привязано к X11:
 
-- `lswitch/app.py::_init_platform()` всегда создает X11 adapters;
 - `lswitch/platform/xkb_adapter.py` использует `libX11`, `setxkbmap`, Cinnamon `gdbus`;
 - `lswitch/platform/selection_adapter.py` использует X11 PRIMARY owner через `python-xlib`;
 - `lswitch/platform/subprocess_impl.py` использует `xdotool` и `xclip`;
@@ -38,17 +38,17 @@
 
 ## 3. Главные блокеры
 
-### 3.1. Platform bootstrap всегда X11
+### 3.1. Platform bootstrap должен оставаться единственной OS/session границей
 
-`LSwitchApp._init_platform()` безусловно создает `SubprocessSystemAdapter`, `X11XKBAdapter`, `X11SelectionAdapter`.
+`LSwitchApp._init_platform()` уже вызывает factory, а `LSwitchApp.run()` не проверяет session/env напрямую. X11/Wayland выбор должен оставаться только в `platform_factory.py`.
 
 Решение:
 
-- добавить `lswitch/platform/platform_factory.py`;
-- реализовать `detect_session_type()` по `XDG_SESSION_TYPE`, `WAYLAND_DISPLAY`, `DISPLAY`;
-- реализовать `detect_compositor()` по `XDG_CURRENT_DESKTOP`, `KDE_FULL_SESSION`, `SWAYSOCK`, `HYPRLAND_INSTANCE_SIGNATURE`;
-- в `_init_platform()` ветвиться на X11/Wayland;
-- X11 ветку оставить максимально неизменной.
+- `platform_factory.py` добавлен;
+- `detect_session_type()` реализован по `XDG_SESSION_TYPE`, `WAYLAND_DISPLAY`, `DISPLAY`;
+- `detect_compositor()` реализован по `XDG_CURRENT_DESKTOP`, `KDE_FULL_SESSION`, `SWAYSOCK`, `HYPRLAND_INSTANCE_SIGNATURE`;
+- X11 ветка оставлена максимально неизменной;
+- Wayland ветка возвращает skeleton adapters и fail-fast ошибки на конкретных backend operations.
 
 ### 3.2. Qt objects вызываются из evdev thread
 
@@ -134,7 +134,7 @@ Systemd unit сейчас содержит `XAUTHORITY`, но не Wayland/DBus 
 ```
 LSwitchApp
   |
-  +-- platform_factory.detect_session_type()
+  +-- platform_factory.create_platform_adapters()
   |
   +-- X11
   |     +-- SubprocessSystemAdapter  # existing xclip/xdotool
@@ -142,10 +142,11 @@ LSwitchApp
   |     +-- X11SelectionAdapter      # existing python-xlib
   |
   +-- Wayland
-        +-- QtBridge                 # main-thread Qt calls
-        +-- WaylandSystemAdapter     # QClipboard + UInput combos
-        +-- WaylandSelectionAdapter  # copy/paste selection flow
-        +-- CompositorXKBAdapter
+        +-- WaylandSystemAdapter     # skeleton now, QClipboard + UInput combos later
+        +-- WaylandSelectionAdapter  # skeleton now, copy/paste selection flow later
+        +-- WaylandLayoutAdapter     # skeleton now, compositor backend later
+        +-- QtBridge                 # main-thread Qt calls, next phase
+        +-- CompositorLayoutBackend
               +-- KdeLayoutBackend
               +-- GnomeLayoutBackend       # follow-up
               +-- SwayLayoutBackend        # follow-up
@@ -178,10 +179,10 @@ LSwitchApp
 
 ### Фаза 0. Подготовка и тестовая сетка
 
-- Зафиксировать тестовые сценарии для X11, чтобы порт не сломал текущую работу.
-- Добавить unit tests для platform detection.
-- Добавить fake/mock tests для future Wayland adapters.
-- Обновить документацию: `WAYLAND_RESEARCH.md` = notes, этот файл = plan.
+- [x] Зафиксировать тестовые сценарии для X11, чтобы порт не сломал текущую работу.
+- [x] Добавить unit tests для platform detection.
+- [x] Добавить fake/mock tests для future Wayland adapters.
+- [x] Обновить документацию: `WAYLAND_RESEARCH.md` = notes, этот файл = plan.
 
 Готовность: тесты проходят, X11 behavior не изменен.
 
@@ -210,10 +211,11 @@ LSwitchApp
 
 ### Фаза 3. Platform factory и Wayland runtime skeleton
 
-- Добавить `platform_factory.py`.
-- Добавить Wayland skeleton adapters, которые явно fail fast для еще не реализованных paths.
-- Встроить ветку в `_init_platform()`.
-- Не включать platform selection polling в Wayland mode; этот выбор должен приходить из platform factory.
+- [x] Добавить `platform_factory.py`.
+- [x] Добавить Wayland skeleton adapters, которые явно fail fast для еще не реализованных paths.
+- [x] Встроить ветку в `_init_platform()`.
+- [x] Не включать platform selection polling в Wayland mode; этот выбор должен приходить из platform factory.
+- [x] Убрать прямой session/env check из `LSwitchApp.run()`.
 
 Готовность: приложение в Wayland хотя бы стартует до понятной ошибки backend-а, X11 продолжает работать.
 

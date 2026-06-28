@@ -9,12 +9,19 @@ import pytest
 from lswitch.platform.platform_factory import (
     PlatformAdapters,
     create_platform_adapters,
+    create_wayland_platform_adapters,
     create_x11_platform_adapters,
     detect_compositor,
     detect_session_type,
 )
 from lswitch.platform.selection_adapter import X11SelectionAdapter
 from lswitch.platform.subprocess_impl import SubprocessSystemAdapter
+from lswitch.platform.wayland import (
+    WaylandBackendNotImplementedError,
+    WaylandLayoutAdapter,
+    WaylandSelectionAdapter,
+    WaylandSystemAdapter,
+)
 from lswitch.platform.xkb_adapter import X11XKBAdapter
 
 
@@ -53,10 +60,25 @@ class TestDetectCompositor:
 
 
 class TestCreatePlatformAdapters:
-    def test_wayland_fails_at_factory_boundary(self):
-        with patch("lswitch.platform.platform_factory.detect_session_type", return_value="wayland"):
-            with pytest.raises(RuntimeError, match="Wayland session detected"):
-                create_platform_adapters()
+    def test_wayland_session_returns_skeleton_adapters(self):
+        fake_vk = MagicMock()
+        with patch("lswitch.platform.platform_factory.VirtualKeyboard", return_value=fake_vk):
+            adapters = create_platform_adapters(
+                debug=True,
+                env={
+                    "XDG_SESSION_TYPE": "wayland",
+                    "XDG_CURRENT_DESKTOP": "KDE",
+                },
+            )
+
+        assert isinstance(adapters, PlatformAdapters)
+        assert adapters.session_type == "wayland"
+        assert adapters.compositor == "kde"
+        assert isinstance(adapters.system, WaylandSystemAdapter)
+        assert isinstance(adapters.xkb, WaylandLayoutAdapter)
+        assert isinstance(adapters.selection, WaylandSelectionAdapter)
+        assert adapters.virtual_kb is fake_vk
+        assert adapters.selection_polling_enabled is False
 
     def test_unknown_session_fails_clearly(self):
         with patch("lswitch.platform.platform_factory.detect_session_type", return_value="unknown"):
@@ -77,3 +99,15 @@ class TestCreatePlatformAdapters:
         assert isinstance(adapters.selection, X11SelectionAdapter)
         assert adapters.virtual_kb is fake_vk
         assert adapters.selection_polling_enabled is True
+
+    def test_create_wayland_platform_adapters_fail_fast_at_operation_boundary(self):
+        fake_vk = MagicMock()
+        with patch("lswitch.platform.platform_factory.VirtualKeyboard", return_value=fake_vk):
+            adapters = create_wayland_platform_adapters(debug=True, compositor="kde")
+
+        with pytest.raises(WaylandBackendNotImplementedError, match="switch_layout"):
+            adapters.xkb.switch_layout()
+        with pytest.raises(WaylandBackendNotImplementedError, match="get_clipboard"):
+            adapters.system.get_clipboard()
+        with pytest.raises(WaylandBackendNotImplementedError, match="get_selection"):
+            adapters.selection.get_selection()

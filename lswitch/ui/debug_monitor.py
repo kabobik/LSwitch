@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 class _SelectionPollerThread(QThread):
-    """Background thread polling X11 PRIMARY selection every 500ms."""
+    """Background thread polling the active platform selection every 500ms."""
 
     selection_updated = pyqtSignal(str, int, float)  # text, owner_id, last_changed_at
 
@@ -185,8 +185,8 @@ class DebugMonitorWindow(QWidget):
 
         splitter.addWidget(marker_group)
 
-        # -- Section 5: X11 PRIMARY Selection --
-        selection_group = QGroupBox("X11 PRIMARY Selection")
+        # -- Section 5: Platform Selection --
+        selection_group = QGroupBox("Platform Selection")
         selection_layout = QVBoxLayout(selection_group)
 
         self._sel_text_label = QLabel("Text: (none)")

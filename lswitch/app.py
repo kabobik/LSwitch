@@ -908,8 +908,8 @@ class LSwitchApp:
             _time_mod.sleep(0.01)
 
             # We DO NOT tap_key(KEY_SPACE) here, because the physical Space key
-            # is almost certainly still held down by the user, and X11/Wayland
-            # input merging would eat the virtual press event. Instead, we
+            # is almost certainly still held down by the user, and desktop
+            # input merging can eat the virtual press event. Instead, we
             # defer sending it until the physical release event arrives.
             conversion_ok = True
 
@@ -938,13 +938,6 @@ class LSwitchApp:
 
     def run(self):
         """Blocking main event loop."""
-        from lswitch.platform.platform_factory import detect_session_type
-        if detect_session_type() == "unknown":
-            raise RuntimeError(
-                "LSwitch requires an active X11 or Wayland graphical session "
-                "(DISPLAY or WAYLAND_DISPLAY is not set)."
-            )
-
         # Защита от двойного запуска
         self._pid_lock = _PidLock(replace=self._replace)
         self._pid_lock.acquire()

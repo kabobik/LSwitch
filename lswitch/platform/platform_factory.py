@@ -64,19 +64,23 @@ def detect_compositor(env: Mapping[str, str] | None = None) -> str:
     return "unknown"
 
 
-def create_platform_adapters(debug: bool = False) -> PlatformAdapters:
+def create_platform_adapters(
+    debug: bool = False,
+    env: Mapping[str, str] | None = None,
+) -> PlatformAdapters:
     """Create adapters for the current session.
 
-    Wayland adapters are intentionally not built here yet. The factory is the
-    hard boundary that will receive the Wayland implementation later.
+    This is the only place that maps the host desktop session to concrete
+    adapters. Application/core code should consume the returned capabilities
+    and never branch on X11/Wayland directly.
     """
-    session_type = detect_session_type()
-    compositor = detect_compositor()
+    session_type = detect_session_type(env)
+    compositor = detect_compositor(env)
 
     if session_type == "wayland":
-        raise RuntimeError(
-            "Wayland session detected, but Wayland platform adapters are not "
-            "implemented yet. See docs/WAYLAND_IMPLEMENTATION_PLAN.md."
+        return create_wayland_platform_adapters(
+            debug=debug,
+            compositor=compositor,
         )
     if session_type == "unknown":
         raise RuntimeError(
@@ -107,4 +111,46 @@ def create_x11_platform_adapters(
         selection=selection,
         virtual_kb=virtual_kb,
         selection_polling_enabled=True,
+    )
+
+
+def create_wayland_platform_adapters(
+    debug: bool = False,
+    compositor: str | None = None,
+) -> PlatformAdapters:
+    """Create the Wayland adapter skeleton.
+
+    The concrete backends are intentionally conservative for now: they satisfy
+    the same interfaces as X11 adapters, but unsupported operations fail at
+    the adapter boundary with actionable messages.
+    """
+    from lswitch.platform.wayland import (
+        WaylandLayoutAdapter,
+        WaylandSelectionAdapter,
+        WaylandSystemAdapter,
+    )
+
+    virtual_kb = VirtualKeyboard(debug=debug)
+    system = WaylandSystemAdapter(
+        virtual_kb=virtual_kb,
+        compositor=compositor or "unknown",
+        debug=debug,
+    )
+    xkb = WaylandLayoutAdapter(
+        compositor=compositor or "unknown",
+        debug=debug,
+    )
+    selection = WaylandSelectionAdapter(
+        system=system,
+        compositor=compositor or "unknown",
+        debug=debug,
+    )
+    return PlatformAdapters(
+        session_type="wayland",
+        compositor=compositor or "unknown",
+        system=system,
+        xkb=xkb,
+        selection=selection,
+        virtual_kb=virtual_kb,
+        selection_polling_enabled=False,
     )
