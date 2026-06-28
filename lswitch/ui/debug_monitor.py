@@ -5,13 +5,13 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QPushButton,
 )
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QFont, QColor
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QFont, QColor
 
 from lswitch.core.events import Event, EventType
 from lswitch.input.key_mapper import keycode_to_char
@@ -96,12 +96,12 @@ class DebugMonitorWindow(QWidget):
 
         # Monospace font for technical data
         mono_font = QFont("Monospace", 9)
-        mono_font.setStyleHint(QFont.Monospace)
+        mono_font.setStyleHint(QFont.StyleHint.Monospace)
 
         main_layout = QVBoxLayout(self)
 
         # Use splitter for resizable sections
-        splitter = QSplitter(Qt.Vertical)
+        splitter = QSplitter(Qt.Orientation.Vertical)
 
         # -- Section 1: Current State --
         state_group = QGroupBox("Current State")
@@ -139,7 +139,9 @@ class DebugMonitorWindow(QWidget):
 
         self._buffer_table = QTableWidget(0, 4)
         self._buffer_table.setHorizontalHeaderLabels(["#", "Keycode", "Char", "Shifted"])
-        self._buffer_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self._buffer_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
         self._buffer_table.setFont(mono_font)
         self._buffer_table.setMaximumHeight(150)
         buffer_layout.addWidget(self._buffer_table)
@@ -156,7 +158,9 @@ class DebugMonitorWindow(QWidget):
         word_layout = QVBoxLayout(word_group)
 
         self._word_label = QLabel("Word: (none)")
-        self._word_label.setFont(QFont("Monospace", 12, QFont.Bold))
+        self._word_label.setFont(
+            QFont("Monospace", 12, QFont.Weight.Bold)
+        )
         word_layout.addWidget(self._word_label)
 
         self._word_events_label = QLabel("Events: (none)")
@@ -216,7 +220,7 @@ class DebugMonitorWindow(QWidget):
         self._log_text = QTextEdit()
         self._log_text.setReadOnly(True)
         self._log_text.setFont(mono_font)
-        self._log_text.setLineWrapMode(QTextEdit.NoWrap)
+        self._log_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         log_layout.addWidget(self._log_text)
 
         # Clear button

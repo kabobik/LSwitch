@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PyQt5.QtWidgets import QMenu
-from PyQt5.QtGui import QPalette, QColor
+from PyQt6.QtWidgets import QMenu
+from PyQt6.QtGui import QPalette, QColor
 
 from lswitch.ui.adapters.base import BaseUIAdapter
 
@@ -30,12 +30,12 @@ class KDEAdapter(BaseUIAdapter):
         hover = tuple(min(255, c + 20) for c in bg)
 
         palette = menu.palette()
-        palette.setColor(QPalette.Window, QColor(*bg))
-        palette.setColor(QPalette.WindowText, QColor(*fg))
-        palette.setColor(QPalette.Base, QColor(*self.theme_colors.get("base_color", bg)))
-        palette.setColor(QPalette.Text, QColor(*fg))
-        palette.setColor(QPalette.Highlight, QColor(*hover))
-        palette.setColor(QPalette.HighlightedText, QColor(*fg))
+        palette.setColor(QPalette.ColorRole.Window, QColor(*bg))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(*fg))
+        palette.setColor(QPalette.ColorRole.Base, QColor(*self.theme_colors.get("base_color", bg)))
+        palette.setColor(QPalette.ColorRole.Text, QColor(*fg))
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(*hover))
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor(*fg))
         menu.setPalette(palette)
 
         menu.setStyleSheet(

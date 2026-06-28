@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PyQt5.QtWidgets import QMenu, QAction
-from PyQt5.QtGui import QIcon
+from PyQt6.QtWidgets import QMenu
+from PyQt6.QtGui import QAction, QIcon
 
 from lswitch.core.events import Event, EventType
 from lswitch.i18n import t
@@ -128,7 +128,7 @@ class ContextMenu:
     @staticmethod
     def _show_about() -> None:
         try:
-            from PyQt5.QtWidgets import QMessageBox
+            from PyQt6.QtWidgets import QMessageBox
             from lswitch import __version__
             QMessageBox.about(None, t('about_title', version=__version__), t('about_description'))
         except Exception:

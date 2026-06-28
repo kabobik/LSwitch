@@ -32,7 +32,7 @@ setup(
         'pyudev>=0.24',  # Мониторинг hot-plug устройств ввода
     ],
     extras_require={
-        'gui': ['PyQt5'],  # GUI панель управления
+        'gui': ['PyQt6'],  # GUI панель управления
         'dev': [
             'pytest>=7.0',
             'pytest-cov',
@@ -55,6 +55,7 @@ setup(
         'Programming Language :: Python :: 3.13',
         'Operating System :: POSIX :: Linux',
         'Environment :: X11 Applications',
+        'Environment :: Wayland',
         'Topic :: Desktop Environment',
     ],
 )

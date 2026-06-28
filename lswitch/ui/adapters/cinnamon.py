@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QDesktopWidget,
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QSize
-from PyQt5.QtGui import QIcon
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize
+from PyQt6.QtGui import QAction, QIcon
 
 from lswitch.ui.adapters.base import BaseUIAdapter
 
@@ -37,7 +37,7 @@ class CustomMenuItem(QWidget):
         self.checkbox: QCheckBox | None = None
 
         self.setMinimumHeight(28)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
@@ -46,8 +46,8 @@ class CustomMenuItem(QWidget):
         if checkable:
             self.checkbox = QCheckBox()
             self.checkbox.setFixedSize(16, 16)
-            self.checkbox.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            self.checkbox.setFocusPolicy(Qt.NoFocus)
+            self.checkbox.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self.checkbox.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             layout.addWidget(self.checkbox)
             self.icon_label = None
         else:
@@ -83,7 +83,11 @@ class CustomMenuItem(QWidget):
 
     def setEnabled(self, enabled: bool) -> None:
         self._enabled = enabled
-        self.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
+        self.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if enabled
+            else Qt.CursorShape.ArrowCursor
+        )
         self._update_style(False)
 
     # -- events ------------------------------------------------------------
@@ -127,8 +131,10 @@ class CustomMenu(QWidget):
         self.bg_color = bg_color
         self.fg_color = fg_color
 
-        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setWindowFlags(
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
 
         border_color = tuple(min(255, c + 15) for c in bg_color)
         self.setStyleSheet(
@@ -159,10 +165,11 @@ class CustomMenu(QWidget):
         self.adjustSize()
         menu_height = self.height()
         adjusted = pos - QPoint(0, menu_height + 5)
-        screen = QDesktopWidget().screenGeometry()
+        screen_obj = QApplication.primaryScreen()
+        screen = screen_obj.availableGeometry() if screen_obj else None
         if adjusted.y() < 0:
             adjusted.setY(pos.y() + 5)
-        if adjusted.x() + self.width() > screen.width():
+        if screen and adjusted.x() + self.width() > screen.width():
             adjusted.setX(screen.width() - self.width())
         self.move(adjusted)
         self.show()
@@ -178,8 +185,6 @@ class QMenuWrapper:
         self.actions: list = []
 
     def addAction(self, action_or_text, callback=None):
-        from PyQt5.QtWidgets import QAction
-
         if isinstance(action_or_text, QAction):
             action = action_or_text
             checkable = action.isCheckable()

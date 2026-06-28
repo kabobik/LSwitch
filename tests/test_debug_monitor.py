@@ -1,6 +1,7 @@
 """Tests for DebugMonitorWindow.
 
-These tests use mocked PyQt5 to avoid conflicts with test_ui.py which also mocks PyQt5.
+These tests use lightweight local mocks to avoid conflicts with test_ui.py,
+which also mocks PyQt6.
 """
 
 import time
@@ -16,7 +17,7 @@ from lswitch.core.states import State, StateContext
 
 
 # ---------------------------------------------------------------------------
-# PyQt5 mock helpers
+# Qt mock helpers
 # ---------------------------------------------------------------------------
 
 class MockQWidget:
@@ -834,4 +835,3 @@ class TestSelectionDisplay:
         assert "B" * 200 in label_text
 
         window.cleanup()
-

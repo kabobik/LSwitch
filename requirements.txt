@@ -4,4 +4,4 @@ python-xlib
 pyudev>=0.24
 
 # GUI (optional — install with: pip install lswitch[gui])
-# PyQt5
+# PyQt6

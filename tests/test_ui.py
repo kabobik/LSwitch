@@ -1,6 +1,6 @@
 """Tests for UI layer (Étape 6): TrayIcon, ContextMenu, ConfigDialog, adapters.
 
-All PyQt5 classes are fully mocked via sys.modules replacement so tests
+All PyQt6 classes are fully mocked via sys.modules replacement so tests
 can run in headless CI environments without a display server.
 """
 
@@ -17,33 +17,35 @@ from unittest.mock import MagicMock, patch, PropertyMock
 import pytest
 
 # ---------------------------------------------------------------------------
-# PyQt5 mock infrastructure — MUST happen before any UI module import
+# PyQt6 mock infrastructure — MUST happen before any UI module import
 # ---------------------------------------------------------------------------
 
-def _build_pyqt5_mocks():
-    """Create a complete mock tree for PyQt5 modules."""
-    pyqt5 = types.ModuleType("PyQt5")
+def _build_pyqt6_mocks():
+    """Create a complete mock tree for PyQt6 modules."""
+    pyqt6 = types.ModuleType("PyQt6")
 
     # --- QtCore ---
-    qtcore = types.ModuleType("PyQt5.QtCore")
-    qtcore.Qt = MagicMock()
-    qtcore.Qt.Popup = 0x00000001
-    qtcore.Qt.FramelessWindowHint = 0x00000800
-    qtcore.Qt.WA_TranslucentBackground = 32
-    qtcore.Qt.WA_TransparentForMouseEvents = 51
-    qtcore.Qt.PointingHandCursor = 13
-    qtcore.Qt.ArrowCursor = 0
-    qtcore.Qt.NoFocus = 0
-    qtcore.Qt.AlignCenter = 0x0084
-    qtcore.Qt.NoPen = 0
+    qtcore = types.ModuleType("PyQt6.QtCore")
+    qtcore.Qt = types.SimpleNamespace()
+    qtcore.Qt.WindowType = types.SimpleNamespace(Popup=0x00000001, FramelessWindowHint=0x00000800)
+    qtcore.Qt.WidgetAttribute = types.SimpleNamespace(
+        WA_TranslucentBackground=32,
+        WA_TransparentForMouseEvents=51,
+    )
+    qtcore.Qt.CursorShape = types.SimpleNamespace(PointingHandCursor=13, ArrowCursor=0)
+    qtcore.Qt.FocusPolicy = types.SimpleNamespace(NoFocus=0)
+    qtcore.Qt.AlignmentFlag = types.SimpleNamespace(AlignCenter=0x0084)
+    qtcore.Qt.PenStyle = types.SimpleNamespace(NoPen=0)
+    qtcore.Qt.Orientation = types.SimpleNamespace(Vertical=2)
     qtcore.QTimer = MagicMock()
     qtcore.QEvent = MagicMock()
     qtcore.QPoint = MagicMock(side_effect=lambda *a: MagicMock())
     qtcore.QSize = MagicMock(side_effect=lambda *a: MagicMock())
     qtcore.pyqtSignal = MagicMock(return_value=MagicMock())
+    qtcore.pyqtSlot = MagicMock(side_effect=lambda *a, **kw: (lambda fn: fn))
 
     # --- QtWidgets ---
-    qtwidgets = types.ModuleType("PyQt5.QtWidgets")
+    qtwidgets = types.ModuleType("PyQt6.QtWidgets")
 
     class _MockQSystemTrayIcon:
         ActivationReason = MagicMock()
@@ -71,7 +73,7 @@ def _build_pyqt5_mocks():
         def setWindowTitle(self, t): self._title = t
         def setMinimumWidth(self, w): pass
         def show(self): pass
-        def exec_(self): return self._result
+        def exec(self): return self._result
         def accept(self): self._result = self.Accepted
         def reject(self): self._result = self.Rejected
 
@@ -180,11 +182,17 @@ def _build_pyqt5_mocks():
     class _MockQFormLayout(_MockQVBoxLayout):
         def addRow(self, label, widget): self._widgets.append(widget)
 
-    qtwidgets.QApplication = MagicMock()
+    class _MockScreen:
+        def availableGeometry(self): return MagicMock(width=lambda: 1920, height=lambda: 1080)
+
+    class _MockQApplication:
+        @staticmethod
+        def primaryScreen(): return _MockScreen()
+
+    qtwidgets.QApplication = _MockQApplication
     qtwidgets.QSystemTrayIcon = _MockQSystemTrayIcon
     qtwidgets.QDialog = _MockQDialog
     qtwidgets.QMenu = _MockQMenu
-    qtwidgets.QAction = _MockQAction
     qtwidgets.QCheckBox = _MockQCheckBox
     qtwidgets.QSpinBox = _MockQSpinBox
     qtwidgets.QDoubleSpinBox = _MockQDoubleSpinBox
@@ -199,43 +207,55 @@ def _build_pyqt5_mocks():
         def connect(self, *a): pass
     qtwidgets.QPushButton = _MockQPushButton
     qtwidgets.QDialogButtonBox = MagicMock()
-    qtwidgets.QDialogButtonBox.Ok = 0x00000400
-    qtwidgets.QDialogButtonBox.Cancel = 0x00400000
+    qtwidgets.QDialogButtonBox.StandardButton = types.SimpleNamespace(
+        Ok=0x00000400,
+        Cancel=0x00400000,
+    )
     qtwidgets.QWidgetAction = MagicMock
-    qtwidgets.QDesktopWidget = MagicMock
     qtwidgets.QMessageBox = MagicMock()
     qtwidgets.QInputDialog = MagicMock
 
     # --- QtGui ---
-    qtgui = types.ModuleType("PyQt5.QtGui")
+    qtgui = types.ModuleType("PyQt6.QtGui")
+    qtgui.QAction = _MockQAction
     qtgui.QIcon = MagicMock(return_value=MagicMock())
     qtgui.QPixmap = MagicMock(return_value=MagicMock())
     qtgui.QPainter = MagicMock(return_value=MagicMock())
+    qtgui.QPainter.RenderHint = types.SimpleNamespace(Antialiasing=1)
     qtgui.QColor = MagicMock(return_value=MagicMock())
     qtgui.QPalette = MagicMock()
-    qtgui.QPalette.Window = 10
-    qtgui.QPalette.WindowText = 11
-    qtgui.QPalette.Base = 12
-    qtgui.QPalette.Text = 13
-    qtgui.QPalette.Highlight = 14
-    qtgui.QPalette.HighlightedText = 15
+    qtgui.QPalette.ColorRole = types.SimpleNamespace(
+        Window=10,
+        WindowText=11,
+        Base=12,
+        Text=13,
+        Highlight=14,
+        HighlightedText=15,
+    )
     qtgui.QFont = MagicMock
+    qtgui.QFont.StyleHint = types.SimpleNamespace(Monospace=1)
+    qtgui.QFont.Weight = types.SimpleNamespace(Bold=75)
     qtgui.QCursor = MagicMock
 
-    pyqt5.QtCore = qtcore
-    pyqt5.QtWidgets = qtwidgets
-    pyqt5.QtGui = qtgui
+    qtwidgets.QHeaderView = MagicMock()
+    qtwidgets.QHeaderView.ResizeMode = types.SimpleNamespace(Stretch=1)
+    qtwidgets.QTextEdit = MagicMock()
+    qtwidgets.QTextEdit.LineWrapMode = types.SimpleNamespace(NoWrap=0)
+
+    pyqt6.QtCore = qtcore
+    pyqt6.QtWidgets = qtwidgets
+    pyqt6.QtGui = qtgui
 
     return {
-        "PyQt5": pyqt5,
-        "PyQt5.QtCore": qtcore,
-        "PyQt5.QtWidgets": qtwidgets,
-        "PyQt5.QtGui": qtgui,
+        "PyQt6": pyqt6,
+        "PyQt6.QtCore": qtcore,
+        "PyQt6.QtWidgets": qtwidgets,
+        "PyQt6.QtGui": qtgui,
     }
 
 
 # Install mocks globally so imports in UI modules resolve correctly
-_qt_mocks = _build_pyqt5_mocks()
+_qt_mocks = _build_pyqt6_mocks()
 _saved_modules: dict[str, types.ModuleType | None] = {}
 for mod_name, mod_obj in _qt_mocks.items():
     _saved_modules[mod_name] = sys.modules.get(mod_name)

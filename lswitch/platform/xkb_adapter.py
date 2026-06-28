@@ -150,8 +150,9 @@ class X11XKBAdapter(IXKBAdapter):
 
     def close(self) -> None:
         """Close the cached X display connection if open."""
-        if self._dpy is not None and self._xkb_available:
-            self._libX11.XCloseDisplay(self._dpy)
+        dpy = getattr(self, "_dpy", None)
+        if dpy is not None and getattr(self, "_xkb_available", False):
+            self._libX11.XCloseDisplay(dpy)
             self._dpy = None
 
     def __del__(self) -> None:
@@ -305,18 +306,27 @@ class X11XKBAdapter(IXKBAdapter):
         return new_layout
 
     def keycode_to_char(self, keycode: int, layout: LayoutInfo, shift: bool = False) -> str:
-        if not self._xkb_available:
+        def _fallback_char() -> str:
+            if layout.name == "en" or layout.xkb_name == "us":
+                try:
+                    from lswitch.input.key_mapper import keycode_to_char
+                    return keycode_to_char(keycode, shift=shift)
+                except Exception:
+                    return ""
             return ""
+
+        if not self._xkb_available:
+            return _fallback_char()
 
         dpy = self._get_display()
         if not dpy:
-            return ""
+            return _fallback_char()
         x11_keycode = keycode + 8  # evdev → X11 offset
         group = layout.index
         level = 1 if shift else 0
         keysym = self._libX11.XkbKeycodeToKeysym(dpy, x11_keycode, group, level)
         if keysym == 0:
-            return ""
+            return _fallback_char()
         # Printable ASCII keysyms (0x20–0x7E) have the same value as their
         # Unicode/ASCII code point.  Return them directly so that keys like
         # comma (keysym 0x2C → ','), period, semicolon etc. are recognised
@@ -335,4 +345,4 @@ class X11XKBAdapter(IXKBAdapter):
         # Cyrillic keysym names
         if name.startswith("Cyrillic_"):
             return _CYRILLIC_MAP.get(name[9:], "")
-        return ""
+        return _fallback_char()

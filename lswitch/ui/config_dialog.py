@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import time
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox,
     QPushButton, QDialogButtonBox, QLabel,
 )
-from PyQt5.QtCore import Qt
 
 from lswitch.config import DEFAULT_CONFIG
 from lswitch.core.events import Event, EventType
@@ -72,7 +71,11 @@ class ConfigDialog(QDialog):
 
         btn_layout.addStretch()
 
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons = (
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box = QDialogButtonBox(buttons)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         btn_layout.addWidget(button_box)

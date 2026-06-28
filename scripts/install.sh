@@ -90,9 +90,9 @@ check_deps() {
         fi
     done
 
-    # PyQt5 (не блокируем, но предупреждаем)
+    # PyQt6 (не блокируем, но предупреждаем)
     local has_qt=true
-    if ! python3 -c "import PyQt5" 2>/dev/null; then
+    if ! python3 -c "import PyQt6" 2>/dev/null; then
         has_qt=false
     fi
 
@@ -120,8 +120,8 @@ check_deps() {
     fi
 
     if [ "$has_qt" = false ]; then
-        warn "PyQt5 не найден — GUI (иконка в трее) будет недоступен"
-        info "Установить: sudo apt install python3-pyqt5"
+        warn "PyQt6 не найден — GUI (иконка в трее) будет недоступен"
+        info "Установить: sudo apt install python3-pyqt6"
     fi
 
     ok "Зависимости в порядке"

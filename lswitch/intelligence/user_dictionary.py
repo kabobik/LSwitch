@@ -36,6 +36,10 @@ class UserDictionary:
     def _check_reload(self) -> None:
         """Перезагружает словарь с диска, если он был изменен (проверка раз в 2.5 сек)."""
         now = time.time()
+        if not hasattr(self, "_last_check_time"):
+            self._last_check_time = now
+        if not hasattr(self, "_last_mtime"):
+            self._last_mtime = 0.0
         if now - self._last_check_time < 2.5:
             return
 

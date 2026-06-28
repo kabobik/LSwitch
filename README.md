@@ -23,7 +23,7 @@ git clone https://github.com/kabobik/lswitch.git && cd lswitch && bash scripts/i
 - ✅ **EN ⟷ RU** — английский ↔ русский
 - ✅ **Автоопределение раскладки** — по n-граммам и словарю
 - ✅ **Самообучающийся словарь** — учится на истории ошибок пользователя
-- ✅ **GUI иконка в трее** — статус и управление через PyQt5
+- ✅ **GUI иконка в трее** — статус и управление через PyQt6
 - ✅ **systemd демон** — автозапуск при входе в систему
 
 ## Установка
@@ -37,7 +37,7 @@ git clone https://github.com/kabobik/lswitch.git && cd lswitch && bash scripts/i
 | evdev | Чтение событий клавиатуры из `/dev/input/` | **Критично** |
 | python-xlib | Определение раскладки, X11 | **Критично** |
 | pyudev | Мониторинг hot-plug устройств | **Критично** |
-| PyQt5 | Иконка в системном трее | Рекомендуется |
+| PyQt6 | Иконка в системном трее | Рекомендуется |
 | systemd | Управление демоном | Рекомендуется |
 
 **Display Server:** X11 (основной), Wayland через XWayland
@@ -271,7 +271,7 @@ Anton — 2024-2026
 
 - Вдохновлено [Punto Switcher](https://yandex.ru/support/punto/) от Яндекса
 - Использует [python-evdev](https://python-evdev.readthedocs.io/) для перехвата клавиатуры
-- PyQt5 для GUI
+- PyQt6 для GUI
 
 ---
 

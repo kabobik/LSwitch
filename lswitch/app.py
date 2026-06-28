@@ -996,7 +996,7 @@ class LSwitchApp:
 
     def _run_with_gui(self):
         """Run evdev in background thread + Qt event loop in main thread."""
-        from PyQt5.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QApplication
         from lswitch.core.events import EventType
         from lswitch.ui.tray_icon import TrayIcon
         from lswitch.ui.context_menu import ContextMenu
@@ -1041,7 +1041,7 @@ class LSwitchApp:
         t.start()
 
         try:
-            from PyQt5.QtCore import QTimer
+            from PyQt6.QtCore import QTimer
             import signal
             
             # Позволяем Python-обработчику сигналов ловить Ctrl+C
@@ -1056,7 +1056,7 @@ class LSwitchApp:
             timer.timeout.connect(lambda: None)
             timer.start(500)
             
-            qt_app.exec_()
+            qt_app.exec()
         finally:
             tray.cleanup()
             self.stop()

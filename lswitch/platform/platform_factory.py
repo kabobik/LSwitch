@@ -27,7 +27,7 @@ class PlatformAdapters:
 
 def detect_session_type(env: Mapping[str, str] | None = None) -> str:
     """Return ``x11``, ``wayland`` or ``unknown`` for the current session."""
-    env = env or os.environ
+    env = os.environ if env is None else env
     explicit = env.get("XDG_SESSION_TYPE", "").strip().lower()
     if explicit in {"x11", "wayland"}:
         return explicit
@@ -40,7 +40,7 @@ def detect_session_type(env: Mapping[str, str] | None = None) -> str:
 
 def detect_compositor(env: Mapping[str, str] | None = None) -> str:
     """Best-effort compositor/desktop detection."""
-    env = env or os.environ
+    env = os.environ if env is None else env
 
     if env.get("HYPRLAND_INSTANCE_SIGNATURE"):
         return "hyprland"

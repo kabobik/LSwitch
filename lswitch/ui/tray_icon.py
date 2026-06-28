@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from PyQt5.QtWidgets import QApplication, QSystemTrayIcon
-from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor
-from PyQt5.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QSystemTrayIcon
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
+from PyQt6.QtCore import Qt
 
 from lswitch.core.events import Event, EventType
 from lswitch.i18n import t
 
 # TODO: EventBus handlers are called synchronously from the publisher thread.
 # If EventBus.publish() is called from a non-GUI thread, Qt widgets must be
-# updated via QMetaObject.invokeMethod(widget, Qt.QueuedConnection, ...) to
+# updated via QMetaObject.invokeMethod(widget, Qt.ConnectionType.QueuedConnection, ...) to
 # ensure thread-safety.  Currently the bus is synchronous and single-threaded,
 # but this should be revisited if async publishing is added.
 
@@ -22,7 +22,7 @@ def create_simple_icon(size: int = 64) -> QIcon:
     pixmap.fill(QColor(0, 0, 0, 0))
 
     painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     # Keyboard body
     painter.setBrush(QColor(70, 130, 180))
@@ -31,7 +31,7 @@ def create_simple_icon(size: int = 64) -> QIcon:
 
     # Key rows (simplified)
     painter.setBrush(QColor(200, 220, 240))
-    painter.setPen(Qt.NoPen)
+    painter.setPen(Qt.PenStyle.NoPen)
     key_w = (size - 20) // 4
     for row in range(3):
         y = 18 + row * 10
@@ -49,11 +49,11 @@ def create_adaptive_icon(layout_name: str = "", size: int = 64) -> QIcon:
     pixmap.fill(QColor(0, 0, 0, 0))
 
     painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     # Background circle
     painter.setBrush(QColor(70, 130, 180))
-    painter.setPen(Qt.NoPen)
+    painter.setPen(Qt.PenStyle.NoPen)
     painter.drawEllipse(2, 2, size - 4, size - 4)
 
     # Layout text
@@ -64,7 +64,7 @@ def create_adaptive_icon(layout_name: str = "", size: int = 64) -> QIcon:
         font.setPixelSize(size // 2)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, label)
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, label)
 
     painter.end()
     return QIcon(pixmap)

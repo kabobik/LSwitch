@@ -2,7 +2,7 @@
 
 These tests exercise the interaction between LSwitchApp, EventBus,
 StateManager, ConversionEngine, EventManager and platform adapters
-WITHOUT importing PyQt5 or requiring real X11/evdev.
+WITHOUT importing PyQt6 or requiring real X11/evdev.
 """
 
 from __future__ import annotations
