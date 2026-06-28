@@ -58,8 +58,10 @@ clipboard, отправляет `ctrl+c`, ждет изменения clipboard 
    - на Wayland обычно не должен срабатывать без fresh-selection флага.
 
 6. Debug Monitor:
-   - если открыть Debug Monitor из tray, его внутренний selection poller должен
-     использовать passive reader (`get_passive_selection`) на Wayland;
+   - если открыть Debug Monitor из tray, он не должен запускать отдельный
+     PRIMARY poller;
+   - Platform Selection показывает app-maintained snapshot
+     (`_prev_sel_text` / `_prev_sel_owner_id`);
    - на Wayland это не должно отправлять `ctrl+c`;
    - если Debug Monitor в idle генерирует `ctrl+c`, это регрессия.
 
@@ -351,9 +353,11 @@ Keyboard selection:
 
 Ожидать:
 
-- Debug Monitor обновляет Platform Selection через passive Wayland reader;
+- Debug Monitor не запускает отдельный PRIMARY poller;
+- Platform Selection обновляется из app-maintained selection snapshot;
 - в idle не появляется `VirtualKeyboard: send_combo sequence=ctrl+c`;
-- если выделение меняется мышью, selection panel может обновиться без copy-flow.
+- если выделение меняется мышью, selection panel обновляется после mouse
+  click/release без copy-flow.
 
 Нежелательно:
 

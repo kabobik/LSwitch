@@ -10,51 +10,15 @@ from PyQt6.QtWidgets import (
     QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QPushButton,
 )
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QFont
 
 from lswitch.core.events import Event, EventType
 from lswitch.input.key_mapper import keycode_to_char
-from lswitch.platform.selection_adapter import read_selection_prefer_passive
 
 if TYPE_CHECKING:
     from lswitch.app import LSwitchApp
     from lswitch.core.event_bus import EventBus
-
-
-class _SelectionPollerThread(QThread):
-    """Background thread polling the active platform selection every 500ms."""
-
-    selection_updated = pyqtSignal(str, int, float)  # text, owner_id, last_changed_at
-
-    def __init__(self, app: "LSwitchApp"):
-        super().__init__()
-        self._app = app
-        self._running = True
-        self._prev_text: str = ""
-        self._prev_owner_id: int = 0
-        self._selection_captured_at: float = 0.0  # time when selection last changed
-
-    def run(self):
-        while self._running:
-            try:
-                info = read_selection_prefer_passive(self._app.selection)
-                changed = (
-                    bool(info.text)
-                    and (info.text != self._prev_text or info.owner_id != self._prev_owner_id)
-                )
-                if changed:
-                    self._prev_text = info.text
-                    self._prev_owner_id = info.owner_id
-                    self._selection_captured_at = time.time()
-                self.selection_updated.emit(info.text, info.owner_id, self._selection_captured_at)
-            except Exception:
-                self.selection_updated.emit("(error)", 0, 0.0)
-            self.msleep(500)
-
-    def stop(self):
-        self._running = False
-        self.wait(1000)
 
 
 class DebugMonitorWindow(QWidget):
@@ -74,8 +38,9 @@ class DebugMonitorWindow(QWidget):
         self._app = app
         self._event_bus = event_bus
         self._log_lines = 0
-
-        self._selection_poller: _SelectionPollerThread | None = None
+        self._selection_display_text = ""
+        self._selection_display_owner_id = 0
+        self._selection_display_changed_at = 0.0
 
         self._init_ui()
         self._connect_signals()
@@ -250,28 +215,11 @@ class DebugMonitorWindow(QWidget):
         self._log_event_signal.connect(self._append_log_entry)
 
     # ------------------------------------------------------------------
-    # Selection Poller Lifecycle
+    # Selection Snapshot
     # ------------------------------------------------------------------
 
-    def _start_selection_poller(self):
-        """Start background selection polling thread."""
-        if self._selection_poller is not None:
-            return
-        if not hasattr(self._app, 'selection') or self._app.selection is None:
-            return
-        self._selection_poller = _SelectionPollerThread(self._app)
-        self._selection_poller.selection_updated.connect(self._on_selection_updated)
-        self._selection_poller.start()
-
-    def _stop_selection_poller(self):
-        """Stop background selection polling thread."""
-        if self._selection_poller is not None:
-            self._selection_poller.stop()
-            self._selection_poller = None
-
-    @pyqtSlot(str, int, float)
     def _on_selection_updated(self, text: str, owner_id: int, last_changed_at: float):
-        """Handle selection update from poller thread (runs in GUI thread)."""
+        """Update selection labels from app-maintained selection snapshot."""
         # Truncate long text
         if len(text) > 200:
             display_text = text[:200] + f"... ({len(text)} total chars)"
@@ -287,11 +235,6 @@ class DebugMonitorWindow(QWidget):
         else:
             self._sel_changed_label.setText("Last changed: -")
 
-    def show(self):
-        """Override show to start selection poller."""
-        super().show()
-        self._start_selection_poller()
-
     def _subscribe_events(self):
         """Subscribe to EventBus events for live updates."""
         if self._event_bus is None:
@@ -301,6 +244,8 @@ class DebugMonitorWindow(QWidget):
         self._event_bus.subscribe(EventType.KEY_PRESS, self._on_event)
         self._event_bus.subscribe(EventType.KEY_RELEASE, self._on_event)
         self._event_bus.subscribe(EventType.KEY_REPEAT, self._on_event)
+        self._event_bus.subscribe(EventType.MOUSE_CLICK, self._on_event)
+        self._event_bus.subscribe(EventType.MOUSE_RELEASE, self._on_event)
 
         # Conversion lifecycle
         self._event_bus.subscribe(EventType.CONVERSION_START, self._on_event)
@@ -319,6 +264,7 @@ class DebugMonitorWindow(QWidget):
 
         for evt in [
             EventType.KEY_PRESS, EventType.KEY_RELEASE, EventType.KEY_REPEAT,
+            EventType.MOUSE_CLICK, EventType.MOUSE_RELEASE,
             EventType.CONVERSION_START, EventType.CONVERSION_COMPLETE, EventType.CONVERSION_CANCELLED,
             EventType.LAYOUT_CHANGED, EventType.DOUBLE_SHIFT, EventType.BACKSPACE_HOLD,
         ]:
@@ -402,6 +348,7 @@ class DebugMonitorWindow(QWidget):
         self._prev_sel_owner_label.setText(
             f"Prev owner: {f'0x{prev_owner:08x}' if prev_owner else '-'}"
         )
+        self._refresh_selection_snapshot(prev_text, prev_owner)
 
         # Section 2: Event Buffer
         self._refresh_buffer_table(ctx.event_buffer)
@@ -411,6 +358,27 @@ class DebugMonitorWindow(QWidget):
 
         # Section 4: Auto Marker
         self._refresh_marker()
+
+    def _refresh_selection_snapshot(self, text: str, owner_id: int) -> None:
+        """Refresh Platform Selection from app-owned baseline, without polling."""
+        changed = (
+            bool(text)
+            and (
+                text != self._selection_display_text
+                or owner_id != self._selection_display_owner_id
+            )
+        )
+        self._selection_display_text = text
+        self._selection_display_owner_id = owner_id
+        if changed:
+            self._selection_display_changed_at = time.time()
+        elif not text:
+            self._selection_display_changed_at = 0.0
+        self._on_selection_updated(
+            text,
+            owner_id,
+            self._selection_display_changed_at,
+        )
 
     def _refresh_buffer_table(self, event_buffer: list):
         """Update event buffer table."""
@@ -535,9 +503,15 @@ class DebugMonitorWindow(QWidget):
         self._log_lines += 1
         if self._log_lines > self.MAX_LOG_LINES:
             # Trim old lines
+            from PyQt6.QtGui import QTextCursor
+
             cursor = self._log_text.textCursor()
-            cursor.movePosition(cursor.Start)
-            cursor.movePosition(cursor.Down, cursor.KeepAnchor, 50)
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.Down,
+                QTextCursor.MoveMode.KeepAnchor,
+                50,
+            )
             cursor.removeSelectedText()
             self._log_lines -= 50
 
@@ -553,13 +527,11 @@ class DebugMonitorWindow(QWidget):
 
     def closeEvent(self, event):
         """Handle window close — cleanup subscriptions."""
-        self._stop_selection_poller()
         self._age_timer.stop()
         self._unsubscribe_events()
         super().closeEvent(event)
 
     def cleanup(self):
         """Manual cleanup for external use."""
-        self._stop_selection_poller()
         self._age_timer.stop()
         self._unsubscribe_events()

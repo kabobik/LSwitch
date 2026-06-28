@@ -41,16 +41,6 @@ def get_passive_selection_reader(selection) -> Callable[[], SelectionInfo] | Non
     return reader if callable(reader) else None
 
 
-def read_selection_prefer_passive(selection) -> SelectionInfo:
-    """Read selection, preferring passive adapters over active copy flows."""
-    if selection is None:
-        raise RuntimeError("Selection adapter is not available")
-    reader = get_passive_selection_reader(selection)
-    if reader is not None:
-        return reader()
-    return selection.get_selection()
-
-
 # ---------------------------------------------------------------------------
 # X11SelectionAdapter — concrete implementation
 # ---------------------------------------------------------------------------

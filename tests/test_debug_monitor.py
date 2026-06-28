@@ -224,6 +224,9 @@ class DebugMonitorWindowMock:
         self._prev_sel_owner_label = MockQLabel("Prev owner: -")
         self._log_text = MockQTextEdit()
         self._age_timer = MockQTimer()
+        self._selection_display_text = ""
+        self._selection_display_owner_id = 0
+        self._selection_display_changed_at = 0.0
         
         self._subscribe_events()
         self._refresh_state()
@@ -250,6 +253,7 @@ class DebugMonitorWindowMock:
             return
         for evt in [
             EventType.KEY_PRESS, EventType.KEY_RELEASE, EventType.KEY_REPEAT,
+            EventType.MOUSE_CLICK, EventType.MOUSE_RELEASE,
             EventType.CONVERSION_START, EventType.CONVERSION_COMPLETE, EventType.CONVERSION_CANCELLED,
             EventType.LAYOUT_CHANGED, EventType.DOUBLE_SHIFT, EventType.BACKSPACE_HOLD,
         ]:
@@ -260,6 +264,7 @@ class DebugMonitorWindowMock:
             return
         for evt in [
             EventType.KEY_PRESS, EventType.KEY_RELEASE, EventType.KEY_REPEAT,
+            EventType.MOUSE_CLICK, EventType.MOUSE_RELEASE,
             EventType.CONVERSION_START, EventType.CONVERSION_COMPLETE, EventType.CONVERSION_CANCELLED,
             EventType.LAYOUT_CHANGED, EventType.DOUBLE_SHIFT, EventType.BACKSPACE_HOLD,
         ]:
@@ -310,9 +315,27 @@ class DebugMonitorWindowMock:
         self._prev_sel_owner_label.setText(
             f"Prev owner: {f'0x{prev_owner:08x}' if prev_owner else '-'}"
         )
+        self._refresh_selection_snapshot(prev_text, prev_owner)
         self._refresh_buffer_table(ctx.event_buffer)
         self._refresh_last_word()
         self._refresh_marker()
+
+    def _refresh_selection_snapshot(self, text, owner_id):
+        changed = bool(text) and (
+            text != self._selection_display_text
+            or owner_id != self._selection_display_owner_id
+        )
+        self._selection_display_text = text
+        self._selection_display_owner_id = owner_id
+        if changed:
+            self._selection_display_changed_at = time.time()
+        elif not text:
+            self._selection_display_changed_at = 0.0
+        self._on_selection_updated(
+            text,
+            owner_id,
+            self._selection_display_changed_at,
+        )
     
     def _refresh_buffer_table(self, event_buffer):
         from lswitch.input.key_mapper import keycode_to_char
@@ -411,17 +434,22 @@ class TestDebugMonitorInit:
         
         assert EventType.KEY_PRESS in event_bus._handlers
         assert len(event_bus._handlers[EventType.KEY_PRESS]) > 0
-        
+        assert EventType.MOUSE_CLICK in event_bus._handlers
+        assert len(event_bus._handlers[EventType.MOUSE_CLICK]) > 0
+
         window.cleanup()
 
     def test_unsubscribes_on_cleanup(self, mock_app, event_bus):
         window = DebugMonitorWindowMock(app=mock_app, event_bus=event_bus)
         handlers_before = len(event_bus._handlers[EventType.KEY_PRESS])
-        
+        mouse_handlers_before = len(event_bus._handlers[EventType.MOUSE_RELEASE])
+
         window.cleanup()
-        
+
         handlers_after = len(event_bus._handlers[EventType.KEY_PRESS])
+        mouse_handlers_after = len(event_bus._handlers[EventType.MOUSE_RELEASE])
         assert handlers_after < handlers_before
+        assert mouse_handlers_after < mouse_handlers_before
 
 
 class TestStateRefresh:
@@ -669,45 +697,8 @@ class TestEventFormatting:
         window.cleanup()
 
 
-class TestSelectionPollerThread:
-    """Test _SelectionPollerThread freshness logic (without actual QThread)."""
-
-    def test_reader_uses_passive_selection_when_available(self):
-        from lswitch.platform.selection_adapter import read_selection_prefer_passive
-
-        class PassiveSelection:
-            def __init__(self):
-                self.active_calls = 0
-                self.passive_calls = 0
-
-            def get_passive_selection(self):
-                self.passive_calls += 1
-                return SelectionInfo(text="passive", owner_id=0, timestamp=time.time())
-
-            def get_selection(self):
-                self.active_calls += 1
-                return SelectionInfo(text="active", owner_id=1, timestamp=time.time())
-
-        selection = PassiveSelection()
-
-        info = read_selection_prefer_passive(selection)
-
-        assert info.text == "passive"
-        assert selection.passive_calls == 1
-        assert selection.active_calls == 0
-
-    def test_reader_uses_active_selection_for_plain_mock(self):
-        from lswitch.platform.selection_adapter import read_selection_prefer_passive
-
-        selection = Mock()
-        selection.get_selection.return_value = SelectionInfo(
-            text="active", owner_id=1, timestamp=time.time(),
-        )
-
-        info = read_selection_prefer_passive(selection)
-
-        assert info.text == "active"
-        selection.get_selection.assert_called_once()
+class TestSelectionFreshnessDisplay:
+    """Test selection freshness display timestamp logic."""
 
     def test_freshness_detected_on_text_change(self):
         """First non-empty selection should be fresh."""
@@ -718,7 +709,7 @@ class TestSelectionPollerThread:
             text="hello", owner_id=0x04a00003, timestamp=time.time()
         )
 
-        # Simulate the freshness logic from _SelectionPollerThread
+        # Simulate freshness logic used for display timestamps.
         prev_text = ""
         prev_owner_id = 0
 
@@ -788,6 +779,29 @@ class TestSelectionPollerThread:
 
 class TestSelectionDisplay:
     """Test selection UI update logic in DebugMonitorWindowMock."""
+
+    def test_selection_snapshot_uses_app_baseline(self, mock_app, event_bus):
+        mock_app._prev_sel_text = "selected"
+        mock_app._prev_sel_owner_id = 7
+
+        window = DebugMonitorWindowMock(app=mock_app, event_bus=event_bus)
+
+        assert "selected" in window._sel_text_label.text()
+        assert "0x00000007" in window._sel_owner_label.text()
+
+        window.cleanup()
+
+    def test_mouse_release_refreshes_selection_snapshot(self, mock_app, event_bus):
+        window = DebugMonitorWindowMock(app=mock_app, event_bus=event_bus)
+        mock_app._prev_sel_text = "mouse selected"
+        mock_app._prev_sel_owner_id = 9
+
+        event_bus.publish(Event(EventType.MOUSE_RELEASE, None, time.time()))
+
+        assert "mouse selected" in window._sel_text_label.text()
+        assert "0x00000009" in window._sel_owner_label.text()
+
+        window.cleanup()
 
     def test_display_normal_text(self, mock_app, event_bus):
         window = DebugMonitorWindowMock(app=mock_app, event_bus=event_bus)
