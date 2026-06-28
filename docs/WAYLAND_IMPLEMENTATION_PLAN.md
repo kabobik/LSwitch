@@ -253,20 +253,20 @@ LSwitchApp
 
 ### Фаза 7. KDE layout backend
 
-- Реализовать `KdeLayoutBackend`.
-- На старте проверить наличие KDE keyboard D-Bus service/interface.
-- `get_layouts()`, `get_current_layout()`, `switch_layout()`.
-- Добавить cache с invalidation, если возможно.
-- Реализовать fallback/error message, если KDE API отличается.
+- [x] Реализовать `KdeLayoutBackend`.
+- [x] На старте проверить наличие KDE keyboard D-Bus service/interface.
+- [x] `get_layouts()`, `get_current_layout()`, `switch_layout()`.
+- [x] Добавить cache с invalidation, если возможно.
+- [x] Реализовать fallback/error message, если KDE API отличается.
 
 Готовность: retype и auto-conversion переключают раскладку на KDE Wayland.
 
 ### Фаза 8. `keycode_to_char()` на Wayland
 
 - Реализовать `XkbCommonKeyMapper`.
-- Для MVP можно поддержать `us`/`ru` reliably.
-- Учитывать evdev keycode offset, shift level, layout index.
-- Покрыть tests для букв и RU punctuation keys (`б`, `ю`, `ж`, `э`).
+- [x] Для MVP можно поддержать `us`/`ru` reliably.
+- [x] Учитывать evdev keycode, shift level, layout.
+- [x] Покрыть tests для букв и RU punctuation keys (`б`, `ю`, `ж`, `э`).
 
 Готовность: `_extract_last_word_events()` корректно видит русские слова на Wayland.
 
@@ -309,6 +309,6 @@ LSwitchApp
 
 ## 8. Открытые вопросы
 
-- Точный KDE D-Bus contract: service/object/interface/method names надо проверить runtime-интроспекцией на целевой Plasma версии.
+- Точный KDE D-Bus contract: backend использует runtime validation, но service/object/interface/method names надо подтвердить на целевой Plasma версии manual QA.
 - Clipboard restore timing после Wayland selection conversion: нужен manual QA на медленных приложениях (Electron/браузеры/IDE).
 - Нужен ли отдельный config для задержек copy/paste/restore или достаточно internal constants с логированием?

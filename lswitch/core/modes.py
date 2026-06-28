@@ -83,8 +83,8 @@ class RetypeMode(BaseMode):
         # 2. Switch layout BEFORE replay so events land in the correct layout.
         # We switch here (not after) so the XKB group is set when UInput events
         # are processed. The system Shift+Shift shortcut may fire afterwards
-        # (after replay) and switch back — that's a separate GNOME/KDE setting
-        # users should disable in keyboard preferences.
+        # (after replay) and switch back — that's a separate desktop keyboard
+        # shortcut users should disable in keyboard preferences.
         try:
             new_layout = self.xkb.switch_layout()
             logger.debug("RetypeMode: switched layout → %s", getattr(new_layout, 'name', new_layout))

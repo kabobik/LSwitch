@@ -10,10 +10,14 @@ import pytest
 
 from lswitch.platform.main_thread import DirectMainThreadInvoker
 from lswitch.platform.wayland import (
+    KdeLayoutBackend,
     WaylandBackendNotImplementedError,
     WaylandSelectionAdapter,
     WaylandSystemAdapter,
+    WaylandLayoutAdapter,
+    WaylandLayoutBackendError,
 )
+from lswitch.platform.xkb_adapter import LayoutInfo
 
 
 class _FakeClipboard:
@@ -209,3 +213,128 @@ class TestWaylandSelectionAdapter:
 
         assert info.text == "word"
         assert system.keys_sent == ["ctrl+shift+Left", "ctrl+c"]
+
+
+class _FakeKdeDbus:
+    def __init__(self, layouts=None, current=0):
+        self.layouts = layouts if layouts is not None else ["English (US)", "Russian"]
+        self.current = current
+        self.calls: list[tuple[str, tuple]] = []
+
+    def call(self, method: str, *args):
+        self.calls.append((method, args))
+        if method == "getLayoutsList":
+            return self.layouts
+        if method == "getLayout":
+            return self.current
+        if method == "setLayout":
+            self.current = args[0]
+            return None
+        raise AssertionError(f"Unexpected method: {method}")
+
+
+class TestKdeLayoutBackend:
+    def test_get_layouts_maps_kde_display_names_to_layout_info(self):
+        backend = KdeLayoutBackend(_FakeKdeDbus())
+
+        layouts = backend.get_layouts()
+
+        assert layouts == [
+            LayoutInfo(name="en", index=0, xkb_name="us"),
+            LayoutInfo(name="ru", index=1, xkb_name="ru"),
+        ]
+
+    def test_get_current_layout_by_index(self):
+        backend = KdeLayoutBackend(_FakeKdeDbus(current=1))
+
+        assert backend.get_current_layout().name == "ru"
+
+    def test_get_current_layout_by_display_name(self):
+        backend = KdeLayoutBackend(_FakeKdeDbus(current="Russian"))
+
+        assert backend.get_current_layout().name == "ru"
+
+    def test_switch_layout_to_target_calls_set_layout_index(self):
+        dbus = _FakeKdeDbus(current=0)
+        backend = KdeLayoutBackend(dbus)
+        target = LayoutInfo(name="ru", index=1, xkb_name="ru")
+
+        result = backend.switch_layout(target=target)
+
+        assert result.name == "ru"
+        assert ("setLayout", (1,)) in dbus.calls
+
+    def test_switch_layout_without_target_cycles(self):
+        dbus = _FakeKdeDbus(current=0)
+        backend = KdeLayoutBackend(dbus)
+
+        result = backend.switch_layout()
+
+        assert result.name == "ru"
+        assert ("setLayout", (1,)) in dbus.calls
+
+    def test_empty_layout_list_fails_clearly(self):
+        backend = KdeLayoutBackend(_FakeKdeDbus(layouts=[]))
+
+        with pytest.raises(WaylandLayoutBackendError, match="no layouts"):
+            backend.get_layouts()
+
+
+class TestWaylandLayoutAdapter:
+    def test_delegates_layout_operations_to_backend(self):
+        backend = KdeLayoutBackend(_FakeKdeDbus(current=0))
+        adapter = WaylandLayoutAdapter(
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            backend=backend,
+        )
+
+        assert [layout.name for layout in adapter.get_layouts()] == ["en", "ru"]
+        assert adapter.get_current_layout().name == "en"
+        assert adapter.switch_layout().name == "ru"
+
+    def test_validate_backend_when_requested(self):
+        backend = MagicMock()
+
+        WaylandLayoutAdapter(
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            backend=backend,
+            validate_backend=True,
+        )
+
+        backend.validate.assert_called_once()
+
+    def test_non_kde_layout_backend_fails_fast(self):
+        adapter = WaylandLayoutAdapter(
+            main_thread=DirectMainThreadInvoker(),
+            compositor="unknown",
+        )
+
+        with pytest.raises(WaylandBackendNotImplementedError, match="get_layouts"):
+            adapter.get_layouts()
+
+    def test_keycode_to_char_supports_us_and_ru_mvp(self):
+        adapter = WaylandLayoutAdapter(
+            main_thread=DirectMainThreadInvoker(),
+            compositor="unknown",
+        )
+        en = LayoutInfo(name="en", index=0, xkb_name="us")
+        ru = LayoutInfo(name="ru", index=1, xkb_name="ru")
+
+        assert adapter.keycode_to_char(16, en) == "q"
+        assert adapter.keycode_to_char(16, ru) == "й"
+        assert adapter.keycode_to_char(51, ru) == "б"
+        assert adapter.keycode_to_char(52, ru) == "ю"
+        assert adapter.keycode_to_char(39, ru) == "ж"
+
+    def test_keycode_to_char_supports_shift_for_ru_punctuation(self):
+        adapter = WaylandLayoutAdapter(
+            main_thread=DirectMainThreadInvoker(),
+            compositor="unknown",
+        )
+        ru = LayoutInfo(name="ru", index=1, xkb_name="ru")
+
+        assert adapter.keycode_to_char(51, ru, shift=True) == "Б"
+        assert adapter.keycode_to_char(52, ru, shift=True) == "Ю"
+        assert adapter.keycode_to_char(39, ru, shift=True) == "Ж"

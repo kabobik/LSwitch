@@ -89,11 +89,13 @@ class TestCreateRuntimePlan:
 class TestCreatePlatformAdapters:
     def test_wayland_session_returns_skeleton_adapters(self):
         fake_vk = MagicMock()
+        fake_layout_backend = MagicMock()
         main_thread = DirectMainThreadInvoker()
         with patch("lswitch.platform.platform_factory.VirtualKeyboard", return_value=fake_vk):
             adapters = create_platform_adapters(
                 debug=True,
                 main_thread=main_thread,
+                layout_backend=fake_layout_backend,
                 env={
                     "XDG_SESSION_TYPE": "wayland",
                     "XDG_CURRENT_DESKTOP": "KDE",
@@ -110,6 +112,7 @@ class TestCreatePlatformAdapters:
         assert adapters.selection_polling_enabled is False
         assert adapters.main_thread is main_thread
         assert adapters.selection_mouse_release_tracking_enabled is False
+        fake_layout_backend.validate.assert_called_once()
 
     def test_unknown_session_fails_clearly(self):
         with patch("lswitch.platform.platform_factory.detect_session_type", return_value="unknown"):
@@ -145,7 +148,7 @@ class TestCreatePlatformAdapters:
         with patch("lswitch.platform.platform_factory.VirtualKeyboard", return_value=fake_vk):
             adapters = create_wayland_platform_adapters(
                 debug=True,
-                compositor="kde",
+                compositor="unknown",
                 main_thread=main_thread,
             )
 

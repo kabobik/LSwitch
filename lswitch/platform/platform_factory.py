@@ -98,6 +98,7 @@ def create_platform_adapters(
     debug: bool = False,
     env: Mapping[str, str] | None = None,
     main_thread: MainThreadInvoker | None = None,
+    layout_backend=None,
 ) -> PlatformAdapters:
     """Create adapters for the current session.
 
@@ -113,6 +114,7 @@ def create_platform_adapters(
             debug=debug,
             compositor=compositor,
             main_thread=main_thread,
+            layout_backend=layout_backend,
         )
     if session_type == "unknown":
         raise RuntimeError(
@@ -152,6 +154,7 @@ def create_wayland_platform_adapters(
     debug: bool = False,
     compositor: str | None = None,
     main_thread: MainThreadInvoker | None = None,
+    layout_backend=None,
 ) -> PlatformAdapters:
     """Create the Wayland adapter skeleton.
 
@@ -179,8 +182,11 @@ def create_wayland_platform_adapters(
         debug=debug,
     )
     xkb = WaylandLayoutAdapter(
+        main_thread=main_thread,
         compositor=compositor or "unknown",
         debug=debug,
+        backend=layout_backend,
+        validate_backend=True,
     )
     selection = WaylandSelectionAdapter(
         system=system,
