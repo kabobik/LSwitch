@@ -192,6 +192,8 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
 
     def _wl_clipboard_args(self, command: str, selection: str) -> list[str]:
         args = [command]
+        if command == "wl-paste":
+            args.append("--no-newline")
         if self._normalize_clipboard_selection(selection) == "primary":
             args.append("--primary")
         return args

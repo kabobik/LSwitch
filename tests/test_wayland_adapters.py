@@ -169,7 +169,25 @@ class TestWaylandSystemAdapter:
         )
 
         assert adapter.get_clipboard(selection="clipboard") == "global"
-        assert calls[0][0] == ["wl-paste"]
+        assert calls[0][0] == ["wl-paste", "--no-newline"]
+
+    def test_primary_clipboard_get_uses_wl_paste_without_extra_newline(self):
+        calls = []
+
+        def runner(args, **kwargs):
+            calls.append((args, kwargs))
+            return subprocess.CompletedProcess(args, 0, stdout="primary", stderr="")
+
+        adapter = WaylandSystemAdapter(
+            virtual_kb=MagicMock(),
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            command_lookup=lambda command: f"/usr/bin/{command}",
+            command_runner=runner,
+        )
+
+        assert adapter.get_clipboard(selection="primary") == "primary"
+        assert calls[0][0] == ["wl-paste", "--no-newline", "--primary"]
 
     def test_clipboard_set_uses_wl_copy_when_available(self):
         calls = []
