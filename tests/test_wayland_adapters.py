@@ -189,6 +189,32 @@ class TestWaylandSystemAdapter:
         assert adapter.get_clipboard(selection="primary") == "primary"
         assert calls[0][0] == ["wl-paste", "--no-newline", "--primary"]
 
+    def test_primary_clipboard_get_empty_does_not_fall_back_to_stale_qt(
+        self,
+        monkeypatch,
+    ):
+        clipboard = _FakeClipboard(supports_selection=True)
+        clipboard.values["selection"] = "stale"
+        _install_fake_qt_clipboard(monkeypatch, clipboard)
+
+        def runner(args, **kwargs):
+            return subprocess.CompletedProcess(
+                args,
+                1,
+                stdout="",
+                stderr="nothing is copied",
+            )
+
+        adapter = WaylandSystemAdapter(
+            virtual_kb=MagicMock(),
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            command_lookup=lambda command: f"/usr/bin/{command}",
+            command_runner=runner,
+        )
+
+        assert adapter.get_clipboard(selection="primary") == ""
+
     def test_clipboard_set_uses_wl_copy_when_available(self):
         calls = []
 

@@ -146,12 +146,20 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         if not self._can_use_wl_clipboard(selection):
             return None
 
+        normalized = self._normalize_clipboard_selection(selection)
         result = self._run_wl_command(
             self._wl_clipboard_args("wl-paste", selection),
             timeout=self.WL_CLIPBOARD_TIMEOUT,
         )
         if result.returncode == 0:
             return result.stdout
+
+        if normalized == "primary":
+            logger.debug(
+                "wl-paste primary returned no selection: %s",
+                result.stderr.strip() or result.returncode,
+            )
+            return ""
 
         logger.debug("wl-paste failed: %s", result.stderr.strip() or result.returncode)
         return None

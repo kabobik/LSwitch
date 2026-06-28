@@ -341,6 +341,28 @@ class TestSelectionValidOnEvents:
         assert app._prev_sel_text == "stale"
         assert passive.active_calls == 0
 
+    def test_reselect_same_passive_selection_after_deselect_is_fresh(self):
+        app = _make_app()
+        passive = _PassiveSelection(["word", "", "", "word"])
+        app.selection = passive
+        app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
+        app._selection_valid = True
+
+        # Click/release clears the old selection.
+        app._on_mouse_click(_mouse_event())
+        app._on_mouse_release(_mouse_release_event())
+
+        assert app._selection_valid is False
+        assert app._prev_sel_text == ""
+
+        # Selecting the same text again must be considered a fresh gesture.
+        app._on_mouse_click(_mouse_event())
+        app._on_mouse_release(_mouse_release_event())
+
+        assert app._selection_valid is True
+        assert app._prev_sel_text == "word"
+        assert passive.active_calls == 0
+
     def test_cross_window_stale_selection(self):
         """Cross-window scenario: select in Window A (poller sets fresh),
         click in Window B (resets fresh), Shift+Shift → NOT fresh."""
