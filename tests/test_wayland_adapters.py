@@ -216,9 +216,10 @@ class TestWaylandSelectionAdapter:
 
 
 class _FakeKdeDbus:
-    def __init__(self, layouts=None, current=0):
+    def __init__(self, layouts=None, current=0, accepted_set_layout_signature: str = "index"):
         self.layouts = layouts if layouts is not None else ["English (US)", "Russian"]
         self.current = current
+        self.accepted_set_layout_signature = accepted_set_layout_signature
         self.calls: list[tuple[str, tuple]] = []
 
     def call(self, method: str, *args):
@@ -228,6 +229,19 @@ class _FakeKdeDbus:
         if method == "getLayout":
             return self.current
         if method == "setLayout":
+            if self.accepted_set_layout_signature == "index":
+                if not (len(args) == 1 and isinstance(args[0], int)):
+                    raise RuntimeError(f"bad signature {args!r}")
+            elif self.accepted_set_layout_signature == "layout":
+                if not (len(args) == 1 and isinstance(args[0], str)):
+                    raise RuntimeError(f"bad signature {args!r}")
+            elif self.accepted_set_layout_signature == "layout_variant":
+                if not (
+                    len(args) == 2
+                    and isinstance(args[0], str)
+                    and isinstance(args[1], str)
+                ):
+                    raise RuntimeError(f"bad signature {args!r}")
             self.current = args[0]
             return None
         raise AssertionError(f"Unexpected method: {method}")
@@ -236,6 +250,18 @@ class _FakeKdeDbus:
 class TestKdeLayoutBackend:
     def test_get_layouts_maps_kde_display_names_to_layout_info(self):
         backend = KdeLayoutBackend(_FakeKdeDbus())
+
+        layouts = backend.get_layouts()
+
+        assert layouts == [
+            LayoutInfo(name="en", index=0, xkb_name="us"),
+            LayoutInfo(name="ru", index=1, xkb_name="ru"),
+        ]
+
+    def test_get_layouts_maps_real_qtdbus_tuple_rows_to_layout_info(self):
+        backend = KdeLayoutBackend(_FakeKdeDbus(
+            layouts=[("us", "", "English (US)"), ("ru", "", "Russian")]
+        ))
 
         layouts = backend.get_layouts()
 
@@ -272,6 +298,33 @@ class TestKdeLayoutBackend:
 
         assert result.name == "ru"
         assert ("setLayout", (1,)) in dbus.calls
+
+    def test_switch_layout_falls_back_to_xkb_name_signature(self):
+        dbus = _FakeKdeDbus(
+            layouts=[("us", "", "English (US)"), ("ru", "", "Russian")],
+            current=0,
+            accepted_set_layout_signature="layout",
+        )
+        backend = KdeLayoutBackend(dbus)
+
+        result = backend.switch_layout()
+
+        assert result.name == "ru"
+        assert ("setLayout", (1,)) in dbus.calls
+        assert ("setLayout", ("ru",)) in dbus.calls
+
+    def test_switch_layout_falls_back_to_layout_variant_signature(self):
+        dbus = _FakeKdeDbus(
+            layouts=[("us", "", "English (US)"), ("ru", "", "Russian")],
+            current=0,
+            accepted_set_layout_signature="layout_variant",
+        )
+        backend = KdeLayoutBackend(dbus)
+
+        result = backend.switch_layout()
+
+        assert result.name == "ru"
+        assert ("setLayout", ("ru", "")) in dbus.calls
 
     def test_empty_layout_list_fails_clearly(self):
         backend = KdeLayoutBackend(_FakeKdeDbus(layouts=[]))

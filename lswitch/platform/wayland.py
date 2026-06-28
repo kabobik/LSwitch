@@ -252,7 +252,7 @@ class KdeLayoutBackend:
         self.dbus = dbus_client
         self.debug = debug
         self._layouts: list[LayoutInfo] | None = None
-        self._raw_layouts: list[str] = []
+        self._raw_layouts: list = []
 
     def validate(self) -> None:
         self.get_layouts()
@@ -306,25 +306,30 @@ class KdeLayoutBackend:
                 f"KDE layout index out of range: {new_index}"
             )
 
-        self.dbus.call("setLayout", new_index)
+        self._set_layout(new_index, layouts[new_index])
         return layouts[new_index]
 
     @staticmethod
-    def _coerce_layout_list(raw) -> list[str]:
+    def _coerce_layout_list(raw) -> list:
         if raw is None:
             return []
         if isinstance(raw, str):
             return [item.strip() for item in raw.splitlines() if item.strip()]
-        return [str(item).strip() for item in raw if str(item).strip()]
+        return [item for item in raw if str(item).strip()]
 
     @staticmethod
     def _layout_name_from_xkb(xkb_name: str) -> str:
         return "en" if xkb_name == "us" else xkb_name
 
     @staticmethod
-    def _xkb_name_from_raw(raw_layout: str) -> str:
-        text = str(raw_layout).strip()
+    def _xkb_name_from_raw(raw_layout) -> str:
+        text = KdeLayoutBackend._raw_layout_text(raw_layout)
         lower = text.lower()
+
+        if isinstance(raw_layout, (tuple, list)) and raw_layout:
+            first = str(raw_layout[0]).strip().lower()
+            if first:
+                return "us" if first == "en" else first
 
         if lower in {"us", "en"} or "english" in lower or "(us)" in lower:
             return "us"
@@ -338,6 +343,12 @@ class KdeLayoutBackend:
 
         match = re.search(r"[a-z]{2,}", lower)
         return match.group(0) if match else lower
+
+    @staticmethod
+    def _raw_layout_text(raw_layout) -> str:
+        if isinstance(raw_layout, (tuple, list)):
+            return " ".join(str(part).strip() for part in raw_layout if str(part).strip())
+        return str(raw_layout).strip()
 
     def _current_index_from_raw(self, raw_current, layouts: list[LayoutInfo]) -> int:
         if isinstance(raw_current, int):
@@ -358,12 +369,57 @@ class KdeLayoutBackend:
         for layout, raw_layout in zip(layouts, self._raw_layouts):
             if current_xkb in {layout.name, layout.xkb_name}:
                 return layout.index
-            if lower == raw_layout.lower():
+            if lower == self._raw_layout_text(raw_layout).lower():
                 return layout.index
 
         raise WaylandLayoutBackendError(
             f"KDE current layout {raw_current!r} is not in configured layouts"
         )
+
+    def _set_layout(self, new_index: int, layout: LayoutInfo) -> None:
+        attempts = self._set_layout_attempts(new_index, layout)
+        failures: list[str] = []
+        for label, args in attempts:
+            try:
+                self.dbus.call("setLayout", *args)
+                return
+            except Exception as exc:
+                failures.append(f"{label}: {exc}")
+
+        raise WaylandLayoutBackendError(
+            "KDE keyboard D-Bus setLayout failed for all known signatures: "
+            + "; ".join(failures)
+        )
+
+    def _set_layout_attempts(
+        self,
+        new_index: int,
+        layout: LayoutInfo,
+    ) -> list[tuple[str, tuple]]:
+        raw_layout = self._raw_layouts[new_index] if new_index < len(self._raw_layouts) else None
+        candidates: list[tuple[str, tuple]] = [
+            ("setLayout(index)", (new_index,)),
+            ("setLayout(xkb_name)", (layout.xkb_name,)),
+        ]
+
+        if layout.name != layout.xkb_name:
+            candidates.append(("setLayout(name)", (layout.name,)))
+
+        if isinstance(raw_layout, (tuple, list)) and raw_layout:
+            xkb_name = str(raw_layout[0]).strip()
+            variant = str(raw_layout[1]).strip() if len(raw_layout) > 1 else ""
+            if xkb_name:
+                candidates.append(("setLayout(raw layout)", (xkb_name,)))
+                candidates.append(("setLayout(raw layout, variant)", (xkb_name, variant)))
+
+        deduped: list[tuple[str, tuple]] = []
+        seen: set[tuple] = set()
+        for label, args in candidates:
+            if args in seen:
+                continue
+            seen.add(args)
+            deduped.append((label, args))
+        return deduped
 
 
 class WaylandLayoutAdapter(_WaylandUnsupported, IXKBAdapter):
