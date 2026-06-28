@@ -133,6 +133,7 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
     RESTORE_DELAY = 0.08
     EXPAND_SELECTION_DELAY = 0.12
     COPY_SENTINEL_PREFIX = "__LSWITCH_COPY_SENTINEL__"
+    COPY_SHORTCUTS = ("ctrl+c", "ctrl+insert")
 
     def __init__(
         self,
@@ -152,12 +153,13 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         self._saved_clipboard = old_clipboard
         sentinel = self._copy_sentinel()
         self.system.set_clipboard(sentinel, selection="clipboard")
-        self.system.send_key_sequence("ctrl+c")
-        text = self._wait_for_clipboard_copy(sentinel)
+        text = self._copy_selection_to_clipboard(sentinel)
         if not text:
+            logger.debug("Wayland selection copy returned empty text")
             self.system.set_clipboard(old_clipboard, selection="clipboard")
             self._saved_clipboard = None
             return self.empty_selection()
+        logger.debug("Wayland selection copied %d chars", len(text))
         return SelectionInfo(text=text, owner_id=0, timestamp=time.time())
 
     def has_fresh_selection(self) -> bool:
@@ -204,6 +206,16 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
             if current and current != sentinel:
                 return current
             time.sleep(self.COPY_POLL_INTERVAL)
+        return ""
+
+    def _copy_selection_to_clipboard(self, sentinel: str) -> str:
+        for sequence in self.COPY_SHORTCUTS:
+            self.system.send_key_sequence(sequence)
+            text = self._wait_for_clipboard_copy(sentinel)
+            if text:
+                logger.debug("Wayland selection copy succeeded via %s", sequence)
+                return text
+            logger.debug("Wayland selection copy via %s returned no text", sequence)
         return ""
 
     def _copy_sentinel(self) -> str:

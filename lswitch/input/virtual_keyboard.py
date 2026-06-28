@@ -59,6 +59,8 @@ class VirtualKeyboard:
         "tab": 15,
         "esc": 1,
         "escape": 1,
+        "insert": 110,
+        "ins": 110,
         "a": 30,
         "b": 48,
         "c": 46,

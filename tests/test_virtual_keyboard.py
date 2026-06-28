@@ -227,6 +227,21 @@ class TestSendCombo:
                 (29, 0),
             ]
 
+    def test_send_combo_ctrl_insert(self):
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            vk.send_combo("ctrl+insert")
+
+            writes = [(c.args[1], c.args[2]) for c in mock_uinput.write.call_args_list]
+            assert writes == [
+                (29, 1),
+                (110, 1),
+                (110, 0),
+                (29, 0),
+            ]
+
     def test_send_combo_empty_sequence_noop(self):
         mock_uinput = MagicMock()
         with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):

@@ -149,9 +149,15 @@ class TestWaylandSystemAdapter:
 
 
 class _RecordingWaylandSystem:
-    def __init__(self, clipboard: str = "", copy_text: str | None = None):
+    def __init__(
+        self,
+        clipboard: str = "",
+        copy_text: str | None = None,
+        copy_text_by_sequence: dict[str, str | None] | None = None,
+    ):
         self.clipboard = clipboard
         self.copy_text = copy_text
+        self.copy_text_by_sequence = copy_text_by_sequence or {}
         self.keys_sent: list[str] = []
         self.clipboard_writes: list[str] = []
 
@@ -166,7 +172,11 @@ class _RecordingWaylandSystem:
 
     def send_key_sequence(self, sequence: str, timeout: float = 0.3) -> None:
         self.keys_sent.append(sequence)
-        if sequence == "ctrl+c" and self.copy_text is not None:
+        if sequence in self.copy_text_by_sequence:
+            text = self.copy_text_by_sequence[sequence]
+            if text is not None:
+                self.clipboard = text
+        elif sequence == "ctrl+c" and self.copy_text is not None:
             self.clipboard = self.copy_text
 
 
@@ -203,6 +213,22 @@ class TestWaylandSelectionAdapter:
 
         assert info.text == "old"
         assert info.owner_id == 0
+
+    def test_get_selection_falls_back_to_ctrl_insert_copy(self):
+        system = _RecordingWaylandSystem(
+            clipboard="old",
+            copy_text_by_sequence={
+                "ctrl+c": None,
+                "ctrl+insert": "selected",
+            },
+        )
+        adapter = _make_selection_adapter(system)
+
+        info = adapter.get_selection()
+
+        assert info.text == "selected"
+        assert info.owner_id == 0
+        assert system.keys_sent == ["ctrl+c", "ctrl+insert"]
 
     def test_get_selection_returns_empty_and_restores_clipboard_when_copy_fails(self):
         system = _RecordingWaylandSystem(clipboard="old", copy_text=None)
