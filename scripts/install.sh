@@ -124,6 +124,18 @@ check_deps() {
         info "Установить: sudo apt install python3-pyqt6"
     fi
 
+    if [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
+        if ! command -v wl-copy &>/dev/null || ! command -v wl-paste &>/dev/null; then
+            warn "wl-clipboard не найден — Wayland selection fallback будет недоступен"
+            if command -v apt &>/dev/null; then
+                info "Попытка установить wl-clipboard через apt..."
+                sudo apt install -y wl-clipboard
+            else
+                warn "Установите wl-clipboard вручную для полной поддержки Wayland"
+            fi
+        fi
+    fi
+
     ok "Зависимости в порядке"
 }
 

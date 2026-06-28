@@ -11,6 +11,7 @@
 - запуск из проекта через `.venv/bin/python`;
 - `evdev`, `pyudev`, `PyQt6` установлены в том Python, которым запускается
   приложение;
+- `wl-copy` и `wl-paste` доступны в `PATH` для Wayland clipboard fallback;
 - пользователь имеет доступ к `/dev/input/event*` и `/dev/uinput`.
 
 ## 1. Что сейчас отправляет `Ctrl+C`
@@ -70,6 +71,7 @@ layout switch, replay events и отложенный space.
 
 ```bash
 .venv/bin/python -c "import evdev, pyudev, PyQt6; print('ok')"
+command -v wl-copy && command -v wl-paste
 ```
 
 Проверить Wayland/KDE backend:
@@ -83,6 +85,7 @@ layout switch, replay events и отложенный space.
 ```text
 [ok] session: wayland
 [ok] compositor: kde
+[ok] wl-clipboard: wl-copy/wl-paste available
 [ok] D-Bus methods: ... setLayout(u)->b ...
 [ok] switch test switch: ... via setLayout(uint32)
 [ok] switch test restore: ... via setLayout(uint32)

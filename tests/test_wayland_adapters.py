@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import subprocess
 import sys
 import types
 from contextlib import contextmanager
@@ -88,6 +89,7 @@ class TestWaylandSystemAdapter:
             virtual_kb=vk,
             main_thread=DirectMainThreadInvoker(),
             compositor="kde",
+            enable_wl_clipboard=False,
         )
 
         adapter.send_key_sequence("ctrl+v")
@@ -103,6 +105,7 @@ class TestWaylandSystemAdapter:
             virtual_kb=MagicMock(),
             main_thread=DirectMainThreadInvoker(),
             compositor="kde",
+            enable_wl_clipboard=False,
         )
 
         assert adapter.get_clipboard(selection="clipboard") == "old"
@@ -118,6 +121,7 @@ class TestWaylandSystemAdapter:
             virtual_kb=MagicMock(),
             main_thread=DirectMainThreadInvoker(),
             compositor="kde",
+            enable_wl_clipboard=False,
         )
 
         assert adapter.get_clipboard(selection="primary") == "selected"
@@ -132,6 +136,7 @@ class TestWaylandSystemAdapter:
             virtual_kb=MagicMock(),
             main_thread=DirectMainThreadInvoker(),
             compositor="kde",
+            enable_wl_clipboard=False,
         )
 
         with pytest.raises(WaylandBackendNotImplementedError, match="primary selection"):
@@ -142,10 +147,67 @@ class TestWaylandSystemAdapter:
             virtual_kb=MagicMock(),
             main_thread=DirectMainThreadInvoker(),
             compositor="kde",
+            enable_wl_clipboard=False,
         )
 
         with pytest.raises(WaylandBackendNotImplementedError, match="run_command"):
             adapter.run_command(["true"])
+
+    def test_clipboard_get_uses_wl_paste_when_available(self):
+        calls = []
+
+        def runner(args, **kwargs):
+            calls.append((args, kwargs))
+            return subprocess.CompletedProcess(args, 0, stdout="global", stderr="")
+
+        adapter = WaylandSystemAdapter(
+            virtual_kb=MagicMock(),
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            command_lookup=lambda command: f"/usr/bin/{command}",
+            command_runner=runner,
+        )
+
+        assert adapter.get_clipboard(selection="clipboard") == "global"
+        assert calls[0][0] == ["wl-paste"]
+
+    def test_clipboard_set_uses_wl_copy_when_available(self):
+        calls = []
+
+        def runner(args, **kwargs):
+            calls.append((args, kwargs))
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        adapter = WaylandSystemAdapter(
+            virtual_kb=MagicMock(),
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            command_lookup=lambda command: f"/usr/bin/{command}",
+            command_runner=runner,
+        )
+
+        adapter.set_clipboard("new", selection="clipboard")
+
+        assert calls[0][0] == ["wl-copy"]
+        assert calls[0][1]["input"] == "new"
+
+    def test_clipboard_get_falls_back_to_qt_when_wl_paste_fails(self, monkeypatch):
+        clipboard = _FakeClipboard()
+        clipboard.values["clipboard"] = "qt"
+        _install_fake_qt_clipboard(monkeypatch, clipboard)
+
+        def runner(args, **kwargs):
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="no data")
+
+        adapter = WaylandSystemAdapter(
+            virtual_kb=MagicMock(),
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            command_lookup=lambda command: f"/usr/bin/{command}",
+            command_runner=runner,
+        )
+
+        assert adapter.get_clipboard(selection="clipboard") == "qt"
 
 
 class _RecordingWaylandSystem:
@@ -188,6 +250,7 @@ def _make_selection_adapter(system: _RecordingWaylandSystem) -> WaylandSelection
     )
     adapter.COPY_WAIT_TIMEOUT = 0.01
     adapter.COPY_POLL_INTERVAL = 0.0
+    adapter.COPY_RETRY_DELAY = 0.0
     adapter.PASTE_DELAY = 0.0
     adapter.RESTORE_DELAY = 0.0
     adapter.EXPAND_SELECTION_DELAY = 0.0

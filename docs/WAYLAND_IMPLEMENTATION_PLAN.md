@@ -235,7 +235,9 @@ LSwitchApp
 - [x] `get_clipboard()`/`set_clipboard()` через `QClipboard`.
 - [x] `send_key_sequence()` через `VirtualKeyboard.send_combo()`.
 - [x] `xdotool_key()` оставить deprecated alias.
-- Fallback на `wl-copy`/`wl-paste` при headless/no-Qt.
+- [x] Fallback на `wl-copy`/`wl-paste` для Wayland clipboard-copy flow,
+  когда Qt clipboard path недостаточен или helper доступен как более надежный
+  compositor-facing backend.
 - Понятные logs при недоступном clipboard.
 
 Готовность: clipboard operations проходят в Wayland KDE session.

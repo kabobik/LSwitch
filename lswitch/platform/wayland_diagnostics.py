@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import shutil
 from typing import Callable, Mapping
 from xml.etree import ElementTree
 
@@ -54,6 +55,7 @@ def run_wayland_diagnostics(
     compositor = detect_compositor(env)
     _add_expected(report, "session", session_type, expected="wayland")
     _add_expected(report, "compositor", compositor, expected="kde")
+    _add_wl_clipboard_status(report)
 
     if dbus_client_factory is None:
         try:
@@ -159,6 +161,18 @@ def _format_layouts(layouts) -> str:
     return ", ".join(
         f"{layout.index}:{layout.name}/{layout.xkb_name}" for layout in layouts
     )
+
+
+def _add_wl_clipboard_status(report: DiagnosticReport) -> None:
+    missing = [
+        command
+        for command in ("wl-copy", "wl-paste")
+        if shutil.which(command) is None
+    ]
+    if missing:
+        report.add("warn", "wl-clipboard", f"missing: {', '.join(missing)}")
+    else:
+        report.add("ok", "wl-clipboard", "wl-copy/wl-paste available")
 
 
 def _add_dbus_introspection(report: DiagnosticReport, dbus_client) -> None:

@@ -10,8 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import re
+import shutil
+import subprocess
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from lswitch.input.virtual_keyboard import VirtualKeyboard
 from lswitch.platform.main_thread import MainThreadInvoker
@@ -60,16 +62,25 @@ class _WaylandUnsupported:
 class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
     """Wayland implementation for key sequences and Qt clipboard access."""
 
+    WL_CLIPBOARD_TIMEOUT = 1.0
+
     def __init__(
         self,
         virtual_kb: VirtualKeyboard,
         main_thread: MainThreadInvoker,
         compositor: str = "unknown",
         debug: bool = False,
+        enable_wl_clipboard: bool = True,
+        command_lookup: Callable[[str], str | None] | None = None,
+        command_runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     ) -> None:
         super().__init__(compositor=compositor, debug=debug)
         self.virtual_kb = virtual_kb
         self.main_thread = main_thread
+        self.enable_wl_clipboard = enable_wl_clipboard
+        self._command_lookup = command_lookup or shutil.which
+        self._command_runner = command_runner or subprocess.run
+        self._wl_clipboard_available: bool | None = None
 
     def run_command(self, args: list[str], timeout: float = 1.0) -> CommandResult:
         raise self._unsupported("run_command")
@@ -78,6 +89,9 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         self.virtual_kb.send_combo(sequence)
 
     def get_clipboard(self, selection: str = "primary") -> str:
+        text = self._get_wl_clipboard(selection)
+        if text is not None:
+            return text
         return self.main_thread.call(
             self._get_clipboard_on_main_thread,
             selection,
@@ -85,6 +99,8 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         )
 
     def set_clipboard(self, text: str, selection: str = "clipboard") -> None:
+        if self._set_wl_clipboard(text, selection):
+            return
         self.main_thread.call(
             self._set_clipboard_on_main_thread,
             text,
@@ -107,10 +123,10 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         if clipboard is None:
             raise RuntimeError("Qt clipboard is not available")
 
-        normalized = (selection or "clipboard").strip().lower()
+        normalized = self._normalize_clipboard_selection(selection)
         if normalized == "clipboard":
             return clipboard, QClipboard.Mode.Clipboard
-        if normalized in {"primary", "selection"}:
+        if normalized == "primary":
             if clipboard.supportsSelection():
                 return clipboard, QClipboard.Mode.Selection
             raise WaylandBackendNotImplementedError(
@@ -118,6 +134,92 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
                 "use clipboard copy/paste flow instead."
             )
         raise ValueError(f"Unsupported clipboard selection: {selection!r}")
+
+    @staticmethod
+    def _normalize_clipboard_selection(selection: str) -> str:
+        normalized = (selection or "clipboard").strip().lower()
+        if normalized == "selection":
+            return "primary"
+        return normalized
+
+    def _get_wl_clipboard(self, selection: str) -> str | None:
+        if not self._can_use_wl_clipboard(selection):
+            return None
+
+        result = self._run_wl_command(
+            self._wl_clipboard_args("wl-paste", selection),
+            timeout=self.WL_CLIPBOARD_TIMEOUT,
+        )
+        if result.returncode == 0:
+            return result.stdout
+
+        logger.debug("wl-paste failed: %s", result.stderr.strip() or result.returncode)
+        return None
+
+    def _set_wl_clipboard(self, text: str, selection: str) -> bool:
+        if not self._can_use_wl_clipboard(selection):
+            return False
+
+        result = self._run_wl_command(
+            self._wl_clipboard_args("wl-copy", selection),
+            input_text=text,
+            timeout=self.WL_CLIPBOARD_TIMEOUT,
+        )
+        if result.returncode == 0:
+            return True
+
+        logger.debug("wl-copy failed: %s", result.stderr.strip() or result.returncode)
+        return False
+
+    def _can_use_wl_clipboard(self, selection: str) -> bool:
+        if not self.enable_wl_clipboard:
+            return False
+
+        normalized = self._normalize_clipboard_selection(selection)
+        if normalized not in {"clipboard", "primary"}:
+            return False
+
+        if self._wl_clipboard_available is None:
+            self._wl_clipboard_available = (
+                self._command_lookup("wl-copy") is not None
+                and self._command_lookup("wl-paste") is not None
+            )
+            if self._wl_clipboard_available:
+                logger.debug("Wayland wl-clipboard backend is available")
+            else:
+                logger.debug("Wayland wl-clipboard backend is not available")
+        return self._wl_clipboard_available
+
+    def _wl_clipboard_args(self, command: str, selection: str) -> list[str]:
+        args = [command]
+        if self._normalize_clipboard_selection(selection) == "primary":
+            args.append("--primary")
+        return args
+
+    def _run_wl_command(
+        self,
+        args: list[str],
+        *,
+        input_text: str | None = None,
+        timeout: float,
+    ) -> CommandResult:
+        try:
+            result = self._command_runner(
+                args,
+                input=input_text,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            return CommandResult(
+                stdout=result.stdout or "",
+                stderr=result.stderr or "",
+                returncode=result.returncode,
+            )
+        except subprocess.TimeoutExpired:
+            return CommandResult(stdout="", stderr="timeout", returncode=-1)
+        except Exception as exc:
+            return CommandResult(stdout="", stderr=str(exc), returncode=-1)
 
 
 class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
@@ -127,11 +229,12 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
     selection owner equivalent.
     """
 
-    COPY_WAIT_TIMEOUT = 0.35
-    COPY_POLL_INTERVAL = 0.01
-    PASTE_DELAY = 0.05
-    RESTORE_DELAY = 0.08
-    EXPAND_SELECTION_DELAY = 0.12
+    COPY_WAIT_TIMEOUT = 1.0
+    COPY_POLL_INTERVAL = 0.05
+    COPY_RETRY_DELAY = 0.1
+    PASTE_DELAY = 0.12
+    RESTORE_DELAY = 0.15
+    EXPAND_SELECTION_DELAY = 0.2
     COPY_SENTINEL_PREFIX = "__LSWITCH_COPY_SENTINEL__"
     COPY_SHORTCUTS = ("ctrl+c", "ctrl+insert")
 
@@ -216,6 +319,7 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
                 logger.debug("Wayland selection copy succeeded via %s", sequence)
                 return text
             logger.debug("Wayland selection copy via %s returned no text", sequence)
+            time.sleep(self.COPY_RETRY_DELAY)
         return ""
 
     def _copy_sentinel(self) -> str:

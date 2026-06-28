@@ -38,9 +38,10 @@ git clone https://github.com/kabobik/lswitch.git && cd lswitch && bash scripts/i
 | python-xlib | Определение раскладки, X11 | **Критично** |
 | pyudev | Мониторинг hot-plug устройств | **Критично** |
 | PyQt6 | Иконка в системном трее | Рекомендуется |
+| wl-clipboard | Clipboard fallback для Wayland (`wl-copy`/`wl-paste`) | Рекомендуется для Wayland |
 | systemd | Управление демоном | Рекомендуется |
 
-**Display Server:** X11 (основной), Wayland через XWayland
+**Display Server:** X11 (основной), KDE Wayland в активной разработке
 
 ### Установка из исходников
 
