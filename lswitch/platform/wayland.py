@@ -108,6 +108,22 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
             timeout=1.0,
         )
 
+    def set_clipboard_mime(
+        self,
+        text: str,
+        selection: str = "clipboard",
+        mime_type: str = "text/plain;charset=utf-8",
+    ) -> None:
+        if self._set_wl_clipboard(text, selection, mime_type=mime_type):
+            return
+        self.main_thread.call(
+            self._set_clipboard_mime_on_main_thread,
+            text,
+            selection,
+            mime_type,
+            timeout=1.0,
+        )
+
     def _get_clipboard_on_main_thread(self, selection: str) -> str:
         clipboard, mode = self._qt_clipboard_and_mode(selection)
         return clipboard.text(mode)
@@ -115,6 +131,22 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
     def _set_clipboard_on_main_thread(self, text: str, selection: str) -> None:
         clipboard, mode = self._qt_clipboard_and_mode(selection)
         clipboard.setText(text, mode)
+
+    def _set_clipboard_mime_on_main_thread(
+        self,
+        text: str,
+        selection: str,
+        mime_type: str,
+    ) -> None:
+        from PyQt6.QtCore import QByteArray, QMimeData
+
+        clipboard, mode = self._qt_clipboard_and_mode(selection)
+        data = QMimeData()
+        if mime_type.startswith("text/plain"):
+            data.setText(text)
+        else:
+            data.setData(mime_type, QByteArray(text.encode("utf-8")))
+        clipboard.setMimeData(data, mode)
 
     def _qt_clipboard_and_mode(self, selection: str):
         from PyQt6.QtGui import QClipboard, QGuiApplication
@@ -164,12 +196,17 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         logger.debug("wl-paste failed: %s", result.stderr.strip() or result.returncode)
         return None
 
-    def _set_wl_clipboard(self, text: str, selection: str) -> bool:
+    def _set_wl_clipboard(
+        self,
+        text: str,
+        selection: str,
+        mime_type: str | None = None,
+    ) -> bool:
         if not self._can_use_wl_clipboard(selection):
             return False
 
         result = self._run_wl_command(
-            self._wl_clipboard_args("wl-copy", selection),
+            self._wl_clipboard_args("wl-copy", selection, mime_type=mime_type),
             input_text=text,
             timeout=self.WL_CLIPBOARD_TIMEOUT,
         )
@@ -198,10 +235,17 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
                 logger.debug("Wayland wl-clipboard backend is not available")
         return self._wl_clipboard_available
 
-    def _wl_clipboard_args(self, command: str, selection: str) -> list[str]:
+    def _wl_clipboard_args(
+        self,
+        command: str,
+        selection: str,
+        mime_type: str | None = None,
+    ) -> list[str]:
         args = [command]
         if command == "wl-paste":
             args.append("--no-newline")
+        if command == "wl-copy" and mime_type:
+            args.extend(["--type", mime_type])
         if self._normalize_clipboard_selection(selection) == "primary":
             args.append("--primary")
         return args
@@ -256,6 +300,7 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
     RESTORE_DELAY = 0.15
     EXPAND_SELECTION_DELAY = 0.2
     COPY_SENTINEL_PREFIX = "__LSWITCH_COPY_SENTINEL__"
+    COPY_SENTINEL_MIME_TYPE = "application/x-lswitch-copy-sentinel"
     COPY_SHORTCUTS = ("ctrl+c", "ctrl+insert")
 
     def __init__(
@@ -275,7 +320,7 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         old_clipboard = self.system.get_clipboard(selection="clipboard")
         self._saved_clipboard = old_clipboard
         sentinel = self._copy_sentinel()
-        self.system.set_clipboard(sentinel, selection="clipboard")
+        self._set_copy_sentinel(sentinel)
         text = self._copy_selection_to_clipboard(sentinel)
         if not text:
             logger.debug("Wayland selection copy returned empty text")
@@ -355,6 +400,20 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
 
     def _copy_sentinel(self) -> str:
         return f"{self.COPY_SENTINEL_PREFIX}{time.monotonic_ns()}"
+
+    def _set_copy_sentinel(self, sentinel: str) -> None:
+        setter = getattr(self.system, "set_clipboard_mime", None)
+        if callable(setter):
+            try:
+                setter(
+                    sentinel,
+                    selection="clipboard",
+                    mime_type=self.COPY_SENTINEL_MIME_TYPE,
+                )
+                return
+            except Exception as exc:
+                logger.debug("Wayland clipboard MIME sentinel failed: %s", exc)
+        self.system.set_clipboard(sentinel, selection="clipboard")
 
 
 class KdeKeyboardDbusClient:

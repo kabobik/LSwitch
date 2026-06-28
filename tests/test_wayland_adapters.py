@@ -238,6 +238,34 @@ class TestWaylandSystemAdapter:
         assert calls[0][1]["stdout"] is subprocess.DEVNULL
         assert calls[0][1]["stderr"] is subprocess.DEVNULL
 
+    def test_clipboard_mime_set_uses_wl_copy_type_when_available(self):
+        calls = []
+
+        def runner(args, **kwargs):
+            calls.append((args, kwargs))
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        adapter = WaylandSystemAdapter(
+            virtual_kb=MagicMock(),
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            command_lookup=lambda command: f"/usr/bin/{command}",
+            command_runner=runner,
+        )
+
+        adapter.set_clipboard_mime(
+            "marker",
+            selection="clipboard",
+            mime_type="application/x-lswitch-copy-sentinel",
+        )
+
+        assert calls[0][0] == [
+            "wl-copy",
+            "--type",
+            "application/x-lswitch-copy-sentinel",
+        ]
+        assert calls[0][1]["input"] == "marker"
+
     def test_clipboard_get_falls_back_to_qt_when_wl_paste_fails(self, monkeypatch):
         clipboard = _FakeClipboard()
         clipboard.values["clipboard"] = "qt"
@@ -271,6 +299,7 @@ class _RecordingWaylandSystem:
         self.copy_text_by_sequence = copy_text_by_sequence or {}
         self.keys_sent: list[str] = []
         self.clipboard_writes: list[str] = []
+        self.clipboard_mime_writes: list[tuple[str, str]] = []
 
     def get_clipboard(self, selection: str = "primary") -> str:
         assert selection in {"clipboard", "primary"}
@@ -282,6 +311,16 @@ class _RecordingWaylandSystem:
         assert selection == "clipboard"
         self.clipboard = text
         self.clipboard_writes.append(text)
+
+    def set_clipboard_mime(
+        self,
+        text: str,
+        selection: str = "clipboard",
+        mime_type: str = "text/plain;charset=utf-8",
+    ) -> None:
+        assert selection == "clipboard"
+        self.clipboard = text
+        self.clipboard_mime_writes.append((mime_type, text))
 
     def send_key_sequence(self, sequence: str, timeout: float = 0.3) -> None:
         self.keys_sent.append(sequence)
@@ -364,8 +403,9 @@ class TestWaylandSelectionAdapter:
         assert info.text == ""
         assert info.owner_id == 0
         assert system.clipboard == "old"
-        assert system.clipboard_writes[0].startswith(adapter.COPY_SENTINEL_PREFIX)
-        assert system.clipboard_writes[-1] == "old"
+        assert system.clipboard_mime_writes[0][0] == adapter.COPY_SENTINEL_MIME_TYPE
+        assert system.clipboard_mime_writes[0][1].startswith(adapter.COPY_SENTINEL_PREFIX)
+        assert system.clipboard_writes == ["old"]
 
     def test_has_fresh_selection_ignores_empty_copy(self):
         system = _RecordingWaylandSystem(clipboard="", copy_text="")
@@ -383,8 +423,9 @@ class TestWaylandSelectionAdapter:
         assert result is True
         assert system.keys_sent == ["ctrl+c", "ctrl+v"]
         assert system.clipboard == "original"
-        assert system.clipboard_writes[0].startswith(adapter.COPY_SENTINEL_PREFIX)
-        assert system.clipboard_writes[1:] == ["converted", "original"]
+        assert system.clipboard_mime_writes[0][0] == adapter.COPY_SENTINEL_MIME_TYPE
+        assert system.clipboard_mime_writes[0][1].startswith(adapter.COPY_SENTINEL_PREFIX)
+        assert system.clipboard_writes == ["converted", "original"]
 
     def test_replace_selection_without_prior_copy_restores_current_clipboard(self):
         system = _RecordingWaylandSystem(clipboard="current")

@@ -35,8 +35,10 @@ clipboard, отправляет `ctrl+c`, ждет изменения clipboard 
    - сначала отправляет `ctrl+shift+Left`, потом `ctrl+c`;
    - если `ctrl+c` не дал текст clipboard, пробует copy fallback
      `ctrl+insert`;
-   - перед `ctrl+c` Wayland adapter ставит временный clipboard sentinel, чтобы
-     copy считался успешным даже если clipboard уже содержал такое же слово;
+  - перед `ctrl+c` Wayland adapter ставит временный internal MIME sentinel,
+    чтобы copy считался успешным даже если clipboard уже содержал такое же
+    слово;
+  - sentinel не должен появляться в видимой истории clipboard manager;
    - это главный ожидаемый источник `ctrl+c` при Double Shift на пустом буфере.
 
 3. Backspace-hold selection mode:
@@ -378,6 +380,8 @@ Keyboard selection:
 
 - вставляется `CLIPBOARD_SENTINEL`, а не converted text;
 - если вставляется converted text, restore timing не сработал.
+- в истории clipboard manager не появляются записи вида
+  `__LSWITCH_COPY_SENTINEL__...`.
 
 Повторить в:
 
