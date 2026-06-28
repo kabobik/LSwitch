@@ -304,13 +304,43 @@ class TestSelectionValidOnEvents:
 
     def test_mouse_click_primes_passive_selection_baseline(self):
         app = _make_app()
-        passive = _PassiveSelection(["old", "new"])
+        passive = _PassiveSelection([""])
+        app._prev_sel_text = "old"
         app.selection = passive
         app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
 
         app._on_mouse_click(_mouse_event())
 
-        assert app._prev_sel_text == "old"
+        assert app._prev_sel_text == ""
+        assert app._selection_valid is False
+        assert passive.active_calls == 0
+        assert passive.passive_calls == 1
+
+    def test_mouse_click_marks_press_time_passive_selection_fresh(self):
+        app = _make_app()
+        passive = _PassiveSelection(["word"])
+        app.selection = passive
+        app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
+        app._prev_sel_text = ""
+
+        app._on_mouse_click(_mouse_event())
+
+        assert app._selection_valid is True
+        assert app._prev_sel_text == "word"
+        assert passive.active_calls == 0
+        assert passive.passive_calls == 1
+
+    def test_mouse_click_same_passive_selection_stays_not_fresh(self):
+        app = _make_app()
+        passive = _PassiveSelection(["word"])
+        app.selection = passive
+        app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
+        app._prev_sel_text = "word"
+
+        app._on_mouse_click(_mouse_event())
+
+        assert app._selection_valid is False
+        assert app._prev_sel_text == "word"
         assert passive.active_calls == 0
         assert passive.passive_calls == 1
 
@@ -333,6 +363,7 @@ class TestSelectionValidOnEvents:
         passive = _PassiveSelection(["stale", "stale"])
         app.selection = passive
         app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
+        app._prev_sel_text = "stale"
 
         app._on_mouse_click(_mouse_event())
         app._on_mouse_release(_mouse_release_event())

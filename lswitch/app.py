@@ -502,9 +502,16 @@ class LSwitchApp:
             # Always update baseline on release
             self._prev_sel_text = info.text or ""
             self._prev_sel_owner_id = info.owner_id
+            if not info.text:
+                self._selection_valid = False
+                logger.trace(  # type: ignore[attr-defined]
+                    "MouseRelease: selection empty"
+                )
+                return
             # If selection changed → fresh selection (drag-select happened)
-            if info.text and (info.text != old_text or
-                              (info.owner_id != old_owner and info.owner_id != 0)):
+            if info.text != old_text or (
+                info.owner_id != old_owner and info.owner_id != 0
+            ):
                 self._selection_valid = True
                 logger.debug(
                     "MouseRelease: fresh selection — text=%r owner=0x%x",
@@ -538,9 +545,21 @@ class LSwitchApp:
         if reader is None:
             return
         try:
+            old_text = self._prev_sel_text
+            old_owner = self._prev_sel_owner_id
             info = reader()
             self._prev_sel_text = info.text or ""
             self._prev_sel_owner_id = info.owner_id
+            if info.text and (
+                info.text != old_text
+                or (info.owner_id != old_owner and info.owner_id != 0)
+            ):
+                self._selection_valid = True
+                logger.debug(
+                    "MouseClick: fresh passive selection — text=%r owner=0x%x",
+                    info.text[:50] if info.text else "", info.owner_id,
+                )
+                return
             logger.trace(  # type: ignore[attr-defined]
                 "MouseClick: passive selection baseline — text=%r",
                 info.text[:50] if info.text else "",

@@ -288,6 +288,18 @@ Mouse selection:
   существующее выделение;
 - после операции clipboard снова содержит `CLIPBOARD_SENTINEL`.
 
+Double-click selection:
+
+1. В текстовом поле написать `ghbdtn`.
+2. Двойным кликом выделить слово `ghbdtn`.
+3. Нажать Double Shift.
+
+Ожидать:
+
+- поведение как в mouse selection;
+- `fresh=False -> True` может появиться уже на mouse press, до release;
+- повторное выделение того же слова после deselect тоже должно давать fresh.
+
 Keyboard selection:
 
 1. Написать `ghbdtn`.
