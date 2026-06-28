@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Callable, Mapping
+from xml.etree import ElementTree
 
 from lswitch.platform.platform_factory import detect_compositor, detect_session_type
 from lswitch.platform.wayland import (
@@ -103,6 +104,8 @@ def run_wayland_diagnostics(
         report.add("fail", "KDE D-Bus client", str(exc))
         return report
 
+    _add_dbus_introspection(report, dbus_client)
+
     try:
         raw_layouts = dbus_client.call("getLayoutsList")
         report.add("ok", "raw getLayoutsList", repr(raw_layouts))
@@ -158,6 +161,31 @@ def _format_layouts(layouts) -> str:
     )
 
 
+def _add_dbus_introspection(report: DiagnosticReport, dbus_client) -> None:
+    introspect = getattr(dbus_client, "introspect", None)
+    if introspect is None:
+        report.add("warn", "D-Bus introspection", "not available")
+        return
+
+    try:
+        xml = introspect()
+        methods = _parse_dbus_methods(xml)
+        detail = ", ".join(methods) if methods else "no methods found"
+        report.add("ok", "D-Bus methods", detail)
+    except Exception as exc:
+        report.add("warn", "D-Bus introspection", str(exc))
+
+
+def _parse_dbus_methods(xml: str) -> list[str]:
+    root = ElementTree.fromstring(xml)
+    methods = {
+        method.attrib["name"]
+        for method in root.findall(".//method")
+        if method.attrib.get("name")
+    }
+    return sorted(methods)
+
+
 def _run_switch_test(report: DiagnosticReport, backend: KdeLayoutBackend, original) -> None:
     layouts = backend.get_layouts()
     if len(layouts) < 2:
@@ -169,7 +197,7 @@ def _run_switch_test(report: DiagnosticReport, backend: KdeLayoutBackend, origin
         switched = backend.switch_layout(target=target)
         report.add(
             "ok",
-            "switch test setLayout",
+            "switch test switch",
             f"{switched.name} index={switched.index}",
         )
         restored = backend.switch_layout(target=original)

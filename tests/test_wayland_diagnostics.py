@@ -13,6 +13,17 @@ class _FakeDbusClient:
         self.current = 0
         self.calls: list[tuple[str, tuple]] = []
 
+    def introspect(self) -> str:
+        return """
+        <node>
+          <interface name="org.kde.KeyboardLayouts">
+            <method name="getLayout"/>
+            <method name="getLayoutsList"/>
+            <method name="switchToNextLayout"/>
+          </interface>
+        </node>
+        """
+
     def call(self, method: str, *args):
         self.calls.append((method, args))
         if method == "getLayoutsList":
@@ -59,6 +70,7 @@ class TestRunWaylandDiagnostics:
         assert report.ok is True
         assert "[ok] session: wayland" in text
         assert "[ok] compositor: kde" in text
+        assert "[ok] D-Bus methods: getLayout, getLayoutsList, switchToNextLayout" in text
         assert "[ok] raw getLayoutsList:" in text
         assert "[ok] raw getLayout: 0" in text
         assert "[ok] parsed layouts: 0:en/us, 1:ru/ru" in text
@@ -70,7 +82,7 @@ class TestRunWaylandDiagnostics:
 
         text = report.to_text()
         assert report.ok is True
-        assert "[ok] switch test setLayout: ru index=1" in text
+        assert "[ok] switch test switch: ru index=1" in text
         assert "[ok] switch test restore: en index=0" in text
         assert ("setLayout", (1,)) in fake_dbus.calls
         assert ("setLayout", (0,)) in fake_dbus.calls

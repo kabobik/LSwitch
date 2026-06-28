@@ -242,9 +242,32 @@ class _FakeKdeDbus:
                     and isinstance(args[1], str)
                 ):
                     raise RuntimeError(f"bad signature {args!r}")
+            elif self.accepted_set_layout_signature == "next":
+                raise RuntimeError("No such method 'setLayout'")
+            elif self.accepted_set_layout_signature == "none":
+                raise RuntimeError("No such method 'setLayout'")
             self.current = args[0]
             return None
+        if method == "switchToNextLayout":
+            if self.accepted_set_layout_signature == "none":
+                raise RuntimeError("No such method 'switchToNextLayout'")
+            self.current = (self._current_index() + 1) % len(self.layouts)
+            return None
         raise AssertionError(f"Unexpected method: {method}")
+
+    def _current_index(self) -> int:
+        if isinstance(self.current, int):
+            return self.current
+
+        text = str(self.current).strip().lower()
+        if text.isdigit():
+            return int(text)
+
+        for index, layout in enumerate(self.layouts):
+            raw_text = KdeLayoutBackend._raw_layout_text(layout).lower()
+            if text and (text == raw_text or text in raw_text):
+                return index
+        return 0
 
 
 class TestKdeLayoutBackend:
@@ -325,6 +348,40 @@ class TestKdeLayoutBackend:
 
         assert result.name == "ru"
         assert ("setLayout", ("ru", "")) in dbus.calls
+
+    def test_switch_layout_falls_back_to_switch_to_next_layout(self):
+        dbus = _FakeKdeDbus(
+            layouts=[("us", "", "English (US)"), ("ru", "", "Russian")],
+            current=0,
+            accepted_set_layout_signature="next",
+        )
+        backend = KdeLayoutBackend(dbus)
+
+        result = backend.switch_layout()
+
+        assert result.name == "ru"
+        assert ("setLayout", (1,)) in dbus.calls
+        assert ("setLayout", ("ru", "")) in dbus.calls
+        assert ("switchToNextLayout", ()) in dbus.calls
+        assert dbus.current == 1
+
+    def test_switch_layout_reports_all_failures_when_kde_methods_are_missing(self):
+        dbus = _FakeKdeDbus(
+            layouts=[("us", "", "English (US)"), ("ru", "", "Russian")],
+            current=0,
+            accepted_set_layout_signature="none",
+        )
+        backend = KdeLayoutBackend(dbus)
+
+        with pytest.raises(
+            WaylandLayoutBackendError,
+            match="layout switch failed for all known methods",
+        ) as exc_info:
+            backend.switch_layout()
+
+        message = str(exc_info.value)
+        assert "setLayout(index)" in message
+        assert "switchToNextLayout" in message
 
     def test_empty_layout_list_fails_clearly(self):
         backend = KdeLayoutBackend(_FakeKdeDbus(layouts=[]))

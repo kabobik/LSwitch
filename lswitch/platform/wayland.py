@@ -196,19 +196,27 @@ class KdeKeyboardDbusClient:
     SERVICE = "org.kde.keyboard"
     PATH = "/Layouts"
     INTERFACE = "org.kde.KeyboardLayouts"
+    INTROSPECTABLE_INTERFACE = "org.freedesktop.DBus.Introspectable"
 
     def __init__(self, main_thread: MainThreadInvoker) -> None:
         self.main_thread = main_thread
 
     def call(self, method: str, *args):
+        return self.call_interface(self.INTERFACE, method, *args)
+
+    def call_interface(self, interface: str, method: str, *args):
         return self.main_thread.call(
             self._call_on_main_thread,
+            interface,
             method,
             *args,
             timeout=1.0,
         )
 
-    def _call_on_main_thread(self, method: str, *args):
+    def introspect(self) -> str:
+        return self.call_interface(self.INTROSPECTABLE_INTERFACE, "Introspect")
+
+    def _call_on_main_thread(self, interface: str, method: str, *args):
         try:
             from PyQt6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
         except ImportError as exc:
@@ -219,7 +227,7 @@ class KdeKeyboardDbusClient:
         iface = QDBusInterface(
             self.SERVICE,
             self.PATH,
-            self.INTERFACE,
+            interface,
             QDBusConnection.sessionBus(),
         )
         if not iface.isValid():
@@ -227,7 +235,7 @@ class KdeKeyboardDbusClient:
             message = error.message() if error else ""
             raise WaylandLayoutBackendError(
                 "KDE keyboard D-Bus interface is unavailable: "
-                f"{self.SERVICE} {self.PATH} {self.INTERFACE}"
+                f"{self.SERVICE} {self.PATH} {interface}"
                 + (f" ({message})" if message else "")
             )
 
@@ -386,10 +394,39 @@ class KdeLayoutBackend:
             except Exception as exc:
                 failures.append(f"{label}: {exc}")
 
+        if self._switch_layout_by_next_cycle(new_index, failures):
+            return
+
         raise WaylandLayoutBackendError(
-            "KDE keyboard D-Bus setLayout failed for all known signatures: "
+            "KDE keyboard D-Bus layout switch failed for all known methods: "
             + "; ".join(failures)
         )
+
+    def _switch_layout_by_next_cycle(
+        self,
+        new_index: int,
+        failures: list[str],
+    ) -> bool:
+        layouts = self.get_layouts()
+        try:
+            current = self.get_current_layout()
+            steps = (new_index - current.index) % len(layouts)
+            if steps == 0:
+                return True
+
+            for _ in range(steps):
+                self.dbus.call("switchToNextLayout")
+
+            updated = self.get_current_layout()
+            if updated.index != new_index:
+                raise WaylandLayoutBackendError(
+                    "switchToNextLayout did not reach requested layout: "
+                    f"expected index {new_index}, got {updated.index}"
+                )
+            return True
+        except Exception as exc:
+            failures.append(f"switchToNextLayout: {exc}")
+            return False
 
     def _set_layout_attempts(
         self,
