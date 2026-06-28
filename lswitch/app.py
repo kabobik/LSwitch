@@ -540,13 +540,39 @@ class LSwitchApp:
 
         Sets fresh=True so the next Shift+Shift will use SelectionMode.
         Does NOT update baseline (_prev_sel_text / _prev_sel_owner_id) —
-        baseline is maintained by _on_mouse_release and _do_conversion.
+        baseline is maintained by _on_mouse_release and tracked conversions.
         """
         self._selection_valid = True
         logger.debug(
             "Poller: selection changed, fresh=True — text=%r owner=0x%x",
             text[:50] if text else "", owner_id,
         )
+
+    def _selection_baseline_tracking_enabled(self) -> bool:
+        """Return whether passive selection baseline reads are safe/useful."""
+        if self._platform is None:
+            return True
+
+        polling = getattr(self._platform, "selection_polling_enabled", None)
+        mouse_release = getattr(
+            self._platform,
+            "selection_mouse_release_tracking_enabled",
+            None,
+        )
+        if polling is None and mouse_release is None:
+            return True
+        return bool(polling or mouse_release)
+
+    def _update_selection_baseline(self) -> None:
+        """Update passive selection baseline when the platform supports it."""
+        if self.selection is None or not self._selection_baseline_tracking_enabled():
+            return
+        try:
+            info = self.selection.get_selection()
+            self._prev_sel_text = info.text or ""
+            self._prev_sel_owner_id = info.owner_id
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Conversion
@@ -723,13 +749,7 @@ class LSwitchApp:
                 self._last_retype_events = []
         finally:
             # Update baseline to prevent re-conversion of same text
-            if self.selection is not None:
-                try:
-                    info = self.selection.get_selection()
-                    self._prev_sel_text = info.text or ""
-                    self._prev_sel_owner_id = info.owner_id
-                except Exception:
-                    pass
+            self._update_selection_baseline()
             self._selection_valid = False  # consumed
             self.state_manager.on_conversion_complete()
 

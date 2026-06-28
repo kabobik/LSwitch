@@ -38,11 +38,12 @@ clipboard, отправляет `ctrl+c`, ждет изменения clipboard 
    - тоже идет через `expand_selection_to_word()`: `ctrl+shift+Left`, затем
      `ctrl+c`.
 
-4. Финальный baseline update после любого manual Double Shift:
-   - `LSwitchApp._do_conversion()` в `finally` вызывает `selection.get_selection()`;
-   - на Wayland это означает дополнительный `ctrl+c` даже после обычного
-     `RetypeMode`;
-   - это кандидат на исправление, если подтвердится, что лишний copy мешает.
+4. Baseline update после conversion:
+   - на X11 baseline чтение нужно для PRIMARY selection tracking;
+   - на KDE Wayland passive tracking отключен, поэтому retype conversion не
+     должен вызывать `selection.get_selection()` и не должен отправлять `ctrl+c`
+     после `RetypeMode`;
+   - если после обычного retype снова виден `ctrl+c`, это регрессия.
 
 5. User dictionary learning для selection:
    - если `user_dict_enabled == true`, `chars_in_buffer == 0`,
@@ -182,8 +183,7 @@ EN -> RU:
   - `DoubleShift detected ... chars=6`;
   - `choose_mode: chars_in_buffer=6 > 0 -> retype`;
   - `RetypeMode: start`;
-- сейчас может появиться один `send_combo sequence=ctrl+c` в конце из-за
-  baseline update в `finally`. Это известная область проверки.
+- не должно быть `send_combo sequence=ctrl+c` после `RetypeMode: done`.
 
 RU -> EN:
 
@@ -243,7 +243,7 @@ RU -> EN:
 - `SelectionMode: expanding selection...`;
 - отправляется `ctrl+shift+Left`, затем `ctrl+c`;
 - если выделять нечего, конвертация не должна менять текст;
-- возможен дополнительный `ctrl+c` из baseline update.
+- не должно быть дополнительного baseline `ctrl+c` после завершения conversion.
 
 Нежелательно:
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -456,6 +457,27 @@ class TestDoConversionUsesSelectionValid:
 
         assert app._prev_sel_text == "конвертированный"
         assert app._prev_sel_owner_id == 1
+        assert app._selection_valid is False
+
+    def test_do_conversion_skips_baseline_read_when_tracking_disabled(self):
+        """Wayland retype must not send an active Ctrl+C after conversion."""
+        app = _make_app()
+        app._platform = SimpleNamespace(
+            selection_polling_enabled=False,
+            selection_mouse_release_tracking_enabled=False,
+        )
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager.context.chars_in_buffer = 6
+        app.conversion_engine.convert = MagicMock(return_value=True)
+        app.selection.get_selection.reset_mock()
+
+        app._do_conversion()
+
+        app.conversion_engine.convert.assert_called_once_with(
+            app.state_manager.context,
+            selection_valid=False,
+        )
+        app.selection.get_selection.assert_not_called()
         assert app._selection_valid is False
 
     def test_do_conversion_no_selection_change_stays_false(self):
