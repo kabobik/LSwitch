@@ -166,7 +166,7 @@ class VirtualKeyboard:
     def _write(self, code: int, value: int) -> None:
         if self._uinput is None:
             return
-        logger.debug("VK_out: write code=%s value=%s", code, value)
+        logger.trace("VK_out: write code=%s value=%s", code, value)  # type: ignore[attr-defined]
         try:
             from evdev import ecodes
             self._uinput.write(ecodes.EV_KEY, code, value)

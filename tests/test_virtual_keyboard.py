@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 import types
 from unittest.mock import MagicMock, patch, call
 
 import pytest
+import lswitch.log
 
 # ---------------------------------------------------------------------------
 # Ensure a fake evdev module is available for import
@@ -62,6 +64,25 @@ class TestTapKey:
                 call.syn(),
             ]
             assert mock_uinput.method_calls == expected
+
+    def test_vk_out_is_trace_not_debug(self, caplog):
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            with caplog.at_level(logging.DEBUG, logger="lswitch.input.virtual_keyboard"):
+                vk.tap_key(30)
+
+            messages = [record.getMessage() for record in caplog.records]
+            assert any("VirtualKeyboard: tap_key" in message for message in messages)
+            assert not any("VK_out:" in message for message in messages)
+
+            caplog.clear()
+            with caplog.at_level(lswitch.log.TRACE, logger="lswitch.input.virtual_keyboard"):
+                vk.tap_key(30)
+
+            messages = [record.getMessage() for record in caplog.records]
+            assert any("VK_out: write code=30 value=1" in message for message in messages)
 
     def test_tap_key_n_times(self):
         """tap_key with n_times=3 should do 3 pairs of press+release."""
