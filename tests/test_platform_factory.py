@@ -111,7 +111,7 @@ class TestCreatePlatformAdapters:
         assert adapters.virtual_kb is fake_vk
         assert adapters.selection_polling_enabled is False
         assert adapters.main_thread is main_thread
-        assert adapters.selection_mouse_release_tracking_enabled is False
+        assert adapters.selection_mouse_release_tracking_enabled is True
         fake_layout_backend.validate.assert_called_once()
 
     def test_unknown_session_fails_clearly(self):

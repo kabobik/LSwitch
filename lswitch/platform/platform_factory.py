@@ -203,5 +203,5 @@ def create_wayland_platform_adapters(
         virtual_kb=virtual_kb,
         selection_polling_enabled=False,
         main_thread=main_thread,
-        selection_mouse_release_tracking_enabled=False,
+        selection_mouse_release_tracking_enabled=True,
     )

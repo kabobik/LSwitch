@@ -277,6 +277,17 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         logger.debug("Wayland selection copied %d chars", len(text))
         return SelectionInfo(text=text, owner_id=0, timestamp=time.time())
 
+    def get_passive_selection(self) -> SelectionInfo:
+        """Read Wayland primary selection without sending copy shortcuts."""
+        try:
+            text = self.system.get_clipboard(selection="primary")
+        except Exception as exc:
+            logger.debug("Wayland passive primary selection read failed: %s", exc)
+            text = ""
+        if text:
+            logger.debug("Wayland passive primary selection read %d chars", len(text))
+        return SelectionInfo(text=text, owner_id=0, timestamp=time.time())
+
     def has_fresh_selection(self) -> bool:
         info = self.get_selection()
         if not info.text:

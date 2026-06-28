@@ -467,10 +467,11 @@ class LSwitchApp:
         self._last_auto_marker = None
         self._selection_valid = False
         self._last_retype_events = []
-        # Do NOT read selection here. Some platform adapters must request the
-        # active selection from the owner app, and doing that during click
-        # handling can race with deselection.
-        # Baseline will be updated by _on_mouse_release instead.
+        # Do NOT actively request selection here. Some adapters must ask the
+        # owner app (for example via Ctrl+C), and doing that during click
+        # handling can race with deselection. Adapters with a passive reader
+        # may safely prime the baseline before _on_mouse_release compares it.
+        self._update_passive_selection_baseline_on_click()
         self.state_manager.on_mouse_click()
 
     def _on_mouse_release(self, event):
@@ -494,7 +495,8 @@ class LSwitchApp:
         ):
             return
         try:
-            info = self.selection.get_selection()
+            reader = self._passive_selection_reader()
+            info = reader() if reader is not None else self.selection.get_selection()
             old_text = self._prev_sel_text
             old_owner = self._prev_sel_owner_id
             # Always update baseline on release
@@ -513,6 +515,39 @@ class LSwitchApp:
                     "MouseRelease: selection unchanged — text=%r",
                     info.text[:50] if info.text else "",
                 )
+        except Exception:
+            pass
+
+    def _passive_selection_reader(self):
+        """Return a no-shortcut selection reader when the adapter provides one."""
+        if self.selection is None:
+            return None
+        if getattr(type(self.selection), "get_passive_selection", None) is None:
+            return None
+        reader = getattr(self.selection, "get_passive_selection", None)
+        return reader if callable(reader) else None
+
+    def _update_passive_selection_baseline_on_click(self) -> None:
+        """Prime baseline on platforms with safe passive selection reads."""
+        if self._platform is None:
+            return
+        if not getattr(
+            self._platform,
+            "selection_mouse_release_tracking_enabled",
+            True,
+        ):
+            return
+        reader = self._passive_selection_reader()
+        if reader is None:
+            return
+        try:
+            info = reader()
+            self._prev_sel_text = info.text or ""
+            self._prev_sel_owner_id = info.owner_id
+            logger.trace(  # type: ignore[attr-defined]
+                "MouseClick: passive selection baseline — text=%r",
+                info.text[:50] if info.text else "",
+            )
         except Exception:
             pass
 
@@ -568,7 +603,8 @@ class LSwitchApp:
         if self.selection is None or not self._selection_baseline_tracking_enabled():
             return
         try:
-            info = self.selection.get_selection()
+            reader = self._passive_selection_reader()
+            info = reader() if reader is not None else self.selection.get_selection()
             self._prev_sel_text = info.text or ""
             self._prev_sel_owner_id = info.owner_id
         except Exception:

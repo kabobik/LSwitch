@@ -248,7 +248,9 @@ LSwitchApp
 - [x] Добавить задержки/ожидание clipboard change после `Ctrl+C`.
 - [x] Не считать empty clipboard fresh selection.
 - [x] Восстанавливать clipboard после paste аккуратно, чтобы не сломать вставку в медленных приложениях.
-- [x] Отключить mouse-release selection tracking для Wayland, чтобы не отправлять скрытый `Ctrl+C` вне явного conversion path.
+- [x] Включить Wayland mouse-release selection tracking через passive primary
+  read (`wl-paste --primary --no-newline`), чтобы mouse selection не уходил в
+  `selection_expand` и не расширял уже выделенный текст.
 - Optional: `QClipboard.Selection` fast path behind feature probe.
 
 Готовность: выделение в Qt/GTK/browser/terminal приложениях конвертируется вручную через double Shift.

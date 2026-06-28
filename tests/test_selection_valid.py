@@ -83,6 +83,26 @@ def _mouse_release_event() -> Event:
     return Event(type=EventType.MOUSE_RELEASE, data=data, timestamp=time.time())
 
 
+class _PassiveSelection:
+    def __init__(self, texts: list[str]):
+        self.texts = texts
+        self.passive_calls = 0
+        self.active_calls = 0
+
+    def get_passive_selection(self) -> SelectionInfo:
+        index = min(self.passive_calls, len(self.texts) - 1)
+        self.passive_calls += 1
+        return SelectionInfo(
+            text=self.texts[index],
+            owner_id=0,
+            timestamp=time.time(),
+        )
+
+    def get_selection(self) -> SelectionInfo:
+        self.active_calls += 1
+        return SelectionInfo(text="active", owner_id=0, timestamp=time.time())
+
+
 # Key constants (matching evdev)
 KEY_Q = 16
 KEY_W = 17
@@ -282,6 +302,45 @@ class TestSelectionValidOnEvents:
 
         app.selection.get_selection.assert_not_called()
 
+    def test_mouse_click_primes_passive_selection_baseline(self):
+        app = _make_app()
+        passive = _PassiveSelection(["old", "new"])
+        app.selection = passive
+        app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
+
+        app._on_mouse_click(_mouse_event())
+
+        assert app._prev_sel_text == "old"
+        assert passive.active_calls == 0
+        assert passive.passive_calls == 1
+
+    def test_mouse_release_uses_passive_selection_reader(self):
+        app = _make_app()
+        passive = _PassiveSelection(["old", "new"])
+        app.selection = passive
+        app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
+
+        app._on_mouse_click(_mouse_event())
+        app._on_mouse_release(_mouse_release_event())
+
+        assert app._selection_valid is True
+        assert app._prev_sel_text == "new"
+        assert passive.active_calls == 0
+        assert passive.passive_calls == 2
+
+    def test_mouse_release_same_passive_selection_stays_not_fresh(self):
+        app = _make_app()
+        passive = _PassiveSelection(["stale", "stale"])
+        app.selection = passive
+        app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
+
+        app._on_mouse_click(_mouse_event())
+        app._on_mouse_release(_mouse_release_event())
+
+        assert app._selection_valid is False
+        assert app._prev_sel_text == "stale"
+        assert passive.active_calls == 0
+
     def test_cross_window_stale_selection(self):
         """Cross-window scenario: select in Window A (poller sets fresh),
         click in Window B (resets fresh), Shift+Shift → NOT fresh."""
@@ -478,6 +537,26 @@ class TestDoConversionUsesSelectionValid:
             selection_valid=False,
         )
         app.selection.get_selection.assert_not_called()
+        assert app._selection_valid is False
+
+    def test_do_conversion_uses_passive_baseline_reader_when_available(self):
+        app = _make_app()
+        passive = _PassiveSelection(["passive baseline"])
+        app.selection = passive
+        app.conversion_engine.selection = passive
+        app._platform = SimpleNamespace(
+            selection_polling_enabled=False,
+            selection_mouse_release_tracking_enabled=True,
+        )
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager.context.chars_in_buffer = 6
+        app.conversion_engine.convert = MagicMock(return_value=True)
+
+        app._do_conversion()
+
+        assert app._prev_sel_text == "passive baseline"
+        assert passive.active_calls == 0
+        assert passive.passive_calls == 1
         assert app._selection_valid is False
 
     def test_do_conversion_no_selection_change_stays_false(self):

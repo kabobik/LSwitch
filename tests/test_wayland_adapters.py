@@ -235,17 +235,21 @@ class _RecordingWaylandSystem:
     def __init__(
         self,
         clipboard: str = "",
+        primary: str = "",
         copy_text: str | None = None,
         copy_text_by_sequence: dict[str, str | None] | None = None,
     ):
         self.clipboard = clipboard
+        self.primary = primary
         self.copy_text = copy_text
         self.copy_text_by_sequence = copy_text_by_sequence or {}
         self.keys_sent: list[str] = []
         self.clipboard_writes: list[str] = []
 
     def get_clipboard(self, selection: str = "primary") -> str:
-        assert selection == "clipboard"
+        assert selection in {"clipboard", "primary"}
+        if selection == "primary":
+            return self.primary
         return self.clipboard
 
     def set_clipboard(self, text: str, selection: str = "clipboard") -> None:
@@ -288,6 +292,17 @@ class TestWaylandSelectionAdapter:
         assert info.text == "selected"
         assert info.owner_id == 0
         assert system.keys_sent == ["ctrl+c"]
+
+    def test_get_passive_selection_reads_primary_without_copy_shortcut(self):
+        system = _RecordingWaylandSystem(clipboard="old", primary="selected")
+        adapter = _make_selection_adapter(system)
+
+        info = adapter.get_passive_selection()
+
+        assert info.text == "selected"
+        assert info.owner_id == 0
+        assert system.keys_sent == []
+        assert system.clipboard == "old"
 
     def test_get_selection_returns_same_text_as_old_clipboard(self):
         system = _RecordingWaylandSystem(clipboard="old", copy_text="old")

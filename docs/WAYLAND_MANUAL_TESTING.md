@@ -25,8 +25,9 @@ clipboard, отправляет `ctrl+c`, ждет изменения clipboard 
 
 1. `SelectionMode` без expand:
    - выбирается, когда `chars_in_buffer == 0` и `selection_valid == True`;
-   - на Wayland штатный poller/mouse-release tracking отключены, поэтому этот
-     путь обычно не должен включаться сам.
+   - на Wayland poller отключен, но mouse-release tracking использует passive
+     primary selection read (`wl-paste --primary --no-newline`) без скрытого
+     `Ctrl+C`, поэтому mouse selection должен идти именно этим путем.
 
 2. `selection_expand` fallback:
    - выбирается при Double Shift, если `chars_in_buffer == 0`,
@@ -45,9 +46,9 @@ clipboard, отправляет `ctrl+c`, ждет изменения clipboard 
 
 4. Baseline update после conversion:
    - на X11 baseline чтение нужно для PRIMARY selection tracking;
-   - на KDE Wayland passive tracking отключен, поэтому retype conversion не
-     должен вызывать `selection.get_selection()` и не должен отправлять `ctrl+c`
-     после `RetypeMode`;
+   - на KDE Wayland baseline читается passive primary selection path, поэтому
+     retype conversion не должен вызывать активный copy-flow и не должен
+     отправлять `ctrl+c` после `RetypeMode`;
    - если после обычного retype снова виден `ctrl+c`, это регрессия.
 
 5. User dictionary learning для selection:
@@ -279,8 +280,12 @@ Mouse selection:
 
 - выделенный текст заменяется на `привет`;
 - layout переключается на RU;
+- в логе есть `selection_valid=True` и `choose_mode: selection_valid=True`;
 - в логе есть `SelectionMode`;
 - есть `ctrl+c` и `ctrl+v`;
+- не должно быть `choose_mode: fallback -> selection_expand`;
+- не должно быть предварительного `ctrl+shift+Left`, который расширяет уже
+  существующее выделение;
 - после операции clipboard снова содержит `CLIPBOARD_SENTINEL`.
 
 Keyboard selection:
