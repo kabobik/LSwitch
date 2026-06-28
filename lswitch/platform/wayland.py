@@ -11,6 +11,7 @@ import time
 from typing import Optional
 
 from lswitch.input.virtual_keyboard import VirtualKeyboard
+from lswitch.platform.main_thread import MainThreadInvoker
 from lswitch.platform.selection_adapter import ISelectionAdapter, SelectionInfo
 from lswitch.platform.system_adapter import CommandResult, ISystemAdapter
 from lswitch.platform.xkb_adapter import IXKBAdapter, LayoutInfo
@@ -39,11 +40,13 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
     def __init__(
         self,
         virtual_kb: VirtualKeyboard,
+        main_thread: MainThreadInvoker,
         compositor: str = "unknown",
         debug: bool = False,
     ) -> None:
         super().__init__(compositor=compositor, debug=debug)
         self.virtual_kb = virtual_kb
+        self.main_thread = main_thread
 
     def run_command(self, args: list[str], timeout: float = 1.0) -> CommandResult:
         raise self._unsupported("run_command")
@@ -69,11 +72,13 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
     def __init__(
         self,
         system: ISystemAdapter,
+        main_thread: MainThreadInvoker,
         compositor: str = "unknown",
         debug: bool = False,
     ) -> None:
         super().__init__(compositor=compositor, debug=debug)
         self.system = system
+        self.main_thread = main_thread
 
     def get_selection(self) -> SelectionInfo:
         raise self._unsupported("get_selection")

@@ -229,7 +229,7 @@ class LSwitchApp:
     # Platform initialisation (lazy — for testability)
     # ------------------------------------------------------------------
 
-    def _init_platform(self):
+    def _init_platform(self, main_thread=None):
         """Initialise platform components.
 
         Separated from ``__init__`` so that tests can substitute mocks
@@ -237,7 +237,10 @@ class LSwitchApp:
         """
         from lswitch.platform.platform_factory import create_platform_adapters
 
-        self._platform = create_platform_adapters(debug=self.debug)
+        self._platform = create_platform_adapters(
+            debug=self.debug,
+            main_thread=main_thread,
+        )
         self.system = self._platform.system
         self.xkb = self._platform.xkb
         self.selection = self._platform.selection
@@ -938,12 +941,24 @@ class LSwitchApp:
 
     def run(self):
         """Blocking main event loop."""
+        from lswitch.platform.platform_factory import create_runtime_plan
+
+        runtime_plan = create_runtime_plan(headless=self.headless)
+        qt_app = None
+        main_thread = None
+
         # Защита от двойного запуска
         self._pid_lock = _PidLock(replace=self._replace)
         self._pid_lock.acquire()
 
         try:
-            self._init_platform()
+            if runtime_plan.requires_qt_before_platform:
+                from lswitch.ui.qt_bridge import QtMainThreadInvoker, ensure_qt_application
+
+                qt_app = ensure_qt_application(sys.argv)
+                main_thread = QtMainThreadInvoker(qt_app)
+
+            self._init_platform(main_thread=main_thread)
             self._wire_event_bus()
         except Exception:
             self.stop()
@@ -971,7 +986,13 @@ class LSwitchApp:
                 logger.debug("Config reloaded via SIGHUP")
         signal.signal(signal.SIGHUP, _reload_handler)
 
-        if self.headless:
+        if runtime_plan.uses_qt_event_loop:
+            if qt_app is None:
+                from lswitch.ui.qt_bridge import ensure_qt_application
+
+                qt_app = ensure_qt_application(sys.argv)
+            self._run_with_qt_loop(qt_app, show_tray=runtime_plan.show_tray)
+        elif self.headless:
             self._run_evdev_loop()
         else:
             self._run_with_gui()
@@ -989,30 +1010,35 @@ class LSwitchApp:
 
     def _run_with_gui(self):
         """Run evdev in background thread + Qt event loop in main thread."""
-        from PyQt6.QtWidgets import QApplication
+        from lswitch.ui.qt_bridge import ensure_qt_application
+
+        qt_app = ensure_qt_application(sys.argv)
+        self._run_with_qt_loop(qt_app, show_tray=True)
+
+    def _run_with_qt_loop(self, qt_app, show_tray: bool):
+        """Run evdev in a worker thread while the main thread runs Qt."""
         from lswitch.core.events import EventType
-        from lswitch.ui.tray_icon import TrayIcon
-        from lswitch.ui.context_menu import ContextMenu
 
-        qt_app = QApplication.instance() or QApplication(sys.argv)
-        qt_app.setQuitOnLastWindowClosed(False)  # tray app — don't quit when debug monitor closes
+        qt_app.setQuitOnLastWindowClosed(False)
 
-        # Build tray icon
-        tray = TrayIcon(event_bus=self.event_bus, config=self.config, app=qt_app)
+        tray = None
+        if show_tray:
+            from lswitch.ui.tray_icon import TrayIcon
+            from lswitch.ui.context_menu import ContextMenu
 
-        # Build context menu
-        menu_obj = ContextMenu(config=self.config, event_bus=self.event_bus, app=self)
-        menu = menu_obj.build()
-        tray.set_context_menu(menu)
+            tray = TrayIcon(event_bus=self.event_bus, config=self.config, app=qt_app)
 
-        # Show current layout
-        try:
-            current = self.xkb.get_current_layout() if self.xkb else None
-            tray.set_layout(current.name if current else "")
-        except Exception:
-            pass
+            menu_obj = ContextMenu(config=self.config, event_bus=self.event_bus, app=self)
+            menu = menu_obj.build()
+            tray.set_context_menu(menu)
 
-        tray.show()
+            try:
+                current = self.xkb.get_current_layout() if self.xkb else None
+                tray.set_layout(current.name if current else "")
+            except Exception:
+                pass
+
+            tray.show()
 
         # APP_QUIT → exit Qt event loop
         def _on_quit(event):
@@ -1051,7 +1077,8 @@ class LSwitchApp:
             
             qt_app.exec()
         finally:
-            tray.cleanup()
+            if tray is not None:
+                tray.cleanup()
             self.stop()
             t.join(timeout=2.0)
 

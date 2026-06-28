@@ -145,7 +145,7 @@ LSwitchApp
         +-- WaylandSystemAdapter     # skeleton now, QClipboard + UInput combos later
         +-- WaylandSelectionAdapter  # skeleton now, copy/paste selection flow later
         +-- WaylandLayoutAdapter     # skeleton now, compositor backend later
-        +-- QtBridge                 # main-thread Qt calls, next phase
+        +-- QtBridge                 # main-thread Qt calls
         +-- CompositorLayoutBackend
               +-- KdeLayoutBackend
               +-- GnomeLayoutBackend       # follow-up
@@ -221,10 +221,11 @@ LSwitchApp
 
 ### Фаза 4. QtBridge и lifecycle
 
-- Создать Qt app до инициализации Wayland adapters.
-- Ввести `QtBridge.call()`.
+- [x] Добавить neutral `PlatformRuntimePlan`, чтобы `LSwitchApp` не ветвился по X11/Wayland.
+- [x] Создать Qt app до инициализации Wayland adapters.
+- [x] Ввести `QtBridge.call()`.
+- [x] Wayland headless всегда запускает Qt loop в main thread, но не создает tray.
 - Перевести clipboard/DBus access на main thread.
-- Wayland headless всегда запускает Qt loop в main thread, но не создает tray.
 - Subprocess clipboard path оставлять только fallback/diagnostic mode.
 
 Готовность: mock tests подтверждают, что Wayland adapters не трогают Qt из evdev thread.

@@ -8,12 +8,15 @@ import pytest
 
 from lswitch.platform.platform_factory import (
     PlatformAdapters,
+    PlatformRuntimePlan,
     create_platform_adapters,
+    create_runtime_plan,
     create_wayland_platform_adapters,
     create_x11_platform_adapters,
     detect_compositor,
     detect_session_type,
 )
+from lswitch.platform.main_thread import DirectMainThreadInvoker
 from lswitch.platform.selection_adapter import X11SelectionAdapter
 from lswitch.platform.subprocess_impl import SubprocessSystemAdapter
 from lswitch.platform.wayland import (
@@ -59,12 +62,38 @@ class TestDetectCompositor:
         assert detect_compositor({}) == "unknown"
 
 
+class TestCreateRuntimePlan:
+    def test_x11_headless_does_not_need_qt_loop(self):
+        plan = create_runtime_plan(headless=True, env={"XDG_SESSION_TYPE": "x11"})
+
+        assert isinstance(plan, PlatformRuntimePlan)
+        assert plan.uses_qt_event_loop is False
+        assert plan.requires_qt_before_platform is False
+        assert plan.show_tray is False
+
+    def test_x11_gui_uses_qt_loop_for_tray(self):
+        plan = create_runtime_plan(headless=False, env={"XDG_SESSION_TYPE": "x11"})
+
+        assert plan.uses_qt_event_loop is True
+        assert plan.requires_qt_before_platform is False
+        assert plan.show_tray is True
+
+    def test_wayland_headless_requires_qt_before_platform(self):
+        plan = create_runtime_plan(headless=True, env={"XDG_SESSION_TYPE": "wayland"})
+
+        assert plan.uses_qt_event_loop is True
+        assert plan.requires_qt_before_platform is True
+        assert plan.show_tray is False
+
+
 class TestCreatePlatformAdapters:
     def test_wayland_session_returns_skeleton_adapters(self):
         fake_vk = MagicMock()
+        main_thread = DirectMainThreadInvoker()
         with patch("lswitch.platform.platform_factory.VirtualKeyboard", return_value=fake_vk):
             adapters = create_platform_adapters(
                 debug=True,
+                main_thread=main_thread,
                 env={
                     "XDG_SESSION_TYPE": "wayland",
                     "XDG_CURRENT_DESKTOP": "KDE",
@@ -79,11 +108,19 @@ class TestCreatePlatformAdapters:
         assert isinstance(adapters.selection, WaylandSelectionAdapter)
         assert adapters.virtual_kb is fake_vk
         assert adapters.selection_polling_enabled is False
+        assert adapters.main_thread is main_thread
 
     def test_unknown_session_fails_clearly(self):
         with patch("lswitch.platform.platform_factory.detect_session_type", return_value="unknown"):
             with pytest.raises(RuntimeError, match="requires an active"):
                 create_platform_adapters()
+
+    def test_wayland_requires_main_thread_invoker(self):
+        with pytest.raises(RuntimeError, match="main-thread invoker"):
+            create_platform_adapters(
+                debug=True,
+                env={"XDG_SESSION_TYPE": "wayland"},
+            )
 
     def test_create_x11_platform_adapters_wires_concrete_types(self):
         fake_vk = MagicMock()
@@ -102,8 +139,13 @@ class TestCreatePlatformAdapters:
 
     def test_create_wayland_platform_adapters_fail_fast_at_operation_boundary(self):
         fake_vk = MagicMock()
+        main_thread = DirectMainThreadInvoker()
         with patch("lswitch.platform.platform_factory.VirtualKeyboard", return_value=fake_vk):
-            adapters = create_wayland_platform_adapters(debug=True, compositor="kde")
+            adapters = create_wayland_platform_adapters(
+                debug=True,
+                compositor="kde",
+                main_thread=main_thread,
+            )
 
         with pytest.raises(WaylandBackendNotImplementedError, match="switch_layout"):
             adapters.xkb.switch_layout()

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from lswitch.input.virtual_keyboard import VirtualKeyboard
+from lswitch.platform.main_thread import MainThreadInvoker
 from lswitch.platform.selection_adapter import ISelectionAdapter
 from lswitch.platform.system_adapter import ISystemAdapter
 from lswitch.platform.xkb_adapter import IXKBAdapter
@@ -23,6 +24,16 @@ class PlatformAdapters:
     selection: ISelectionAdapter
     virtual_kb: VirtualKeyboard
     selection_polling_enabled: bool = False
+    main_thread: MainThreadInvoker | None = None
+
+
+@dataclass(frozen=True)
+class PlatformRuntimePlan:
+    """Runtime requirements for the detected desktop session."""
+
+    uses_qt_event_loop: bool
+    requires_qt_before_platform: bool
+    show_tray: bool
 
 
 def detect_session_type(env: Mapping[str, str] | None = None) -> str:
@@ -64,9 +75,28 @@ def detect_compositor(env: Mapping[str, str] | None = None) -> str:
     return "unknown"
 
 
+def create_runtime_plan(
+    headless: bool,
+    env: Mapping[str, str] | None = None,
+) -> PlatformRuntimePlan:
+    """Return neutral runtime requirements for app startup.
+
+    ``LSwitchApp`` consumes this plan without knowing which desktop protocol
+    caused each requirement. Session-specific decisions stay in this module.
+    """
+    session_type = detect_session_type(env)
+    requires_qt_before_platform = session_type == "wayland"
+    return PlatformRuntimePlan(
+        uses_qt_event_loop=(not headless) or requires_qt_before_platform,
+        requires_qt_before_platform=requires_qt_before_platform,
+        show_tray=not headless,
+    )
+
+
 def create_platform_adapters(
     debug: bool = False,
     env: Mapping[str, str] | None = None,
+    main_thread: MainThreadInvoker | None = None,
 ) -> PlatformAdapters:
     """Create adapters for the current session.
 
@@ -81,6 +111,7 @@ def create_platform_adapters(
         return create_wayland_platform_adapters(
             debug=debug,
             compositor=compositor,
+            main_thread=main_thread,
         )
     if session_type == "unknown":
         raise RuntimeError(
@@ -111,12 +142,14 @@ def create_x11_platform_adapters(
         selection=selection,
         virtual_kb=virtual_kb,
         selection_polling_enabled=True,
+        main_thread=None,
     )
 
 
 def create_wayland_platform_adapters(
     debug: bool = False,
     compositor: str | None = None,
+    main_thread: MainThreadInvoker | None = None,
 ) -> PlatformAdapters:
     """Create the Wayland adapter skeleton.
 
@@ -130,9 +163,16 @@ def create_wayland_platform_adapters(
         WaylandSystemAdapter,
     )
 
+    if main_thread is None:
+        raise RuntimeError(
+            "Wayland platform adapters require a main-thread invoker. "
+            "Create the Qt runtime before calling create_platform_adapters()."
+        )
+
     virtual_kb = VirtualKeyboard(debug=debug)
     system = WaylandSystemAdapter(
         virtual_kb=virtual_kb,
+        main_thread=main_thread,
         compositor=compositor or "unknown",
         debug=debug,
     )
@@ -142,6 +182,7 @@ def create_wayland_platform_adapters(
     )
     selection = WaylandSelectionAdapter(
         system=system,
+        main_thread=main_thread,
         compositor=compositor or "unknown",
         debug=debug,
     )
@@ -153,4 +194,5 @@ def create_wayland_platform_adapters(
         selection=selection,
         virtual_kb=virtual_kb,
         selection_polling_enabled=False,
+        main_thread=main_thread,
     )
