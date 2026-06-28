@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 import types
+from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
 
 from lswitch.platform.main_thread import DirectMainThreadInvoker
 from lswitch.platform.wayland import (
+    DbusUInt32,
+    KdeKeyboardDbusClient,
     KdeLayoutBackend,
     WaylandBackendNotImplementedError,
     WaylandSelectionAdapter,
@@ -53,6 +57,28 @@ def _install_fake_qt_clipboard(monkeypatch, clipboard: _FakeClipboard) -> None:
     pyqt6.QtGui = qtgui
     monkeypatch.setitem(sys.modules, "PyQt6", pyqt6)
     monkeypatch.setitem(sys.modules, "PyQt6.QtGui", qtgui)
+
+
+@contextmanager
+def _real_pyqt_modules():
+    module_names = [
+        name for name in sys.modules
+        if name == "PyQt6" or name.startswith("PyQt6.")
+    ]
+    saved = {name: sys.modules[name] for name in module_names}
+    for name in module_names:
+        sys.modules.pop(name, None)
+    importlib.invalidate_caches()
+
+    try:
+        yield
+    finally:
+        for name in [
+            module_name for module_name in sys.modules
+            if module_name == "PyQt6" or module_name.startswith("PyQt6.")
+        ]:
+            sys.modules.pop(name, None)
+        sys.modules.update(saved)
 
 
 class TestWaylandSystemAdapter:
@@ -229,7 +255,10 @@ class _FakeKdeDbus:
         if method == "getLayout":
             return self.current
         if method == "setLayout":
-            if self.accepted_set_layout_signature == "index":
+            if self.accepted_set_layout_signature == "uint32":
+                if not (len(args) == 1 and isinstance(args[0], DbusUInt32)):
+                    raise RuntimeError(f"bad signature {args!r}")
+            elif self.accepted_set_layout_signature == "index":
                 if not (len(args) == 1 and isinstance(args[0], int)):
                     raise RuntimeError(f"bad signature {args!r}")
             elif self.accepted_set_layout_signature == "layout":
@@ -246,7 +275,7 @@ class _FakeKdeDbus:
                 raise RuntimeError("No such method 'setLayout'")
             elif self.accepted_set_layout_signature == "none":
                 raise RuntimeError("No such method 'setLayout'")
-            self.current = args[0]
+            self.current = args[0].value if isinstance(args[0], DbusUInt32) else args[0]
             return None
         if method == "switchToNextLayout":
             if self.accepted_set_layout_signature == "none":
@@ -303,7 +332,18 @@ class TestKdeLayoutBackend:
 
         assert backend.get_current_layout().name == "ru"
 
-    def test_switch_layout_to_target_calls_set_layout_index(self):
+    def test_switch_layout_to_target_calls_set_layout_uint32_first(self):
+        dbus = _FakeKdeDbus(current=0, accepted_set_layout_signature="uint32")
+        backend = KdeLayoutBackend(dbus)
+        target = LayoutInfo(name="ru", index=1, xkb_name="ru")
+
+        result = backend.switch_layout(target=target)
+
+        assert result.name == "ru"
+        assert ("setLayout", (DbusUInt32(1),)) in dbus.calls
+        assert ("setLayout", (1,)) not in dbus.calls
+
+    def test_switch_layout_falls_back_to_signed_index_signature(self):
         dbus = _FakeKdeDbus(current=0)
         backend = KdeLayoutBackend(dbus)
         target = LayoutInfo(name="ru", index=1, xkb_name="ru")
@@ -311,6 +351,7 @@ class TestKdeLayoutBackend:
         result = backend.switch_layout(target=target)
 
         assert result.name == "ru"
+        assert ("setLayout", (DbusUInt32(1),)) in dbus.calls
         assert ("setLayout", (1,)) in dbus.calls
 
     def test_switch_layout_without_target_cycles(self):
@@ -320,6 +361,7 @@ class TestKdeLayoutBackend:
         result = backend.switch_layout()
 
         assert result.name == "ru"
+        assert ("setLayout", (DbusUInt32(1),)) in dbus.calls
         assert ("setLayout", (1,)) in dbus.calls
 
     def test_switch_layout_falls_back_to_xkb_name_signature(self):
@@ -333,6 +375,7 @@ class TestKdeLayoutBackend:
         result = backend.switch_layout()
 
         assert result.name == "ru"
+        assert ("setLayout", (DbusUInt32(1),)) in dbus.calls
         assert ("setLayout", (1,)) in dbus.calls
         assert ("setLayout", ("ru",)) in dbus.calls
 
@@ -347,6 +390,7 @@ class TestKdeLayoutBackend:
         result = backend.switch_layout()
 
         assert result.name == "ru"
+        assert ("setLayout", (DbusUInt32(1),)) in dbus.calls
         assert ("setLayout", ("ru", "")) in dbus.calls
 
     def test_switch_layout_falls_back_to_switch_to_next_layout(self):
@@ -360,6 +404,7 @@ class TestKdeLayoutBackend:
         result = backend.switch_layout()
 
         assert result.name == "ru"
+        assert ("setLayout", (DbusUInt32(1),)) in dbus.calls
         assert ("setLayout", (1,)) in dbus.calls
         assert ("setLayout", ("ru", "")) in dbus.calls
         assert ("switchToNextLayout", ()) in dbus.calls
@@ -380,8 +425,29 @@ class TestKdeLayoutBackend:
             backend.switch_layout()
 
         message = str(exc_info.value)
+        assert "setLayout(uint32)" in message
         assert "setLayout(index)" in message
         assert "switchToNextLayout" in message
+
+    def test_dbus_uint32_rejects_invalid_values(self):
+        with pytest.raises(ValueError, match="out of range"):
+            DbusUInt32(-1)
+        with pytest.raises(ValueError, match="out of range"):
+            DbusUInt32(0x100000000)
+
+    def test_dbus_uint32_converts_to_qtdbus_uint_variant(self):
+        with _real_pyqt_modules():
+            try:
+                qtcore = importlib.import_module("PyQt6.QtCore")
+            except ImportError:
+                pytest.skip("real PyQt6.QtCore is not available")
+            if not hasattr(qtcore, "QMetaType") or not hasattr(qtcore, "QVariant"):
+                pytest.skip("real PyQt6.QtCore is not available")
+
+            arg = KdeKeyboardDbusClient._qtdbus_argument(DbusUInt32(1))
+
+            assert arg.typeName() == "uint"
+            assert arg.value() == 1
 
     def test_empty_layout_list_fails_clearly(self):
         backend = KdeLayoutBackend(_FakeKdeDbus(layouts=[]))

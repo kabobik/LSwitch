@@ -263,6 +263,8 @@ LSwitchApp
   проверкой итогового `getLayout`.
 - [x] Добавить D-Bus introspection в `lswitch --diagnose-wayland`, чтобы видеть
   реальные методы/signatures KDE `/Layouts` на конкретной версии Plasma.
+- [x] Использовать typed D-Bus `uint32` для KDE `setLayout(u)->b`; Python `int`
+  уходит как signed `i` и не подходит этому API.
 
 Готовность: retype и auto-conversion переключают раскладку на KDE Wayland.
 

@@ -7,6 +7,7 @@ paths fail fast with actionable errors.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 import re
 import time
@@ -28,6 +29,19 @@ class WaylandBackendNotImplementedError(NotImplementedError):
 
 class WaylandLayoutBackendError(RuntimeError):
     """Raised when a compositor layout backend is unavailable or invalid."""
+
+
+@dataclass(frozen=True)
+class DbusUInt32:
+    """Typed D-Bus uint32 argument for QtDBus calls."""
+
+    value: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, int) or isinstance(self.value, bool):
+            raise TypeError("D-Bus uint32 value must be an integer")
+        if self.value < 0 or self.value > 0xFFFFFFFF:
+            raise ValueError("D-Bus uint32 value is out of range")
 
 
 class _WaylandUnsupported:
@@ -239,7 +253,7 @@ class KdeKeyboardDbusClient:
                 + (f" ({message})" if message else "")
             )
 
-        reply = iface.call(method, *args)
+        reply = iface.call(method, *(self._qtdbus_argument(arg) for arg in args))
         if reply.type() == QDBusMessage.MessageType.ErrorMessage:
             raise WaylandLayoutBackendError(
                 f"KDE keyboard D-Bus method {method!r} failed: {reply.errorMessage()}"
@@ -251,6 +265,26 @@ class KdeKeyboardDbusClient:
         if len(values) == 1:
             return values[0]
         return values
+
+    @staticmethod
+    def _qtdbus_argument(arg):
+        if not isinstance(arg, DbusUInt32):
+            return arg
+
+        try:
+            from PyQt6.QtCore import QMetaType, QVariant
+        except ImportError as exc:
+            raise WaylandLayoutBackendError(
+                "PyQt6.QtCore QMetaType/QVariant is required for D-Bus uint32"
+            ) from exc
+
+        variant = QVariant(arg.value)
+        uint_type = QMetaType(int(QMetaType.Type.UInt.value))
+        if not variant.convert(uint_type):
+            raise WaylandLayoutBackendError(
+                f"Could not convert {arg.value!r} to D-Bus uint32"
+            )
+        return variant
 
 
 class KdeLayoutBackend:
@@ -389,7 +423,9 @@ class KdeLayoutBackend:
         failures: list[str] = []
         for label, args in attempts:
             try:
-                self.dbus.call("setLayout", *args)
+                result = self.dbus.call("setLayout", *args)
+                if result is False:
+                    raise WaylandLayoutBackendError(f"{label} returned false")
                 return
             except Exception as exc:
                 failures.append(f"{label}: {exc}")
@@ -435,6 +471,7 @@ class KdeLayoutBackend:
     ) -> list[tuple[str, tuple]]:
         raw_layout = self._raw_layouts[new_index] if new_index < len(self._raw_layouts) else None
         candidates: list[tuple[str, tuple]] = [
+            ("setLayout(uint32)", (DbusUInt32(new_index),)),
             ("setLayout(index)", (new_index,)),
             ("setLayout(xkb_name)", (layout.xkb_name,)),
         ]

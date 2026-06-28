@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from lswitch.platform.wayland import DbusUInt32
 from lswitch.platform.wayland_diagnostics import (
     DiagnosticReport,
     run_wayland_diagnostics,
@@ -38,7 +39,7 @@ class _FakeDbusClient:
         if method == "getLayout":
             return self.current
         if method == "setLayout":
-            self.current = args[0]
+            self.current = args[0].value if isinstance(args[0], DbusUInt32) else args[0]
             return None
         raise AssertionError(f"Unexpected method: {method}")
 
@@ -95,8 +96,8 @@ class TestRunWaylandDiagnostics:
         assert report.ok is True
         assert "[ok] switch test switch: ru index=1" in text
         assert "[ok] switch test restore: en index=0" in text
-        assert ("setLayout", (1,)) in fake_dbus.calls
-        assert ("setLayout", (0,)) in fake_dbus.calls
+        assert ("setLayout", (DbusUInt32(1),)) in fake_dbus.calls
+        assert ("setLayout", (DbusUInt32(0),)) in fake_dbus.calls
 
     def test_non_wayland_or_non_kde_are_warnings_not_failures(self):
         report = run_wayland_diagnostics(
