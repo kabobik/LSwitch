@@ -44,10 +44,15 @@ class TestSubprocessSystemAdapter:
         result = adapter.run_command(["__nonexistent_binary_12345__"])
         assert result.returncode == -1
 
-    def test_xdotool_key_no_crash(self):
-        """xdotool_key should not raise even if xdotool is not installed."""
+    def test_send_key_sequence_no_crash(self):
+        """send_key_sequence should not raise even if xdotool is not installed."""
         adapter = SubprocessSystemAdapter()
         # Should not raise — failure is silently handled
+        adapter.send_key_sequence("ctrl+a", timeout=0.1)
+
+    def test_xdotool_key_alias_no_crash(self):
+        """xdotool_key remains as a compatibility alias."""
+        adapter = SubprocessSystemAdapter()
         adapter.xdotool_key("ctrl+a", timeout=0.1)
 
     def test_get_clipboard_returns_string(self):
@@ -79,7 +84,10 @@ class TestMockSystemAdapter:
         assert isinstance(result, CommandResult)
         assert result.returncode == 0
 
-    def test_xdotool_key_noop(self, mock_system: MockSystemAdapter):
+    def test_send_key_sequence_noop(self, mock_system: MockSystemAdapter):
+        mock_system.send_key_sequence("ctrl+a")  # no crash
+
+    def test_xdotool_key_alias_noop(self, mock_system: MockSystemAdapter):
         mock_system.xdotool_key("ctrl+a")  # no crash
 
     def test_get_clipboard_empty(self, mock_system: MockSystemAdapter):

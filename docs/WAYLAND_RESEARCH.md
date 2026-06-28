@@ -1,5 +1,11 @@
 # Wayland-портация LSwitch: KDE-first, Qt6-native
 
+> **Статус документа:** это исследовательские заметки, а не актуальный план реализации. Здесь сохранены гипотезы, промежуточные решения и утверждения, которые могли оказаться неточными после сверки с кодом.
+>
+> **Актуальный рабочий план:** `docs/WAYLAND_IMPLEMENTATION_PLAN.md`.
+>
+> **Особенно осторожно:** утверждения про `QClipboard.Selection`, `selectionChanged()` и headless-режим через Qt требуют feature detection и fallback-стратегий. На Wayland нельзя считать X11 PRIMARY semantics доступными по умолчанию.
+
 > **Подход:** Полный переход на **PyQt6** (Qt 6) без compatibility-слоёв. Qt 6 трактует Wayland как первоклассную платформу и даёт рабочий `QtDBus`, стабильный `QClipboard` и `selectionChanged` на Wayland. `send_combo()` через UInput заменяет `xdotool`. Subprocess (`wl-clipboard`) — только fallback для headless-режима.
 >
 > **Почему PyQt6, а не PyQt5:**

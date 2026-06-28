@@ -104,7 +104,7 @@ class X11SelectionAdapter(ISelectionAdapter):
             old_clip = self._system.get_clipboard(selection="clipboard")
             self._system.set_clipboard(new_text, selection="clipboard")
             time.sleep(0.02)
-            self._system.xdotool_key("ctrl+v")
+            self._system.send_key_sequence("ctrl+v")
             time.sleep(0.05)
             # Restore the original clipboard
             if old_clip is not None:
@@ -116,7 +116,7 @@ class X11SelectionAdapter(ISelectionAdapter):
     def expand_selection_to_word(self) -> SelectionInfo:
         """Expand the current selection to the surrounding word via Ctrl+Shift+Left."""
         try:
-            self._system.xdotool_key("ctrl+shift+Left")
+            self._system.send_key_sequence("ctrl+shift+Left")
             time.sleep(0.05)
         except Exception:
             pass

@@ -228,13 +228,13 @@ class TestMouseRelease:
 
 
 class TestPollerCallback:
-    """Tests for _on_poller_primary_changed — sets fresh=True, does NOT update baseline."""
+    """Tests for _on_poller_selection_changed — sets fresh=True, does NOT update baseline."""
 
     def test_poller_callback_sets_fresh_true(self):
         app = _make_app()
         assert app._selection_valid is False
 
-        app._on_poller_primary_changed("привет", 42)
+        app._on_poller_selection_changed("привет", 42)
 
         assert app._selection_valid is True
 
@@ -245,7 +245,7 @@ class TestPollerCallback:
         app._prev_sel_text = "old"
         app._prev_sel_owner_id = 1
 
-        app._on_poller_primary_changed("new", 42)
+        app._on_poller_selection_changed("new", 42)
 
         # fresh is set, but baseline stays old
         assert app._selection_valid is True
@@ -255,7 +255,7 @@ class TestPollerCallback:
     def test_poller_fresh_survives_until_click(self):
         """Poller sets fresh → it persists until mouse click resets it."""
         app = _make_app()
-        app._on_poller_primary_changed("text", 1)
+        app._on_poller_selection_changed("text", 1)
         assert app._selection_valid is True
 
         # Click resets
@@ -287,7 +287,7 @@ class TestSelectionValidOnEvents:
         app = _make_app()
 
         # Poller detected selection in Window A
-        app._on_poller_primary_changed("hello", 99)
+        app._on_poller_selection_changed("hello", 99)
         assert app._selection_valid is True
 
         # Click in Window B resets fresh

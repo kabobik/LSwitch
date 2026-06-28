@@ -28,6 +28,7 @@ DEFAULT_CONFIG: dict = {
     'auto_switch_threshold': 0,
     'user_dict_enabled': False,
     'user_dict_min_weight': 2,
+    'wayland_selection_strategy': 'auto',
 }
 
 
@@ -123,6 +124,16 @@ def validate_config(conf: dict | None) -> dict:
     if udw_i < 0:
         raise ValueError(f"Invalid 'user_dict_min_weight': must be >= 0")
     out['user_dict_min_weight'] = udw_i
+
+    # wayland_selection_strategy — advanced Wayland selection strategy
+    wss = conf.get('wayland_selection_strategy', defaults['wayland_selection_strategy'])
+    valid_strategies = {'auto', 'clipboard_copy', 'primary_selection', 'disabled'}
+    if wss not in valid_strategies:
+        raise ValueError(
+            "Invalid 'wayland_selection_strategy': "
+            f"must be one of {sorted(valid_strategies)}"
+        )
+    out['wayland_selection_strategy'] = wss
 
     return out
 

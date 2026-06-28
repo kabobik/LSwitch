@@ -31,6 +31,7 @@ class TestDefaultConfig:
         'auto_switch_threshold',
         'user_dict_enabled',
         'user_dict_min_weight',
+        'wayland_selection_strategy',
     }
 
     def test_contains_all_expected_keys(self):
@@ -54,10 +55,12 @@ class TestValidateConfig:
             'auto_switch_threshold': 5,
             'user_dict_enabled': True,
             'user_dict_min_weight': 3,
+            'wayland_selection_strategy': 'clipboard_copy',
         })
         assert result['double_click_timeout'] == 0.5
         assert result['debug'] is True
         assert result['auto_switch_threshold'] == 5
+        assert result['wayland_selection_strategy'] == 'clipboard_copy'
 
     def test_invalid_double_click_timeout_type(self):
         with pytest.raises(ValueError, match="double_click_timeout"):
@@ -78,6 +81,10 @@ class TestValidateConfig:
     def test_invalid_auto_switch_threshold_negative(self):
         with pytest.raises(ValueError, match="auto_switch_threshold"):
             validate_config({'auto_switch_threshold': -1})
+
+    def test_invalid_wayland_selection_strategy(self):
+        with pytest.raises(ValueError, match="wayland_selection_strategy"):
+            validate_config({'wayland_selection_strategy': 'magic'})
 
     def test_none_returns_defaults(self):
         result = validate_config(None)

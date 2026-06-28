@@ -32,6 +32,61 @@ class VirtualKeyboard:
     KEY_PRESS_DELAY  = 0.001   # 1 ms between press and release
     KEY_REPEAT_DELAY = 0.001   # 1 ms between successive key taps
 
+    _KEY_NAME_MAP: dict[str, int] = {
+        "ctrl": 29,
+        "control": 29,
+        "leftctrl": 29,
+        "rightctrl": 97,
+        "shift": 42,
+        "leftshift": 42,
+        "rightshift": 54,
+        "alt": 56,
+        "leftalt": 56,
+        "rightalt": 100,
+        "super": 125,
+        "meta": 125,
+        "win": 125,
+        "leftmeta": 125,
+        "rightmeta": 126,
+        "left": 105,
+        "right": 106,
+        "up": 103,
+        "down": 108,
+        "backspace": 14,
+        "return": 28,
+        "enter": 28,
+        "space": 57,
+        "tab": 15,
+        "esc": 1,
+        "escape": 1,
+        "a": 30,
+        "b": 48,
+        "c": 46,
+        "d": 32,
+        "e": 18,
+        "f": 33,
+        "g": 34,
+        "h": 35,
+        "i": 23,
+        "j": 36,
+        "k": 37,
+        "l": 38,
+        "m": 50,
+        "n": 49,
+        "o": 24,
+        "p": 25,
+        "q": 16,
+        "r": 19,
+        "s": 31,
+        "t": 20,
+        "u": 22,
+        "v": 47,
+        "w": 17,
+        "x": 45,
+        "y": 21,
+        "z": 44,
+    }
+
     def tap_key(self, keycode: int, n_times: int = 1) -> None:
         """Press and release a keycode n times."""
         logger.debug("VirtualKeyboard: tap_key code=%s n_times=%s", keycode, n_times)
@@ -41,6 +96,30 @@ class VirtualKeyboard:
             self._write(keycode, 0)
             if i < n_times - 1:
                 time.sleep(self.KEY_REPEAT_DELAY)
+
+    @classmethod
+    def _key_name_to_code(cls, name: str) -> int:
+        normalized = name.strip().lower().replace("_", "").replace("-", "")
+        if normalized.startswith("key"):
+            normalized = normalized[3:]
+        try:
+            return cls._KEY_NAME_MAP[normalized]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported key name in sequence: {name!r}") from exc
+
+    def send_combo(self, sequence: str) -> None:
+        """Send a key combination such as ``ctrl+v`` via UInput."""
+        names = [part.strip() for part in sequence.split("+") if part.strip()]
+        if not names:
+            return
+        keycodes = [self._key_name_to_code(name) for name in names]
+        logger.debug("VirtualKeyboard: send_combo sequence=%s codes=%s", sequence, keycodes)
+        for code in keycodes:
+            self._write(code, 1)
+            time.sleep(self.KEY_PRESS_DELAY)
+        for code in reversed(keycodes):
+            self._write(code, 0)
+            time.sleep(self.KEY_PRESS_DELAY)
 
     # evdev keycode for Left Shift — used to replay shifted keys.
     KEY_LEFTSHIFT = 42

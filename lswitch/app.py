@@ -128,22 +128,22 @@ from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.event_manager import EventManager
 
 
-class _SelectionLoggerThread(threading.Thread):
-    """Background daemon thread polling X11 PRIMARY selection every 500ms.
+class _SelectionPollerThread(threading.Thread):
+    """Background daemon thread polling platform selection every 500ms.
 
     Logs changes at DEBUG level, and notifies ``LSwitchApp`` via
-    ``on_primary_changed`` callback so the baseline is always up to date.
-    Does NOT read PRIMARY at click time (avoids the race condition).
-    Always runs when a selection adapter is available.
+    ``on_selection_changed`` callback so the baseline is always up to date.
+    Does NOT read selection at click time (avoids platform races).
+    Enabled only when the platform factory marks polling as appropriate.
     """
 
-    def __init__(self, selection_adapter, on_primary_changed=None):
-        super().__init__(daemon=True, name="sel-logger")
+    def __init__(self, selection_adapter, on_selection_changed=None):
+        super().__init__(daemon=True, name="selection-poller")
         self._selection = selection_adapter
         self._running = True
         self._prev_text: str = ""
         self._prev_owner_id: int = 0
-        self._on_primary_changed = on_primary_changed  # callback(text, owner_id)
+        self._on_selection_changed = on_selection_changed  # callback(text, owner_id)
 
     def run(self):
         import time
@@ -157,13 +157,13 @@ class _SelectionLoggerThread(threading.Thread):
                     self._prev_text = info.text
                     self._prev_owner_id = info.owner_id
                     _logger.debug(
-                        "PRIMARY changed: text=%r owner=0x%x",
+                        "Selection changed: text=%r owner=0x%x",
                         info.text[:80] if info.text else "", info.owner_id,
                     )
-                    if self._on_primary_changed:
-                        self._on_primary_changed(info.text, info.owner_id)
+                    if self._on_selection_changed:
+                        self._on_selection_changed(info.text, info.owner_id)
             except Exception as exc:
-                _logger.trace("sel-logger error: %s", exc)  # type: ignore[attr-defined]
+                _logger.trace("selection-poller error: %s", exc)  # type: ignore[attr-defined]
             time.sleep(0.5)
 
     def stop(self):
@@ -178,7 +178,7 @@ class LSwitchApp:
         headless=False — with tray icon (default)
 
     ``_init_platform()`` is separated from ``__init__`` so that tests
-    can inject mocks without touching real X11 / evdev resources.
+    can inject mocks without touching real platform / evdev resources.
     """
 
     MANUAL_WEIGHT_STEP = 2
@@ -222,7 +222,8 @@ class LSwitchApp:
         self._prev_sel_text: str = ""
         self._prev_sel_owner_id: int = 0
         self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
-        self._selection_logger: _SelectionLoggerThread | None = None
+        self._platform = None
+        self._selection_poller: _SelectionPollerThread | None = None
 
     # ------------------------------------------------------------------
     # Platform initialisation (lazy — for testability)
@@ -232,29 +233,15 @@ class LSwitchApp:
         """Initialise platform components.
 
         Separated from ``__init__`` so that tests can substitute mocks
-        without requiring real X11 / evdev.
+        without requiring real platform / evdev resources.
         """
-        from lswitch.platform.subprocess_impl import SubprocessSystemAdapter
+        from lswitch.platform.platform_factory import create_platform_adapters
 
-        self.system = SubprocessSystemAdapter(debug=self.debug)
-
-        try:
-            from lswitch.platform.xkb_adapter import X11XKBAdapter
-            self.xkb = X11XKBAdapter(debug=self.debug)
-        except Exception:
-            raise RuntimeError("X11 недоступен — XKBAdapter не удалось инициализировать")
-
-        try:
-            from lswitch.platform.selection_adapter import X11SelectionAdapter
-            self.selection = X11SelectionAdapter(system=self.system, debug=self.debug)
-        except Exception:
-            raise RuntimeError("X11 SelectionAdapter не удалось инициализировать")
-
-        try:
-            from lswitch.input.virtual_keyboard import VirtualKeyboard
-            self.virtual_kb = VirtualKeyboard(debug=self.debug)
-        except Exception:
-            raise RuntimeError("VirtualKeyboard (UInput) не удалось создать")
+        self._platform = create_platform_adapters(debug=self.debug)
+        self.system = self._platform.system
+        self.xkb = self._platform.xkb
+        self.selection = self._platform.selection
+        self.virtual_kb = self._platform.virtual_kb
 
         from lswitch.intelligence.dictionary_service import DictionaryService
         from lswitch.intelligence.ngram_analyzer import NgramAnalyzer
@@ -477,23 +464,23 @@ class LSwitchApp:
         self._last_auto_marker = None
         self._selection_valid = False
         self._last_retype_events = []
-        # Do NOT read PRIMARY here — xclip -o sends XConvertSelection which
-        # can cause the selection owner to drop PRIMARY when the click has
-        # just deselected text (race condition on Cinnamon/GTK apps).
+        # Do NOT read selection here. Some platform adapters must request the
+        # active selection from the owner app, and doing that during click
+        # handling can race with deselection.
         # Baseline will be updated by _on_mouse_release instead.
         self.state_manager.on_mouse_click()
 
     def _on_mouse_release(self, event):
         """Mouse button release — potential end of drag-select.
 
-        Read PRIMARY and compare with baseline.  If content changed,
+        Read platform selection and compare with baseline. If content changed,
         a drag-select just happened — mark selection as fresh.
         Always update baseline so the next click/release cycle has
         an accurate reference.
 
-        Reading PRIMARY at release time is safe — the GTK application
-        has already finished processing the button-release event and
-        committed the selection to PRIMARY.
+        Reading at release time is safer because the target application has
+        already processed the button-release event and committed selection
+        state for the current platform.
         """
         if self.selection is None:
             return
@@ -504,7 +491,7 @@ class LSwitchApp:
             # Always update baseline on release
             self._prev_sel_text = info.text or ""
             self._prev_sel_owner_id = info.owner_id
-            # If PRIMARY changed → fresh selection (drag-select happened)
+            # If selection changed → fresh selection (drag-select happened)
             if info.text and (info.text != old_text or
                               (info.owner_id != old_owner and info.owner_id != 0)):
                 self._selection_valid = True
@@ -514,7 +501,7 @@ class LSwitchApp:
                 )
             else:
                 logger.trace(  # type: ignore[attr-defined]
-                    "MouseRelease: PRIMARY unchanged — text=%r",
+                    "MouseRelease: selection unchanged — text=%r",
                     info.text[:50] if info.text else "",
                 )
         except Exception:
@@ -539,8 +526,8 @@ class LSwitchApp:
     # Selection validity tracking
     # ------------------------------------------------------------------
 
-    def _on_poller_primary_changed(self, text: str, owner_id: int) -> None:
-        """Called by _SelectionLoggerThread when PRIMARY changes.
+    def _on_poller_selection_changed(self, text: str, owner_id: int) -> None:
+        """Called by _SelectionPollerThread when platform selection changes.
 
         Sets fresh=True so the next Shift+Shift will use SelectionMode.
         Does NOT update baseline (_prev_sel_text / _prev_sel_owner_id) —
@@ -548,7 +535,7 @@ class LSwitchApp:
         """
         self._selection_valid = True
         logger.debug(
-            "Poller: PRIMARY changed, fresh=True — text=%r owner=0x%x",
+            "Poller: selection changed, fresh=True — text=%r owner=0x%x",
             text[:50] if text else "", owner_id,
         )
 
@@ -951,25 +938,30 @@ class LSwitchApp:
 
     def run(self):
         """Blocking main event loop."""
-        if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
+        from lswitch.platform.platform_factory import detect_session_type
+        if detect_session_type() == "unknown":
             raise RuntimeError(
-                "LSwitch требует X11 (переменная DISPLAY не установлена). "
-                "Для systemd: добавьте ImportEnvironment=DISPLAY в .service файл."
+                "LSwitch requires an active X11 or Wayland graphical session "
+                "(DISPLAY or WAYLAND_DISPLAY is not set)."
             )
 
         # Защита от двойного запуска
         self._pid_lock = _PidLock(replace=self._replace)
         self._pid_lock.acquire()
 
-        self._init_platform()
-        self._wire_event_bus()
+        try:
+            self._init_platform()
+            self._wire_event_bus()
+        except Exception:
+            self.stop()
+            raise
 
-        if self.selection:
-            self._selection_logger = _SelectionLoggerThread(
+        if self.selection and getattr(self._platform, "selection_polling_enabled", False):
+            self._selection_poller = _SelectionPollerThread(
                 self.selection,
-                on_primary_changed=self._on_poller_primary_changed,
+                on_selection_changed=self._on_poller_selection_changed,
             )
-            self._selection_logger.start()
+            self._selection_poller.start()
 
         count = self.device_manager.scan_devices()
 
@@ -1077,8 +1069,8 @@ class LSwitchApp:
     def stop(self):
         """Graceful shutdown — safe to call multiple times."""
         self._running = False
-        if self._selection_logger:
-            self._selection_logger.stop()
+        if self._selection_poller:
+            self._selection_poller.stop()
         if self._udev_monitor:
             try:
                 self._udev_monitor.stop()

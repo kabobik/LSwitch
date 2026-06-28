@@ -84,7 +84,7 @@ class MockSystemAdapter(ISystemAdapter):
     def run_command(self, args: list[str], timeout: float = 1.0) -> CommandResult:
         return CommandResult(stdout="", stderr="", returncode=0)
 
-    def xdotool_key(self, sequence: str, timeout: float = 0.3) -> None:
+    def send_key_sequence(self, sequence: str, timeout: float = 0.3) -> None:
         pass
 
     def get_clipboard(self, selection: str = "primary") -> str:

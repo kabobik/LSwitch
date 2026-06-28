@@ -87,7 +87,7 @@ class _RecordingSystemAdapter(MockSystemAdapter):
     def set_clipboard(self, text: str, selection: str = "clipboard") -> None:
         self._clipboard[selection] = text
 
-    def xdotool_key(self, sequence: str, timeout: float = 0.3) -> None:
+    def send_key_sequence(self, sequence: str, timeout: float = 0.3) -> None:
         self.keys_sent.append(sequence)
 
 

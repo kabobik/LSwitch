@@ -22,7 +22,7 @@ class SubprocessSystemAdapter(ISystemAdapter):
         except Exception as e:
             return CommandResult(stdout="", stderr=str(e), returncode=-1)
 
-    def xdotool_key(self, sequence: str, timeout: float = 0.3) -> None:
+    def send_key_sequence(self, sequence: str, timeout: float = 0.3) -> None:
         self.run_command(["xdotool", "key", sequence], timeout=timeout)
 
     def get_clipboard(self, selection: str = "primary") -> str:

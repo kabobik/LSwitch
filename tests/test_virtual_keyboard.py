@@ -170,6 +170,60 @@ class TestReplayEvents:
             assert (48, 0) in writes
 
 
+class TestSendCombo:
+    def test_send_combo_ctrl_v(self):
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            vk.send_combo("ctrl+v")
+
+            assert mock_uinput.method_calls == [
+                call.write(1, 29, 1),
+                call.syn(),
+                call.write(1, 47, 1),
+                call.syn(),
+                call.write(1, 47, 0),
+                call.syn(),
+                call.write(1, 29, 0),
+                call.syn(),
+            ]
+
+    def test_send_combo_ctrl_shift_left_alias_case(self):
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            vk.send_combo("ctrl+shift+Left")
+
+            writes = [(c.args[1], c.args[2]) for c in mock_uinput.write.call_args_list]
+            assert writes == [
+                (29, 1),
+                (42, 1),
+                (105, 1),
+                (105, 0),
+                (42, 0),
+                (29, 0),
+            ]
+
+    def test_send_combo_empty_sequence_noop(self):
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            mock_uinput.reset_mock()
+            vk.send_combo("")
+            assert mock_uinput.write.call_count == 0
+
+    def test_send_combo_unknown_key_raises(self):
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            with pytest.raises(ValueError, match="Unsupported key name"):
+                vk.send_combo("ctrl+definitely_unknown")
+
+
 class TestWriteWithNoUInput:
     def test_write_does_not_crash_when_uinput_is_none(self):
         """If UInput creation failed, _write should silently return."""
