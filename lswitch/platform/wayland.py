@@ -131,6 +131,8 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
     COPY_POLL_INTERVAL = 0.01
     PASTE_DELAY = 0.05
     RESTORE_DELAY = 0.08
+    EXPAND_SELECTION_DELAY = 0.12
+    COPY_SENTINEL_PREFIX = "__LSWITCH_COPY_SENTINEL__"
 
     def __init__(
         self,
@@ -148,9 +150,12 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
     def get_selection(self) -> SelectionInfo:
         old_clipboard = self.system.get_clipboard(selection="clipboard")
         self._saved_clipboard = old_clipboard
+        sentinel = self._copy_sentinel()
+        self.system.set_clipboard(sentinel, selection="clipboard")
         self.system.send_key_sequence("ctrl+c")
-        text = self._wait_for_clipboard_copy(old_clipboard)
+        text = self._wait_for_clipboard_copy(sentinel)
         if not text:
+            self.system.set_clipboard(old_clipboard, selection="clipboard")
             self._saved_clipboard = None
             return self.empty_selection()
         return SelectionInfo(text=text, owner_id=0, timestamp=time.time())
@@ -185,23 +190,24 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
 
     def expand_selection_to_word(self) -> SelectionInfo:
         self.system.send_key_sequence("ctrl+shift+Left")
-        time.sleep(self.PASTE_DELAY)
+        time.sleep(self.EXPAND_SELECTION_DELAY)
         return self.get_selection()
 
     @staticmethod
     def empty_selection() -> SelectionInfo:
         return SelectionInfo(text="", owner_id=0, timestamp=time.time())
 
-    def _wait_for_clipboard_copy(self, old_clipboard: str) -> str:
+    def _wait_for_clipboard_copy(self, sentinel: str) -> str:
         deadline = time.time() + self.COPY_WAIT_TIMEOUT
-        last_seen = old_clipboard
         while time.time() < deadline:
             current = self.system.get_clipboard(selection="clipboard")
-            if current and current != old_clipboard:
+            if current and current != sentinel:
                 return current
-            last_seen = current
             time.sleep(self.COPY_POLL_INTERVAL)
-        return "" if last_seen == old_clipboard else last_seen
+        return ""
+
+    def _copy_sentinel(self) -> str:
+        return f"{self.COPY_SENTINEL_PREFIX}{time.monotonic_ns()}"
 
 
 class KdeKeyboardDbusClient:

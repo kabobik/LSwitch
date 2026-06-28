@@ -31,6 +31,8 @@ clipboard, отправляет `ctrl+c`, ждет изменения clipboard 
    - выбирается при Double Shift, если `chars_in_buffer == 0`,
      `selection_valid == False`, `backspace_hold_active == False`;
    - сначала отправляет `ctrl+shift+Left`, потом `ctrl+c`;
+   - перед `ctrl+c` Wayland adapter ставит временный clipboard sentinel, чтобы
+     copy считался успешным даже если clipboard уже содержал такое же слово;
    - это главный ожидаемый источник `ctrl+c` при Double Shift на пустом буфере.
 
 3. Backspace-hold selection mode:
@@ -242,6 +244,8 @@ RU -> EN:
 - `choose_mode: fallback -> selection_expand`;
 - `SelectionMode: expanding selection...`;
 - отправляется `ctrl+shift+Left`, затем `ctrl+c`;
+- если курсор стоит сразу после слова, слово выделяется и затем заменяется
+  converted text;
 - если выделять нечего, конвертация не должна менять текст;
 - не должно быть дополнительного baseline `ctrl+c` после завершения conversion.
 

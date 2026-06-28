@@ -180,6 +180,7 @@ def _make_selection_adapter(system: _RecordingWaylandSystem) -> WaylandSelection
     adapter.COPY_POLL_INTERVAL = 0.0
     adapter.PASTE_DELAY = 0.0
     adapter.RESTORE_DELAY = 0.0
+    adapter.EXPAND_SELECTION_DELAY = 0.0
     return adapter
 
 
@@ -194,14 +195,26 @@ class TestWaylandSelectionAdapter:
         assert info.owner_id == 0
         assert system.keys_sent == ["ctrl+c"]
 
-    def test_get_selection_returns_empty_when_clipboard_does_not_change(self):
+    def test_get_selection_returns_same_text_as_old_clipboard(self):
         system = _RecordingWaylandSystem(clipboard="old", copy_text="old")
+        adapter = _make_selection_adapter(system)
+
+        info = adapter.get_selection()
+
+        assert info.text == "old"
+        assert info.owner_id == 0
+
+    def test_get_selection_returns_empty_and_restores_clipboard_when_copy_fails(self):
+        system = _RecordingWaylandSystem(clipboard="old", copy_text=None)
         adapter = _make_selection_adapter(system)
 
         info = adapter.get_selection()
 
         assert info.text == ""
         assert info.owner_id == 0
+        assert system.clipboard == "old"
+        assert system.clipboard_writes[0].startswith(adapter.COPY_SENTINEL_PREFIX)
+        assert system.clipboard_writes[-1] == "old"
 
     def test_has_fresh_selection_ignores_empty_copy(self):
         system = _RecordingWaylandSystem(clipboard="", copy_text="")
@@ -219,7 +232,8 @@ class TestWaylandSelectionAdapter:
         assert result is True
         assert system.keys_sent == ["ctrl+c", "ctrl+v"]
         assert system.clipboard == "original"
-        assert system.clipboard_writes == ["converted", "original"]
+        assert system.clipboard_writes[0].startswith(adapter.COPY_SENTINEL_PREFIX)
+        assert system.clipboard_writes[1:] == ["converted", "original"]
 
     def test_replace_selection_without_prior_copy_restores_current_clipboard(self):
         system = _RecordingWaylandSystem(clipboard="current")
