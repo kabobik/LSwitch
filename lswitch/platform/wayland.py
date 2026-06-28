@@ -295,6 +295,7 @@ class KdeLayoutBackend:
         self.debug = debug
         self._layouts: list[LayoutInfo] | None = None
         self._raw_layouts: list = []
+        self.last_switch_method: str | None = None
 
     def validate(self) -> None:
         self.get_layouts()
@@ -419,6 +420,7 @@ class KdeLayoutBackend:
         )
 
     def _set_layout(self, new_index: int, layout: LayoutInfo) -> None:
+        self.last_switch_method = None
         attempts = self._set_layout_attempts(new_index, layout)
         failures: list[str] = []
         for label, args in attempts:
@@ -426,6 +428,7 @@ class KdeLayoutBackend:
                 result = self.dbus.call("setLayout", *args)
                 if result is False:
                     raise WaylandLayoutBackendError(f"{label} returned false")
+                self.last_switch_method = label
                 return
             except Exception as exc:
                 failures.append(f"{label}: {exc}")
@@ -448,6 +451,7 @@ class KdeLayoutBackend:
             current = self.get_current_layout()
             steps = (new_index - current.index) % len(layouts)
             if steps == 0:
+                self.last_switch_method = "already-current"
                 return True
 
             for _ in range(steps):
@@ -459,6 +463,7 @@ class KdeLayoutBackend:
                     "switchToNextLayout did not reach requested layout: "
                     f"expected index {new_index}, got {updated.index}"
                 )
+            self.last_switch_method = f"switchToNextLayout x{steps}"
             return True
         except Exception as exc:
             failures.append(f"switchToNextLayout: {exc}")

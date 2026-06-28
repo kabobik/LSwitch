@@ -94,8 +94,8 @@ class TestRunWaylandDiagnostics:
 
         text = report.to_text()
         assert report.ok is True
-        assert "[ok] switch test switch: ru index=1" in text
-        assert "[ok] switch test restore: en index=0" in text
+        assert "[ok] switch test switch: ru index=1 via setLayout(uint32)" in text
+        assert "[ok] switch test restore: en index=0 via setLayout(uint32)" in text
         assert ("setLayout", (DbusUInt32(1),)) in fake_dbus.calls
         assert ("setLayout", (DbusUInt32(0),)) in fake_dbus.calls
 

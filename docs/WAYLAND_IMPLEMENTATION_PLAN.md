@@ -283,7 +283,8 @@ LSwitchApp
 
 - `lswitch --diagnose-wayland` подтверждает raw/parsed KDE D-Bus layout state;
 - `lswitch --diagnose-wayland` показывает D-Bus methods/signatures для KDE `/Layouts`;
-- `lswitch --diagnose-wayland-switch-test` переключает раскладку и возвращает исходную;
+- `lswitch --diagnose-wayland-switch-test` переключает раскладку, показывает
+  использованный backend method и возвращает исходную;
 - запуск GUI/tray;
 - запуск headless/service;
 - double Shift retype EN->RU и RU->EN;

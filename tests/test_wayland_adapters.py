@@ -342,6 +342,7 @@ class TestKdeLayoutBackend:
         assert result.name == "ru"
         assert ("setLayout", (DbusUInt32(1),)) in dbus.calls
         assert ("setLayout", (1,)) not in dbus.calls
+        assert backend.last_switch_method == "setLayout(uint32)"
 
     def test_switch_layout_falls_back_to_signed_index_signature(self):
         dbus = _FakeKdeDbus(current=0)
@@ -353,6 +354,7 @@ class TestKdeLayoutBackend:
         assert result.name == "ru"
         assert ("setLayout", (DbusUInt32(1),)) in dbus.calls
         assert ("setLayout", (1,)) in dbus.calls
+        assert backend.last_switch_method == "setLayout(index)"
 
     def test_switch_layout_without_target_cycles(self):
         dbus = _FakeKdeDbus(current=0)
@@ -409,6 +411,7 @@ class TestKdeLayoutBackend:
         assert ("setLayout", ("ru", "")) in dbus.calls
         assert ("switchToNextLayout", ()) in dbus.calls
         assert dbus.current == 1
+        assert backend.last_switch_method == "switchToNextLayout x1"
 
     def test_switch_layout_reports_all_failures_when_kde_methods_are_missing(self):
         dbus = _FakeKdeDbus(

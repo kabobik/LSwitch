@@ -220,13 +220,21 @@ def _run_switch_test(report: DiagnosticReport, backend: KdeLayoutBackend, origin
         report.add(
             "ok",
             "switch test switch",
-            f"{switched.name} index={switched.index}",
+            _format_switch_result(backend, switched),
         )
         restored = backend.switch_layout(target=original)
         report.add(
             "ok",
             "switch test restore",
-            f"{restored.name} index={restored.index}",
+            _format_switch_result(backend, restored),
         )
     except Exception as exc:
         report.add("fail", "switch test", str(exc))
+
+
+def _format_switch_result(backend: KdeLayoutBackend, layout) -> str:
+    detail = f"{layout.name} index={layout.index}"
+    method = getattr(backend, "last_switch_method", None)
+    if method:
+        detail += f" via {method}"
+    return detail
