@@ -179,11 +179,33 @@ def _add_dbus_introspection(report: DiagnosticReport, dbus_client) -> None:
 def _parse_dbus_methods(xml: str) -> list[str]:
     root = ElementTree.fromstring(xml)
     methods = {
-        method.attrib["name"]
+        _format_dbus_method(method)
         for method in root.findall(".//method")
         if method.attrib.get("name")
     }
     return sorted(methods)
+
+
+def _format_dbus_method(method: ElementTree.Element) -> str:
+    name = method.attrib["name"]
+    input_signature = _method_arg_signature(method, direction="in")
+    output_signature = _method_arg_signature(method, direction="out")
+    formatted = f"{name}({input_signature})"
+    if output_signature:
+        formatted += f"->{output_signature}"
+    return formatted
+
+
+def _method_arg_signature(method: ElementTree.Element, *, direction: str) -> str:
+    parts = []
+    for arg in method.findall("arg"):
+        arg_direction = arg.attrib.get("direction", "in")
+        if arg_direction != direction:
+            continue
+        arg_type = arg.attrib.get("type", "")
+        if arg_type:
+            parts.append(arg_type)
+    return "".join(parts)
 
 
 def _run_switch_test(report: DiagnosticReport, backend: KdeLayoutBackend, original) -> None:

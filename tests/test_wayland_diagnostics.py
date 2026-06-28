@@ -17,8 +17,15 @@ class _FakeDbusClient:
         return """
         <node>
           <interface name="org.kde.KeyboardLayouts">
-            <method name="getLayout"/>
-            <method name="getLayoutsList"/>
+            <method name="getLayout">
+              <arg name="layout" type="u" direction="out"/>
+            </method>
+            <method name="getLayoutsList">
+              <arg name="layouts" type="a(sss)" direction="out"/>
+            </method>
+            <method name="setLayout">
+              <arg name="layout" type="u" direction="in"/>
+            </method>
             <method name="switchToNextLayout"/>
           </interface>
         </node>
@@ -70,7 +77,11 @@ class TestRunWaylandDiagnostics:
         assert report.ok is True
         assert "[ok] session: wayland" in text
         assert "[ok] compositor: kde" in text
-        assert "[ok] D-Bus methods: getLayout, getLayoutsList, switchToNextLayout" in text
+        assert (
+            "[ok] D-Bus methods: "
+            "getLayout()->u, getLayoutsList()->a(sss), "
+            "setLayout(u), switchToNextLayout()"
+        ) in text
         assert "[ok] raw getLayoutsList:" in text
         assert "[ok] raw getLayout: 0" in text
         assert "[ok] parsed layouts: 0:en/us, 1:ru/ru" in text

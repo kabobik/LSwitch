@@ -262,7 +262,7 @@ LSwitchApp
   `setLayout` signatures, затем переключаться через `switchToNextLayout` с
   проверкой итогового `getLayout`.
 - [x] Добавить D-Bus introspection в `lswitch --diagnose-wayland`, чтобы видеть
-  реальные методы KDE `/Layouts` на конкретной версии Plasma.
+  реальные методы/signatures KDE `/Layouts` на конкретной версии Plasma.
 
 Готовность: retype и auto-conversion переключают раскладку на KDE Wayland.
 
@@ -280,7 +280,7 @@ LSwitchApp
 Проверить:
 
 - `lswitch --diagnose-wayland` подтверждает raw/parsed KDE D-Bus layout state;
-- `lswitch --diagnose-wayland` показывает D-Bus methods для KDE `/Layouts`;
+- `lswitch --diagnose-wayland` показывает D-Bus methods/signatures для KDE `/Layouts`;
 - `lswitch --diagnose-wayland-switch-test` переключает раскладку и возвращает исходную;
 - запуск GUI/tray;
 - запуск headless/service;
