@@ -190,6 +190,9 @@ class TestWaylandSystemAdapter:
 
         assert calls[0][0] == ["wl-copy"]
         assert calls[0][1]["input"] == "new"
+        assert "capture_output" not in calls[0][1]
+        assert calls[0][1]["stdout"] is subprocess.DEVNULL
+        assert calls[0][1]["stderr"] is subprocess.DEVNULL
 
     def test_clipboard_get_falls_back_to_qt_when_wl_paste_fails(self, monkeypatch):
         clipboard = _FakeClipboard()

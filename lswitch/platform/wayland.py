@@ -204,13 +204,23 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         timeout: float,
     ) -> CommandResult:
         try:
-            result = self._command_runner(
-                args,
-                input=input_text,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            if args and args[0] == "wl-copy":
+                result = self._command_runner(
+                    args,
+                    input=input_text,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=timeout,
+                )
+            else:
+                result = self._command_runner(
+                    args,
+                    input=input_text,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
             return CommandResult(
                 stdout=result.stdout or "",
                 stderr=result.stderr or "",
