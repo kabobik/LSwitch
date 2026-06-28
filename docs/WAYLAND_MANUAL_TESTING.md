@@ -58,10 +58,10 @@ clipboard, отправляет `ctrl+c`, ждет изменения clipboard 
    - на Wayland обычно не должен срабатывать без fresh-selection флага.
 
 6. Debug Monitor:
-   - если открыть Debug Monitor из tray, его внутренний selection poller вызывает
-     `app.selection.get_selection()` каждые 500 ms;
-   - на Wayland это будет периодически отправлять `ctrl+c`;
-   - для тестов спама `ctrl+c` Debug Monitor лучше держать закрытым.
+   - если открыть Debug Monitor из tray, его внутренний selection poller должен
+     использовать passive reader (`get_passive_selection`) на Wayland;
+   - на Wayland это не должно отправлять `ctrl+c`;
+   - если Debug Monitor в idle генерирует `ctrl+c`, это регрессия.
 
 `Auto-conversion на Space` не использует `ctrl+c`: там путь через backspace,
 layout switch, replay events и отложенный space.
@@ -337,14 +337,18 @@ Keyboard selection:
 3. Ничего не нажимать 3-5 секунд.
 4. Закрыть Debug Monitor.
 
-Ожидать по текущей реализации:
+Ожидать:
 
-- пока Debug Monitor открыт, каждые примерно 500 ms может появляться
+- Debug Monitor обновляет Platform Selection через passive Wayland reader;
+- в idle не появляется `VirtualKeyboard: send_combo sequence=ctrl+c`;
+- если выделение меняется мышью, selection panel может обновиться без copy-flow.
+
+Нежелательно:
+
+- пока Debug Monitor открыт, каждые примерно 500 ms появляется
   `VirtualKeyboard: send_combo sequence=ctrl+c`;
-- после закрытия Debug Monitor spam должен прекратиться.
-
-Если это подтверждается, Debug Monitor на Wayland нужно менять: не poll-ить
-selection через active `Ctrl+C` flow, либо показывать selection panel disabled.
+- после закрытия Debug Monitor spam прекращается. Это означает, что monitor
+  снова читает selection через active copy-flow.
 
 ## 11. Clipboard restore
 
@@ -420,5 +424,5 @@ selection через active `Ctrl+C` flow, либо показывать selecti
 | Mouse selection | Selection conversion + clipboard restore |  |  |
 | Keyboard selection | Selection conversion + clipboard restore |  |  |
 | Backspace hold | Selection mode only while gesture active |  |  |
-| Debug Monitor | `ctrl+c` только пока окно открыто |  |  |
+| Debug Monitor | Нет idle `ctrl+c` от selection poller |  |  |
 | Headless | Без tray, основные сценарии работают |  |  |

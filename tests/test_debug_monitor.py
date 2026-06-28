@@ -14,6 +14,7 @@ import pytest
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.event_bus import EventBus
 from lswitch.core.states import State, StateContext
+from lswitch.platform.selection_adapter import SelectionInfo
 
 
 # ---------------------------------------------------------------------------
@@ -671,9 +672,45 @@ class TestEventFormatting:
 class TestSelectionPollerThread:
     """Test _SelectionPollerThread freshness logic (without actual QThread)."""
 
+    def test_reader_uses_passive_selection_when_available(self):
+        from lswitch.platform.selection_adapter import read_selection_prefer_passive
+
+        class PassiveSelection:
+            def __init__(self):
+                self.active_calls = 0
+                self.passive_calls = 0
+
+            def get_passive_selection(self):
+                self.passive_calls += 1
+                return SelectionInfo(text="passive", owner_id=0, timestamp=time.time())
+
+            def get_selection(self):
+                self.active_calls += 1
+                return SelectionInfo(text="active", owner_id=1, timestamp=time.time())
+
+        selection = PassiveSelection()
+
+        info = read_selection_prefer_passive(selection)
+
+        assert info.text == "passive"
+        assert selection.passive_calls == 1
+        assert selection.active_calls == 0
+
+    def test_reader_uses_active_selection_for_plain_mock(self):
+        from lswitch.platform.selection_adapter import read_selection_prefer_passive
+
+        selection = Mock()
+        selection.get_selection.return_value = SelectionInfo(
+            text="active", owner_id=1, timestamp=time.time(),
+        )
+
+        info = read_selection_prefer_passive(selection)
+
+        assert info.text == "active"
+        selection.get_selection.assert_called_once()
+
     def test_freshness_detected_on_text_change(self):
         """First non-empty selection should be fresh."""
-        from lswitch.platform.selection_adapter import SelectionInfo
 
         app = Mock()
         app.selection = Mock()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Callable
 
 from lswitch.platform.system_adapter import ISystemAdapter
 
@@ -28,6 +29,26 @@ class ISelectionAdapter(ABC):
 
     @abstractmethod
     def expand_selection_to_word(self) -> SelectionInfo: ...
+
+
+def get_passive_selection_reader(selection) -> Callable[[], SelectionInfo] | None:
+    """Return a no-shortcut selection reader when an adapter provides one."""
+    if selection is None:
+        return None
+    if getattr(type(selection), "get_passive_selection", None) is None:
+        return None
+    reader = getattr(selection, "get_passive_selection", None)
+    return reader if callable(reader) else None
+
+
+def read_selection_prefer_passive(selection) -> SelectionInfo:
+    """Read selection, preferring passive adapters over active copy flows."""
+    if selection is None:
+        raise RuntimeError("Selection adapter is not available")
+    reader = get_passive_selection_reader(selection)
+    if reader is not None:
+        return reader()
+    return selection.get_selection()
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ from PyQt6.QtGui import QFont, QColor
 
 from lswitch.core.events import Event, EventType
 from lswitch.input.key_mapper import keycode_to_char
+from lswitch.platform.selection_adapter import read_selection_prefer_passive
 
 if TYPE_CHECKING:
     from lswitch.app import LSwitchApp
@@ -37,7 +38,7 @@ class _SelectionPollerThread(QThread):
     def run(self):
         while self._running:
             try:
-                info = self._app.selection.get_selection()
+                info = read_selection_prefer_passive(self._app.selection)
                 changed = (
                     bool(info.text)
                     and (info.text != self._prev_text or info.owner_id != self._prev_owner_id)
