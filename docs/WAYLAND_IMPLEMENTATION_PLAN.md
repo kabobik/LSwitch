@@ -142,8 +142,8 @@ LSwitchApp
   |     +-- X11SelectionAdapter      # existing python-xlib
   |
   +-- Wayland
-        +-- WaylandSystemAdapter     # skeleton now, QClipboard + UInput combos later
-        +-- WaylandSelectionAdapter  # skeleton now, copy/paste selection flow later
+        +-- WaylandSystemAdapter     # QClipboard + UInput combos
+        +-- WaylandSelectionAdapter  # copy/paste selection flow
         +-- WaylandLayoutAdapter     # skeleton now, compositor backend later
         +-- QtBridge                 # main-thread Qt calls
         +-- CompositorLayoutBackend
@@ -232,9 +232,9 @@ LSwitchApp
 
 ### Фаза 5. WaylandSystemAdapter
 
-- `get_clipboard()`/`set_clipboard()` через `QClipboard`.
-- `send_key_sequence()` через `VirtualKeyboard.send_combo()`.
-- `xdotool_key()` оставить deprecated alias.
+- [x] `get_clipboard()`/`set_clipboard()` через `QClipboard`.
+- [x] `send_key_sequence()` через `VirtualKeyboard.send_combo()`.
+- [x] `xdotool_key()` оставить deprecated alias.
 - Fallback на `wl-copy`/`wl-paste` при headless/no-Qt.
 - Понятные logs при недоступном clipboard.
 
@@ -242,10 +242,11 @@ LSwitchApp
 
 ### Фаза 6. WaylandSelectionAdapter
 
-- Реализовать copy/paste selection flow.
-- Добавить задержки/ожидание clipboard change после `Ctrl+C`.
-- Не считать empty clipboard fresh selection.
-- Восстанавливать clipboard после paste аккуратно, чтобы не сломать вставку в медленных приложениях.
+- [x] Реализовать copy/paste selection flow.
+- [x] Добавить задержки/ожидание clipboard change после `Ctrl+C`.
+- [x] Не считать empty clipboard fresh selection.
+- [x] Восстанавливать clipboard после paste аккуратно, чтобы не сломать вставку в медленных приложениях.
+- [x] Отключить mouse-release selection tracking для Wayland, чтобы не отправлять скрытый `Ctrl+C` вне явного conversion path.
 - Optional: `QClipboard.Selection` fast path behind feature probe.
 
 Готовность: выделение в Qt/GTK/browser/terminal приложениях конвертируется вручную через double Shift.

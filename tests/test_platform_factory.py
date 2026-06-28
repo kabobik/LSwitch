@@ -109,6 +109,7 @@ class TestCreatePlatformAdapters:
         assert adapters.virtual_kb is fake_vk
         assert adapters.selection_polling_enabled is False
         assert adapters.main_thread is main_thread
+        assert adapters.selection_mouse_release_tracking_enabled is False
 
     def test_unknown_session_fails_clearly(self):
         with patch("lswitch.platform.platform_factory.detect_session_type", return_value="unknown"):
@@ -136,8 +137,9 @@ class TestCreatePlatformAdapters:
         assert isinstance(adapters.selection, X11SelectionAdapter)
         assert adapters.virtual_kb is fake_vk
         assert adapters.selection_polling_enabled is True
+        assert adapters.selection_mouse_release_tracking_enabled is True
 
-    def test_create_wayland_platform_adapters_fail_fast_at_operation_boundary(self):
+    def test_create_wayland_platform_adapters_fail_fast_for_layout_and_subprocess(self):
         fake_vk = MagicMock()
         main_thread = DirectMainThreadInvoker()
         with patch("lswitch.platform.platform_factory.VirtualKeyboard", return_value=fake_vk):
@@ -149,7 +151,5 @@ class TestCreatePlatformAdapters:
 
         with pytest.raises(WaylandBackendNotImplementedError, match="switch_layout"):
             adapters.xkb.switch_layout()
-        with pytest.raises(WaylandBackendNotImplementedError, match="get_clipboard"):
-            adapters.system.get_clipboard()
-        with pytest.raises(WaylandBackendNotImplementedError, match="get_selection"):
-            adapters.selection.get_selection()
+        with pytest.raises(WaylandBackendNotImplementedError, match="run_command"):
+            adapters.system.run_command(["true"])

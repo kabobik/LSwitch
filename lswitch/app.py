@@ -487,6 +487,12 @@ class LSwitchApp:
         """
         if self.selection is None:
             return
+        if not getattr(
+            self._platform,
+            "selection_mouse_release_tracking_enabled",
+            True,
+        ):
+            return
         try:
             info = self.selection.get_selection()
             old_text = self._prev_sel_text

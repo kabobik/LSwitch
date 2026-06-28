@@ -25,6 +25,7 @@ class PlatformAdapters:
     virtual_kb: VirtualKeyboard
     selection_polling_enabled: bool = False
     main_thread: MainThreadInvoker | None = None
+    selection_mouse_release_tracking_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,7 @@ def create_x11_platform_adapters(
         virtual_kb=virtual_kb,
         selection_polling_enabled=True,
         main_thread=None,
+        selection_mouse_release_tracking_enabled=True,
     )
 
 
@@ -195,4 +197,5 @@ def create_wayland_platform_adapters(
         virtual_kb=virtual_kb,
         selection_polling_enabled=False,
         main_thread=main_thread,
+        selection_mouse_release_tracking_enabled=False,
     )

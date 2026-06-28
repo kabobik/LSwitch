@@ -127,6 +127,22 @@ class TestOnMouseClick:
             mock_click.assert_called_once()
 
 
+class TestOnMouseRelease:
+    def test_skips_selection_tracking_when_platform_disables_it(self):
+        app = _make_app()
+        app.selection = MagicMock()
+        app._platform = type(
+            "Platform",
+            (),
+            {"selection_mouse_release_tracking_enabled": False},
+        )()
+
+        event = Event(EventType.MOUSE_RELEASE, KeyEventData(code=272, value=0), 0.0)
+        app._on_mouse_release(event)
+
+        app.selection.get_selection.assert_not_called()
+
+
 class TestStop:
     """stop() handles None components gracefully."""
 
