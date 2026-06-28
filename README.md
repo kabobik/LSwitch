@@ -105,11 +105,13 @@ journalctl --user-unit=lswitch -f      # следить за логами
 ### Запуск вручную (для отладки)
 
 ```bash
-lswitch           # запуск с GUI
-lswitch --headless  # без GUI (headless daemon)
-lswitch --debug   # с отладочными сообщениями
-lswitch --trace   # с трассировкой всех событий
-lswitch --replace # остановить предыдущий экземпляр и запустить новый
+lswitch                    # запуск с GUI
+lswitch --headless         # без GUI (headless daemon)
+lswitch --debug            # с отладочными сообщениями
+lswitch --trace            # с трассировкой всех событий
+lswitch --replace          # остановить предыдущий экземпляр и запустить новый
+lswitch --diagnose-wayland # диагностика KDE Wayland backend
+lswitch --diagnose-wayland-switch-test # диагностика + тест переключения раскладки
 ```
 
 > **Защита от двойного запуска:** LSwitch использует PID lock — если экземпляр уже работает, второй не запустится. Для замены используйте `--replace`.

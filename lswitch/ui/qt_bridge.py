@@ -31,6 +31,16 @@ def ensure_qt_application(argv: list[str] | None = None):
     return QApplication(argv if argv is not None else sys.argv)
 
 
+def ensure_qt_core_application(argv: list[str] | None = None):
+    """Return an existing QCoreApplication or create one in the current thread."""
+    from PyQt6.QtCore import QCoreApplication
+
+    app = QCoreApplication.instance()
+    if app is not None:
+        return app
+    return QCoreApplication(argv if argv is not None else sys.argv)
+
+
 class QtMainThreadInvoker:
     """Synchronous queued-call bridge into Qt's main thread."""
 
