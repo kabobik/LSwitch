@@ -341,7 +341,7 @@ class TestSelectionValidOnEvents:
         assert passive.active_calls == 0
         assert passive.passive_calls == 1
 
-    def test_mouse_click_with_passive_selection_only_primes_baseline(self):
+    def test_mouse_click_marks_press_time_passive_selection_fresh(self):
         app = _make_app()
         passive = _PassiveSelection(["word"])
         app.selection = passive
@@ -350,30 +350,10 @@ class TestSelectionValidOnEvents:
 
         app._on_mouse_click(_mouse_event())
 
-        assert app._selection_valid is False
+        assert app._selection_valid is True
         assert app._prev_sel_text == "word"
         assert passive.active_calls == 0
         assert passive.passive_calls == 1
-
-    def test_first_mouse_click_with_stale_passive_primary_does_not_use_selection(self):
-        app = _make_app()
-        passive = _PassiveSelection(["stale primary"])
-        app.selection = passive
-        app.conversion_engine.selection = passive
-        app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
-
-        app._on_mouse_click(_mouse_event())
-        app.state_manager.context.state = State.CONVERTING
-        app.state_manager.context.chars_in_buffer = 0
-        app.conversion_engine.convert = MagicMock(return_value=True)
-
-        app._do_conversion()
-
-        app.conversion_engine.convert.assert_called_once_with(
-            app.state_manager.context,
-            selection_valid=False,
-        )
-        assert app._selection_valid is False
 
     def test_mouse_click_same_passive_selection_stays_not_fresh(self):
         app = _make_app()
