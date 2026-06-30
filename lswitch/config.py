@@ -93,6 +93,15 @@ _CONFIG_SECTION_KEY_ORDER = {
 }
 
 _CONFIG_COMMENTS: dict[str, str] = {
+    'double_click_timeout': 'Maximum interval between two Shift presses, seconds.',
+    'debug': 'Enable verbose logging and Debug Monitor tray action.',
+    'switch_layout_after_convert': 'Switch keyboard layout after manual conversion.',
+    'layout_switch_key': 'Shortcut used by the system to switch keyboard layout.',
+    'auto_switch': 'Enable automatic wrong-layout detection and conversion.',
+    'auto_switch_threshold': 'Minimum detector confidence for automatic conversion.',
+    'user_dict_enabled': 'Enable the self-learning user dictionary.',
+    'user_dict_min_weight': 'Minimum user dictionary score required to affect detection.',
+    'wayland_selection_strategy': 'Wayland selection conversion mode.',
     'timing': 'Common input/conversion timings, seconds.',
     'timing.key_press_delay': 'Delay between virtual key press and release.',
     'timing.key_repeat_delay': 'Delay between successive virtual key taps.',
@@ -158,6 +167,9 @@ def _dump_config_toml(config: dict) -> str:
 
     for key in _CONFIG_KEY_ORDER:
         if key in config:
+            comment = _CONFIG_COMMENTS.get(key)
+            if comment:
+                lines.append(f"# {comment}")
             lines.append(f"{key} = {_toml_value(config[key])}")
 
     for section in _CONFIG_SECTION_ORDER:

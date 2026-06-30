@@ -246,6 +246,22 @@ class TestConfigManager:
         assert mgr2.get('debug') is True
         assert mgr2.get('double_click_timeout') == 0.7
 
+    def test_saved_config_documents_every_setting(self, tmp_path):
+        cfg_path = str(tmp_path / "cfg.toml")
+        mgr = ConfigManager(config_path=cfg_path)
+
+        assert mgr.save() is True
+
+        lines = (tmp_path / "cfg.toml").read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("["):
+                continue
+
+            assert "=" in stripped
+            assert index > 0
+            assert lines[index - 1].strip().startswith("#"), stripped
+
     def test_reload_restores_from_file(self, tmp_path):
         cfg_path = str(tmp_path / "cfg.toml")
         mgr = ConfigManager(config_path=cfg_path)

@@ -139,53 +139,78 @@ lswitch --diagnose-wayland-switch-test # диагностика + тест пе�
 
 ```toml
 # LSwitch configuration
-
-double_click_timeout = 0.3
-switch_layout_after_convert = true
-layout_switch_key = "Alt_L+Shift_L"
-debug = false
-
-auto_switch = false
-auto_switch_threshold = 40
-
-user_dict_enabled = true
-user_dict_min_weight = 2
-
+#
 # Wayland selection strategies:
 #   auto              - read PRIMARY selection first, fallback to clipboard copy/paste
 #   clipboard_copy    - always use clipboard copy/paste flow
 #   primary_selection - read PRIMARY and replace selection by direct UInput typing
 #   disabled          - disable Wayland selection conversion
+
+# Maximum interval between two Shift presses, seconds.
+double_click_timeout = 0.3
+# Enable verbose logging and Debug Monitor tray action.
+debug = false
+# Switch keyboard layout after manual conversion.
+switch_layout_after_convert = true
+# Shortcut used by the system to switch keyboard layout.
+layout_switch_key = "Alt_L+Shift_L"
+# Enable automatic wrong-layout detection and conversion.
+auto_switch = false
+# Minimum detector confidence for automatic conversion.
+auto_switch_threshold = 40
+# Enable the self-learning user dictionary.
+user_dict_enabled = true
+# Minimum user dictionary score required to affect detection.
+user_dict_min_weight = 2
+# Wayland selection conversion mode.
 wayland_selection_strategy = "auto"
 
 # Common input/conversion timings, seconds.
 [timing]
+# Delay between virtual key press and release.
 key_press_delay = 0.001
+# Delay between successive virtual key taps.
 key_repeat_delay = 0.001
+# After layout switch before replaying typed word.
 retype_before_replay_delay = 0.05
+# After layout switch before direct selection typing.
 direct_type_after_layout_switch_delay = 0.03
+# After layout switch before undo replay.
 undo_before_replay_delay = 0.03
+# After layout switch before auto-conversion replay.
 auto_before_replay_delay = 0.03
+# After auto-conversion replay before final Space handling.
 auto_before_space_delay = 0.01
 
 # X11-only selection timings, seconds.
 [x11_selection_timing]
+# PRIMARY selection polling interval.
 poll_interval = 0.5
+# After writing clipboard before Ctrl+V.
 paste_delay = 0.02
+# After Ctrl+V before restoring clipboard.
 restore_delay = 0.05
+# After Ctrl+Shift+Left before reading PRIMARY.
 expand_selection_delay = 0.05
 
 # Wayland-only system timings, seconds.
 [wayland_timing]
+# Timeout for wl-copy/wl-paste helper commands.
 wl_clipboard_timeout = 1.0
 
 # Wayland-only selection timings, seconds.
 [wayland_selection_timing]
+# Maximum wait for Ctrl+C to update clipboard.
 copy_wait_timeout = 1.0
+# Clipboard poll interval after copy shortcut.
 copy_poll_interval = 0.05
+# Delay before trying fallback copy shortcut.
 copy_retry_delay = 0.1
+# After writing clipboard before Ctrl+V.
 paste_delay = 0.12
+# After Ctrl+V before restoring clipboard.
 restore_delay = 0.15
+# After Ctrl+Shift+Left before reading selection.
 expand_selection_delay = 0.2
 ```
 
