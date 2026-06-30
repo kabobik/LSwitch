@@ -90,6 +90,50 @@ class TestWireEventBus:
         app._wire_event_bus()
         assert len(app.event_bus._handlers[EventType.MOUSE_CLICK]) > 0
 
+    def test_subscribes_config_changed(self):
+        app = _make_app()
+        app._wire_event_bus()
+        assert len(app.event_bus._handlers[EventType.CONFIG_CHANGED]) > 0
+
+
+class TestRuntimeConfig:
+    """Runtime config changes update already-created app components."""
+
+    def test_config_changed_enables_user_dictionary_without_restart(self):
+        app = _make_app()
+        app.user_dict = None
+        app.auto_detector = MagicMock()
+        app.conversion_engine = MagicMock()
+        fake_dict = MagicMock()
+        fake_dict.path = ":test:"
+
+        app._wire_event_bus()
+        app.config.set("user_dict_enabled", True)
+        app.config.set("user_dict_min_weight", 4)
+
+        with patch("lswitch.intelligence.user_dictionary.UserDictionary", return_value=fake_dict):
+            app.event_bus.publish(Event(EventType.CONFIG_CHANGED, {"user_dict_enabled": True}, 0.0))
+
+        assert app.user_dict is fake_dict
+        assert app.auto_detector.user_dict is fake_dict
+        assert app.auto_detector.user_dict_min_weight == 4
+        assert app.conversion_engine.user_dict is fake_dict
+
+    def test_config_changed_disables_user_dictionary_without_restart(self):
+        app = _make_app()
+        fake_dict = MagicMock()
+        app.user_dict = fake_dict
+        app.auto_detector = MagicMock()
+        app.conversion_engine = MagicMock()
+
+        app._wire_event_bus()
+        app.config.set("user_dict_enabled", False)
+        app.event_bus.publish(Event(EventType.CONFIG_CHANGED, {"user_dict_enabled": False}, 0.0))
+
+        assert app.user_dict is None
+        assert app.auto_detector.user_dict is None
+        assert app.conversion_engine.user_dict is None
+
 
 class TestDoConversion:
     """_do_conversion calls ConversionEngine.convert()."""

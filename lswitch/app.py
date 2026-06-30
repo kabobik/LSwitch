@@ -278,8 +278,7 @@ class LSwitchApp:
 
         # UserDictionary: self-learning word weights
         if self.config.get('user_dict_enabled'):
-            from lswitch.intelligence.user_dictionary import UserDictionary
-            self.user_dict = UserDictionary()
+            self._enable_user_dictionary()
 
         self.auto_detector = AutoDetector(
             dictionary=dictionary, 
@@ -298,6 +297,7 @@ class LSwitchApp:
             debug=self.debug,
             timing=self.timing,
         )
+        self._sync_learning_components()
 
         self.event_manager = EventManager(self.event_bus, debug=self.debug)
 
@@ -330,6 +330,60 @@ class LSwitchApp:
         self.event_bus.subscribe(EventType.KEY_REPEAT, self._on_key_repeat)
         self.event_bus.subscribe(EventType.MOUSE_CLICK, self._on_mouse_click)
         self.event_bus.subscribe(EventType.MOUSE_RELEASE, self._on_mouse_release)
+        self.event_bus.subscribe(EventType.CONFIG_CHANGED, self._on_config_changed)
+
+    def _enable_user_dictionary(self) -> None:
+        """Create the user dictionary object when runtime config enables it."""
+        if self.user_dict is not None:
+            return
+        from lswitch.intelligence.user_dictionary import UserDictionary
+
+        self.user_dict = UserDictionary()
+        logger.info("User dictionary enabled: %s", self.user_dict.path)
+
+    def _sync_learning_components(self) -> None:
+        """Propagate current UserDictionary settings into runtime components."""
+        min_weight = self.config.get('user_dict_min_weight', 2)
+        try:
+            min_weight = int(min_weight)
+        except (TypeError, ValueError):
+            min_weight = 2
+
+        if self.auto_detector is not None:
+            self.auto_detector.user_dict = self.user_dict
+            self.auto_detector.user_dict_min_weight = min_weight
+        if self.conversion_engine is not None:
+            self.conversion_engine.user_dict = self.user_dict
+
+    def _apply_runtime_config(self) -> None:
+        """Apply config values that affect already-created runtime objects."""
+        self.timing = self.config.get('timing', {})
+        self.x11_selection_timing = self.config.get('x11_selection_timing', {})
+        self.wayland_timing = self.config.get('wayland_timing', {})
+        self.wayland_selection_timing = self.config.get(
+            'wayland_selection_timing',
+            {},
+        )
+        self.state_manager.double_click_timeout = self.config.get(
+            'double_click_timeout',
+            self.state_manager.double_click_timeout,
+        )
+        if self.conversion_engine is not None:
+            self.conversion_engine.timing = self.timing
+
+        if self.config.get('user_dict_enabled'):
+            try:
+                self._enable_user_dictionary()
+            except Exception as exc:
+                logger.error("User dictionary initialization failed: %s", exc)
+                self.user_dict = None
+        elif self.user_dict is not None:
+            logger.info("User dictionary disabled")
+            self.user_dict = None
+        self._sync_learning_components()
+
+    def _on_config_changed(self, event) -> None:
+        self._apply_runtime_config()
 
     # ------------------------------------------------------------------
     # Event callbacks
@@ -692,6 +746,7 @@ class LSwitchApp:
         manual_word: str = ""
         manual_lang: str = ""
         is_selection_conversion = False
+        pending_manual_learning: tuple[str, str, bool] | None = None
         chars_in_buffer = self.state_manager.context.chars_in_buffer
         selection_valid_for_convert = (
             self._selection_valid
@@ -762,25 +817,11 @@ class LSwitchApp:
 
         # --- Case B: pure manual conversion → confirm this word needs switching ---
         elif manual_word and manual_lang and self.user_dict:
-            if is_selection_conversion:
-                from lswitch.core.text_converter import convert_text
-                target_lang = "ru" if manual_lang == "en" else "en"
-                converted_word = convert_text(manual_word, direction=f"{manual_lang}_to_{target_lang}")
-                self.user_dict.add_correction(
-                    converted_word, target_lang, debug=self.debug, weight_step=self.MANUAL_WEIGHT_STEP
-                )
-                logger.info(
-                    "Selection manual conversion: '%s' (%s) -> keeping result '%s' (%s) +%d",
-                    manual_word, manual_lang, converted_word, target_lang, self.MANUAL_WEIGHT_STEP
-                )
-            else:
-                self.user_dict.add_confirmation(
-                    manual_word, manual_lang, debug=self.debug, weight_step=self.MANUAL_WEIGHT_STEP
-                )
-                logger.info(
-                    "Manual conversion: '%s' (%s) — convert +%d",
-                    manual_word, manual_lang, self.MANUAL_WEIGHT_STEP,
-                )
+            pending_manual_learning = (
+                manual_word,
+                manual_lang,
+                is_selection_conversion,
+            )
 
         try:
             # Save buffer before convert (reset() will clear it)
@@ -846,6 +887,12 @@ class LSwitchApp:
                 selection_valid=selection_valid_for_convert,
             )
 
+            if success and self.user_dict:
+                if pending_manual_learning is not None:
+                    self._record_manual_conversion_learning(*pending_manual_learning)
+                elif saved_count == 0:
+                    self._record_last_selection_conversion_learning()
+
             # Remember events for potential repeat retype
             if success and saved_count == 0 and selection_valid_for_convert:
                 self._selection_repeat_valid = True
@@ -862,6 +909,85 @@ class LSwitchApp:
             self._update_selection_baseline()
             self._selection_valid = False  # consumed
             self.state_manager.on_conversion_complete()
+
+    def _record_manual_conversion_learning(
+        self,
+        manual_word: str,
+        manual_lang: str,
+        is_selection_conversion: bool,
+    ) -> None:
+        if self.user_dict is None:
+            return
+        if is_selection_conversion:
+            from lswitch.core.text_converter import convert_text
+
+            target_lang = "ru" if manual_lang == "en" else "en"
+            converted_word = convert_text(
+                manual_word,
+                direction=f"{manual_lang}_to_{target_lang}",
+            )
+            self.user_dict.add_correction(
+                converted_word,
+                target_lang,
+                debug=self.debug,
+                weight_step=self.MANUAL_WEIGHT_STEP,
+            )
+            logger.info(
+                "Selection manual conversion: '%s' (%s) -> keeping result '%s' (%s) +%d",
+                manual_word, manual_lang, converted_word, target_lang,
+                self.MANUAL_WEIGHT_STEP,
+            )
+        else:
+            self.user_dict.add_confirmation(
+                manual_word,
+                manual_lang,
+                debug=self.debug,
+                weight_step=self.MANUAL_WEIGHT_STEP,
+            )
+            logger.info(
+                "Manual conversion: '%s' (%s) — convert +%d",
+                manual_word, manual_lang, self.MANUAL_WEIGHT_STEP,
+            )
+
+    def _record_last_selection_conversion_learning(self) -> None:
+        if self.user_dict is None or self.conversion_engine is None:
+            return
+
+        conversion = getattr(self.conversion_engine, "last_conversion", None)
+        if not isinstance(conversion, dict):
+            return
+        if conversion.get("mode") not in {"selection", "selection_expand"}:
+            return
+
+        original = str(conversion.get("original") or "").strip()
+        converted = str(conversion.get("converted") or "").strip()
+        if not (
+            self._is_single_word_for_learning(original)
+            and self._is_single_word_for_learning(converted)
+        ):
+            return
+
+        target_lang = conversion.get("target_lang")
+        if target_lang not in {"en", "ru"}:
+            from lswitch.core.text_converter import detect_language
+
+            target_lang = "en" if detect_language(converted) == "en" else "ru"
+
+        self.user_dict.add_correction(
+            converted,
+            target_lang,
+            debug=self.debug,
+            weight_step=self.MANUAL_WEIGHT_STEP,
+        )
+        logger.info(
+            "Selection manual conversion: '%s' -> keeping result '%s' (%s) +%d",
+            original, converted, target_lang, self.MANUAL_WEIGHT_STEP,
+        )
+
+    @staticmethod
+    def _is_single_word_for_learning(text: str) -> bool:
+        stripped = text.strip()
+        return bool(stripped and not any(ch.isspace() for ch in stripped))
 
     # ------------------------------------------------------------------
     # Auto-conversion (space-triggered, AutoDetector)
@@ -1118,7 +1244,8 @@ class LSwitchApp:
         logger.info("LSwitch 2.0 запущен (headless=%s, %d устройств)", self.headless, count)
 
         def _reload_handler(signum, frame):
-            self.config.reload()
+            if self.config.reload():
+                self._apply_runtime_config()
             if self.debug:
                 logger.debug("Config reloaded via SIGHUP")
         signal.signal(signal.SIGHUP, _reload_handler)

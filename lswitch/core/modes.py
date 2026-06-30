@@ -138,6 +138,9 @@ class SelectionMode(BaseMode):
         self.system = system
         self.debug = debug
         self.expand = expand
+        self.last_original: str = ""
+        self.last_converted: str = ""
+        self.last_target_lang: str | None = None
         timing = timing or {}
         self.direct_type_after_layout_switch_delay = float(
             timing.get("direct_type_after_layout_switch_delay", 0.03)
@@ -145,6 +148,10 @@ class SelectionMode(BaseMode):
 
     def execute(self, context: "StateContext") -> bool:
         from lswitch.core.text_converter import invert_layout_runs
+
+        self.last_original = ""
+        self.last_converted = ""
+        self.last_target_lang = None
 
         if self.expand or context.backspace_hold_active:
             logger.debug(f"SelectionMode: expanding selection... (expand={self.expand}, backspace_hold={context.backspace_hold_active})")
@@ -202,6 +209,9 @@ class SelectionMode(BaseMode):
             target_langs,
             target_layout.name if target_layout else "next",
         )
+        self.last_original = sel.text
+        self.last_converted = converted
+        self.last_target_lang = final_target_lang
         return True
 
     @staticmethod

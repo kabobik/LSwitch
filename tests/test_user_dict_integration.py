@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from lswitch.app import LSwitchApp
+from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.states import State
 from lswitch.intelligence.auto_detector import AutoDetector
@@ -212,6 +213,33 @@ class TestDoubleShiftAfterAutoCallsCorrection:
         should, reason = detector.should_convert('ghbdtn', 'en')
 
         assert should is True
+
+
+class TestSelectionExpandLearning:
+    """Selection-expand conversion learns even when no fresh selection flag exists."""
+
+    def test_selection_expand_success_creates_keep_entry(self):
+        app = _make_app(auto_switch=True, user_dict_enabled=True)
+        ud = _make_user_dict_in_memory()
+        app.user_dict = ud
+        app.conversion_engine = ConversionEngine(
+            xkb=app.xkb,
+            selection=app.selection,
+            virtual_kb=app.virtual_kb,
+            dictionary=MagicMock(),
+            system=app.system,
+            user_dict=ud,
+            debug=True,
+        )
+        app.selection.set_selection("ghbdtn")
+        app._selection_valid = False
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager.context.chars_in_buffer = 0
+
+        app._do_conversion()
+
+        assert app.selection.get_selection().text == "привет"
+        assert ud.data["keep"]["ru"]["привет"] == 2
 
 
 class TestNegativeWeightBlocksConversion:

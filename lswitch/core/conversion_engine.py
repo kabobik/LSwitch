@@ -39,6 +39,7 @@ class ConversionEngine:
         self.user_dict = user_dict
         self.debug = debug
         self.timing = timing or {}
+        self.last_conversion: dict | None = None
 
     def choose_mode(self, context: "StateContext", selection_valid: bool = False) -> str:
         """Return 'selection', 'selection_expand', or 'retype' based on state.
@@ -76,6 +77,7 @@ class ConversionEngine:
 
         mode = self.choose_mode(context, selection_valid=selection_valid)
         logger.debug("Converting in mode: %s", mode)
+        self.last_conversion = None
         if mode == "retype":
             retype = RetypeMode(
                 self.virtual_kb,
@@ -94,7 +96,10 @@ class ConversionEngine:
                 expand=True,
                 timing=self.timing,
             )
-            return sel_mode.execute(context)
+            success = sel_mode.execute(context)
+            if success:
+                self._remember_selection_conversion(mode, sel_mode)
+            return success
         else:
             sel_mode = SelectionMode(
                 self.selection,
@@ -103,4 +108,15 @@ class ConversionEngine:
                 self.debug,
                 timing=self.timing,
             )
-            return sel_mode.execute(context)
+            success = sel_mode.execute(context)
+            if success:
+                self._remember_selection_conversion(mode, sel_mode)
+            return success
+
+    def _remember_selection_conversion(self, mode: str, sel_mode) -> None:
+        self.last_conversion = {
+            "mode": mode,
+            "original": getattr(sel_mode, "last_original", ""),
+            "converted": getattr(sel_mode, "last_converted", ""),
+            "target_lang": getattr(sel_mode, "last_target_lang", None),
+        }
