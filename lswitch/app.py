@@ -625,7 +625,13 @@ class LSwitchApp:
         return get_passive_selection_reader(self.selection)
 
     def _update_passive_selection_baseline_on_click(self) -> None:
-        """Prime baseline on platforms with safe passive selection reads."""
+        """Prime baseline on platforms with safe passive selection reads.
+
+        A click is not a completed selection gesture.  On Wayland PRIMARY may
+        already contain stale text from before LSwitch started, so the click
+        baseline must never mark the selection as fresh by itself.  Freshness
+        is decided on mouse release after comparing against this baseline.
+        """
         if self._platform is None:
             return
         if not getattr(
@@ -638,21 +644,9 @@ class LSwitchApp:
         if reader is None:
             return
         try:
-            old_text = self._prev_sel_text
-            old_owner = self._prev_sel_owner_id
             info = reader()
             self._prev_sel_text = info.text or ""
             self._prev_sel_owner_id = info.owner_id
-            if info.text and (
-                info.text != old_text
-                or (info.owner_id != old_owner and info.owner_id != 0)
-            ):
-                self._selection_valid = True
-                logger.debug(
-                    "MouseClick: fresh passive selection — text=%r owner=0x%x",
-                    info.text[:50] if info.text else "", info.owner_id,
-                )
-                return
             logger.trace(  # type: ignore[attr-defined]
                 "MouseClick: passive selection baseline — text=%r",
                 info.text[:50] if info.text else "",

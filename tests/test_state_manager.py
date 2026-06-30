@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
+import lswitch.log
 from lswitch.core.state_manager import StateManager
 from lswitch.core.states import State
 
@@ -71,3 +73,33 @@ def test_conversion_complete_returns_idle():
     sm.on_shift_up()
     sm.on_conversion_complete()
     assert sm.state == State.IDLE
+
+
+def test_regular_transition_logs_at_trace_not_debug(caplog):
+    sm = StateManager(debug=True)
+
+    with caplog.at_level(logging.DEBUG, logger="lswitch.core.state_manager"):
+        sm.on_key_press(30)
+
+    assert "key_press" not in caplog.text
+
+    caplog.clear()
+    sm = StateManager(debug=True)
+    with caplog.at_level(lswitch.log.TRACE, logger="lswitch.core.state_manager"):
+        sm.on_key_press(30)
+
+    assert "key_press" in caplog.text
+
+
+def test_double_shift_transition_stays_debug_visible(caplog):
+    sm = StateManager(double_click_timeout=0.3, debug=True)
+
+    with caplog.at_level(logging.DEBUG, logger="lswitch.core.state_manager"):
+        sm.on_shift_down()
+        sm.on_shift_up()
+        sm.on_shift_down()
+        sm.on_shift_up()
+
+    assert "shift_up_double" in caplog.text
+    assert "shift_down" not in caplog.text
+    assert "shift_up_single" not in caplog.text
