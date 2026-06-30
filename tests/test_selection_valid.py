@@ -143,6 +143,10 @@ class TestSelectionValidInitial:
         app = _make_app()
         assert app._selection_repeat_valid is False
 
+    def test_selection_baseline_not_initialized_initially(self):
+        app = _make_app()
+        assert app._selection_baseline_initialized is False
+
     def test_selection_generation_increments_on_fresh_transition(self):
         app = _make_app()
 
@@ -167,6 +171,7 @@ class TestMouseRelease:
         app = _make_app()
         app._prev_sel_text = ""
         app._prev_sel_owner_id = 0
+        app._selection_baseline_initialized = True
 
         app.selection.get_selection.return_value = SelectionInfo(
             text="hello", owner_id=42, timestamp=time.time(),
@@ -244,6 +249,7 @@ class TestMouseRelease:
         app = _make_app()
         app._prev_sel_text = ""
         app._prev_sel_owner_id = 0
+        app._selection_baseline_initialized = True
 
         # Click at start of drag → resets sel_valid
         app._on_mouse_click(_mouse_event())
@@ -263,6 +269,7 @@ class TestMouseRelease:
         app = _make_app()
         app._prev_sel_text = "hello"
         app._prev_sel_owner_id = 42
+        app._selection_baseline_initialized = True
 
         app.selection.get_selection.return_value = SelectionInfo(
             text="hello", owner_id=99, timestamp=time.time(),
@@ -347,6 +354,7 @@ class TestSelectionValidOnEvents:
         app.selection = passive
         app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
         app._prev_sel_text = ""
+        app._selection_baseline_initialized = True
 
         app._on_mouse_click(_mouse_event())
 
@@ -354,6 +362,37 @@ class TestSelectionValidOnEvents:
         assert app._prev_sel_text == "word"
         assert passive.active_calls == 0
         assert passive.passive_calls == 1
+
+    def test_first_mouse_click_with_stale_passive_primary_only_initializes_baseline(self):
+        app = _make_app()
+        passive = _PassiveSelection(["stale primary"])
+        app.selection = passive
+        app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
+
+        app._on_mouse_click(_mouse_event())
+
+        assert app._selection_valid is False
+        assert app._prev_sel_text == "stale primary"
+        assert app._selection_baseline_initialized is True
+        assert passive.active_calls == 0
+        assert passive.passive_calls == 1
+
+    def test_double_click_selection_after_initial_baseline_can_be_fresh(self):
+        app = _make_app()
+        passive = _PassiveSelection(["stale", "stale", "word"])
+        app.selection = passive
+        app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
+
+        app._on_mouse_click(_mouse_event())
+        app._on_mouse_release(_mouse_release_event())
+        assert app._selection_valid is False
+
+        app._on_mouse_click(_mouse_event())
+
+        assert app._selection_valid is True
+        assert app._prev_sel_text == "word"
+        assert passive.active_calls == 0
+        assert passive.passive_calls == 3
 
     def test_mouse_click_same_passive_selection_stays_not_fresh(self):
         app = _make_app()
@@ -437,6 +476,7 @@ class TestSelectionValidOnEvents:
     def test_drag_select_via_mouse_release(self):
         """Drag-select: click (resets) → release with new PRIMARY → fresh."""
         app = _make_app()
+        app._selection_baseline_initialized = True
 
         app._on_mouse_click(_mouse_event())
         assert app._selection_valid is False

@@ -236,6 +236,7 @@ class LSwitchApp:
         self._selection_repeat_generation: int = 0
         self._prev_sel_text: str = ""
         self._prev_sel_owner_id: int = 0
+        self._selection_baseline_initialized: bool = False
         self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
         self._platform = None
         self._selection_poller: _SelectionPollerThread | None = None
@@ -591,14 +592,22 @@ class LSwitchApp:
             info = reader() if reader is not None else self.selection.get_selection()
             old_text = self._prev_sel_text
             old_owner = self._prev_sel_owner_id
+            had_baseline = self._selection_baseline_initialized
             # Always update baseline on release
             self._prev_sel_text = info.text or ""
             self._prev_sel_owner_id = info.owner_id
+            self._selection_baseline_initialized = True
             if not info.text:
                 self._selection_valid = False
                 self._clear_selection_repeat()
                 logger.trace(  # type: ignore[attr-defined]
                     "MouseRelease: selection empty"
+                )
+                return
+            if not had_baseline:
+                logger.trace(  # type: ignore[attr-defined]
+                    "MouseRelease: initial selection baseline — text=%r",
+                    info.text[:50] if info.text else "",
                 )
                 return
             # If selection changed → fresh selection (drag-select happened)
@@ -641,8 +650,16 @@ class LSwitchApp:
             old_text = self._prev_sel_text
             old_owner = self._prev_sel_owner_id
             info = reader()
+            had_baseline = self._selection_baseline_initialized
             self._prev_sel_text = info.text or ""
             self._prev_sel_owner_id = info.owner_id
+            self._selection_baseline_initialized = True
+            if not had_baseline:
+                logger.trace(  # type: ignore[attr-defined]
+                    "MouseClick: initial passive selection baseline — text=%r",
+                    info.text[:50] if info.text else "",
+                )
+                return
             if info.text and (
                 info.text != old_text
                 or (info.owner_id != old_owner and info.owner_id != 0)
@@ -716,6 +733,7 @@ class LSwitchApp:
             info = reader() if reader is not None else self.selection.get_selection()
             self._prev_sel_text = info.text or ""
             self._prev_sel_owner_id = info.owner_id
+            self._selection_baseline_initialized = True
         except Exception:
             pass
 
