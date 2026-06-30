@@ -139,8 +139,26 @@ class UserDictionary:
 
     def _increment(self, action: str, word: str, lang: str, weight_step: int) -> int:
         weight_step = max(1, int(weight_step))
-        table = self._table(action, self._lang(lang))
         word_key = self._word(word)
+        lang_key = self._lang(lang)
+        opposite = "keep" if action == "convert" else "convert"
+        self.data = self._normalize_data(getattr(self, "data", None))
+        table = self.data[action].setdefault(lang_key, {})
+        opposite_table = self.data[opposite].setdefault(lang_key, {})
+
+        opposite_weight = int(opposite_table.get(word_key, 0))
+        if opposite_weight > 0:
+            if opposite_weight > weight_step:
+                opposite_table[word_key] = opposite_weight - weight_step
+                table.pop(word_key, None)
+                return int(table.get(word_key, 0))
+            if opposite_weight == weight_step:
+                opposite_table.pop(word_key, None)
+                table.pop(word_key, None)
+                return 0
+            opposite_table.pop(word_key, None)
+            weight_step -= opposite_weight
+
         table[word_key] = int(table.get(word_key, 0)) + weight_step
         return table[word_key]
 
@@ -176,6 +194,7 @@ class UserDictionary:
             raise
 
     def _dump_toml(self) -> str:
+        self.data = self._normalize_data(getattr(self, "data", None))
         lines = [
             "# LSwitch user dictionary",
             "# Values are confidence counters.",
@@ -185,7 +204,7 @@ class UserDictionary:
 
         for action in _ACTIONS:
             for lang in _LANGS:
-                words = self._table(action, lang)
+                words = self.data[action][lang]
                 if not words:
                     continue
                 lines.append(f"[{action}.{lang}]")
@@ -225,7 +244,23 @@ class UserDictionary:
                     if weight_int > 0:
                         table[cls._word(word)] = weight_int
 
-        return normalized
+        return cls._collapse_counterweights(normalized)
+
+    @classmethod
+    def _collapse_counterweights(cls, data: dict) -> dict:
+        langs = set(data["convert"]) | set(data["keep"])
+        for lang in langs:
+            convert = data["convert"].setdefault(lang, {})
+            keep = data["keep"].setdefault(lang, {})
+            for word in set(convert) & set(keep):
+                diff = int(convert.get(word, 0)) - int(keep.get(word, 0))
+                convert.pop(word, None)
+                keep.pop(word, None)
+                if diff > 0:
+                    convert[word] = diff
+                elif diff < 0:
+                    keep[word] = -diff
+        return data
 
     @staticmethod
     def _word(word: str) -> str:
