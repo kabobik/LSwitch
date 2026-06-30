@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable
 
+from lswitch.intelligence.maps import EN_TO_RU
 from lswitch.platform.system_adapter import ISystemAdapter
 
 
@@ -41,6 +42,24 @@ def get_passive_selection_reader(selection) -> Callable[[], SelectionInfo] | Non
     return reader if callable(reader) else None
 
 
+LAYOUT_WORD_CONTINUATION_CHARS = frozenset(
+    ch for ch, mapped in EN_TO_RU.items()
+    if not ch.isalpha() and mapped.isalpha()
+)
+
+
+def _leading_added_text(previous: str, current: str) -> str:
+    if not previous or not current or current == previous:
+        return ""
+    if current.endswith(previous):
+        return current[: -len(previous)]
+    return ""
+
+
+def _is_layout_word_char(ch: str) -> bool:
+    return bool(ch and (ch.isalpha() or ch in LAYOUT_WORD_CONTINUATION_CHARS))
+
+
 # ---------------------------------------------------------------------------
 # X11SelectionAdapter — concrete implementation
 # ---------------------------------------------------------------------------
@@ -68,6 +87,7 @@ class X11SelectionAdapter(ISelectionAdapter):
     PASTE_DELAY = 0.02
     RESTORE_DELAY = 0.05
     EXPAND_SELECTION_DELAY = 0.05
+    MAX_LAYOUT_WORD_PROBE_CHARS = 64
 
     def __init__(
         self,
@@ -151,4 +171,46 @@ class X11SelectionAdapter(ISelectionAdapter):
             time.sleep(self.EXPAND_SELECTION_DELAY)
         except Exception:
             pass
-        return self.get_selection()
+        return self._expand_through_layout_word_boundaries(self.get_selection())
+
+    def _expand_through_layout_word_boundaries(
+        self,
+        initial: SelectionInfo,
+    ) -> SelectionInfo:
+        if not initial.text:
+            return initial
+
+        previous = initial
+        probing = False
+        for _ in range(self.MAX_LAYOUT_WORD_PROBE_CHARS):
+            try:
+                self._system.send_key_sequence("shift+Left")
+                time.sleep(self.EXPAND_SELECTION_DELAY)
+                current = self.get_selection()
+            except Exception:
+                return previous
+
+            added = _leading_added_text(previous.text, current.text)
+            if not added:
+                return previous
+
+            added_char = added[-1]
+            if not probing:
+                if added_char not in LAYOUT_WORD_CONTINUATION_CHARS:
+                    self._shrink_selection_right()
+                    return initial
+                probing = True
+            elif not _is_layout_word_char(added_char):
+                self._shrink_selection_right()
+                return previous
+
+            previous = current
+
+        return previous
+
+    def _shrink_selection_right(self) -> None:
+        try:
+            self._system.send_key_sequence("shift+Right")
+            time.sleep(self.EXPAND_SELECTION_DELAY)
+        except Exception:
+            pass

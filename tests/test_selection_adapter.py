@@ -7,6 +7,7 @@ import pytest
 
 from lswitch.platform.selection_adapter import (
     ISelectionAdapter,
+    LAYOUT_WORD_CONTINUATION_CHARS,
     SelectionInfo,
     X11SelectionAdapter,
 )
@@ -70,6 +71,13 @@ class TestMockSelectionAdapter:
         assert info.text == "partial"
 
 
+def test_layout_word_continuation_chars_cover_cyrillic_punctuation_keys():
+    assert LAYOUT_WORD_CONTINUATION_CHARS == frozenset({
+        "[", "]", ";", "'", ",", ".", "`",
+        "{", "}", ":", '"', "<", ">", "~",
+    })
+
+
 # ---------------------------------------------------------------------------
 # X11SelectionAdapter unit tests (with mock system adapter)
 # ---------------------------------------------------------------------------
@@ -89,6 +97,22 @@ class _RecordingSystemAdapter(MockSystemAdapter):
 
     def send_key_sequence(self, sequence: str, timeout: float = 0.3) -> None:
         self.keys_sent.append(sequence)
+
+
+class _ExpandableSystemAdapter(_RecordingSystemAdapter):
+    def __init__(self, sequence_text: dict[tuple[str, int], str], primary: str = "tim"):
+        super().__init__()
+        self._clipboard["primary"] = primary
+        self.sequence_text = sequence_text
+        self.sequence_counts: dict[str, int] = {}
+
+    def send_key_sequence(self, sequence: str, timeout: float = 0.3) -> None:
+        super().send_key_sequence(sequence, timeout=timeout)
+        count = self.sequence_counts.get(sequence, 0) + 1
+        self.sequence_counts[sequence] = count
+        text = self.sequence_text.get((sequence, count))
+        if text is not None:
+            self._clipboard["primary"] = text
 
 
 class TestX11SelectionAdapterUnit:
@@ -168,6 +192,50 @@ class TestX11SelectionAdapterUnit:
         info = adapter.expand_selection_to_word()
         assert isinstance(info, SelectionInfo)
         assert "ctrl+shift+Left" in sys.keys_sent
+
+    def test_expand_selection_to_word_through_layout_punctuation(self):
+        sys = _ExpandableSystemAdapter(
+            primary="tim",
+            sequence_text={
+                ("ctrl+shift+Left", 1): "tim",
+                ("shift+Left", 1): ";tim",
+                ("shift+Left", 2): "j;tim",
+                ("shift+Left", 3): "vj;tim",
+                ("shift+Left", 4): "cvj;tim",
+                ("shift+Left", 5): " cvj;tim",
+                ("shift+Right", 1): "cvj;tim",
+            },
+        )
+        adapter = self._make_adapter(sys)
+
+        info = adapter.expand_selection_to_word()
+
+        assert info.text == "cvj;tim"
+        assert sys.keys_sent == [
+            "ctrl+shift+Left",
+            "shift+Left",
+            "shift+Left",
+            "shift+Left",
+            "shift+Left",
+            "shift+Left",
+            "shift+Right",
+        ]
+
+    def test_expand_selection_to_word_does_not_cross_space(self):
+        sys = _ExpandableSystemAdapter(
+            primary="tim",
+            sequence_text={
+                ("ctrl+shift+Left", 1): "tim",
+                ("shift+Left", 1): " tim",
+                ("shift+Right", 1): "tim",
+            },
+        )
+        adapter = self._make_adapter(sys)
+
+        info = adapter.expand_selection_to_word()
+
+        assert info.text == "tim"
+        assert sys.keys_sent == ["ctrl+shift+Left", "shift+Left", "shift+Right"]
 
     def test_applies_timing_config(self):
         adapter = X11SelectionAdapter(

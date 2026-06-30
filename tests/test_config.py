@@ -280,3 +280,16 @@ class TestConfigManager:
         path = str(tmp_path / "cfg.toml")
         mgr = ConfigManager(config_path=path)
         assert mgr.config_path == path
+
+    def test_legacy_config_json_path_is_normalized_to_toml(self, tmp_path):
+        legacy_path = tmp_path / "config.json"
+        mgr = ConfigManager(config_path=str(legacy_path))
+        mgr.set("auto_switch", True)
+
+        assert mgr.config_path == str(tmp_path / "config.toml")
+        assert mgr.save() is True
+        assert not legacy_path.exists()
+        assert (tmp_path / "config.toml").exists()
+
+        loaded = load_config(config_path=str(legacy_path))
+        assert loaded["auto_switch"] is True

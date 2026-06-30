@@ -404,6 +404,7 @@ install() {
 
     # 2. Копирование приложения
     info "Копирование файлов в $INSTALL_DIR..."
+    info "Источник установки: $PROJECT_DIR"
     mkdir -p "$INSTALL_DIR"
     # Копируем пакет и метаданные
     rm -rf "$INSTALL_DIR/lswitch" "$INSTALL_DIR/__version__.py" "$INSTALL_DIR/setup.py"
@@ -411,22 +412,26 @@ install() {
     cp    "$PROJECT_DIR/__version__.py" "$INSTALL_DIR/__version__.py"
     # Удаляем __pycache__ из копии
     find "$INSTALL_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
+    if ! grep -q "config.toml" "$INSTALL_DIR/lswitch/config.py"; then
+        error "Установленная копия не содержит TOML config loader: $INSTALL_DIR/lswitch/config.py"
+        error "Проверьте, что install.sh запущен из актуальной папки проекта: $PROJECT_DIR"
+        exit 1
+    fi
     ok "Файлы скопированы"
 
     # 3. Entry point
     info "Создание команды $APP_NAME..."
     mkdir -p "$BIN_DIR"
-    cat > "$BIN_DIR/$APP_NAME" << 'ENTRY'
+    install_dir_py="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$INSTALL_DIR")"
+    cat > "$BIN_DIR/$APP_NAME" << ENTRY
 #!/usr/bin/env python3
 import sys
-import os
 
-# Добавляем директорию установки в путь
-data_home = os.environ.get(
-    "XDG_DATA_HOME",
-    os.path.join(os.path.expanduser("~"), ".local", "share"),
-)
-install_dir = os.path.join(data_home, "lswitch")
+# Добавляем директорию установки в путь.
+# Путь фиксируется на момент install, чтобы runtime XDG_DATA_HOME не уводил
+# импорт в старую копию пакета.
+install_dir = $install_dir_py
 if install_dir not in sys.path:
     sys.path.insert(0, install_dir)
 

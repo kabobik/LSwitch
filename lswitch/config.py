@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 CONFIG_DIR = os.path.expanduser("~/.config/lswitch")
 DEFAULT_CONFIG_PATH = os.path.join(CONFIG_DIR, "config.toml")
+LEGACY_CONFIG_FILENAME = "config.json"
 WAYLAND_SELECTION_STRATEGIES = {
     "auto",
     "clipboard_copy",
@@ -212,6 +213,17 @@ def _save_toml(path: str, config: dict) -> None:
         raise
 
 
+def _normalize_config_path(config_path: str | None = None) -> str:
+    """Return the TOML config path; never write legacy ``config.json``."""
+    if not config_path:
+        return DEFAULT_CONFIG_PATH
+
+    if os.path.basename(config_path) == LEGACY_CONFIG_FILENAME:
+        return os.path.join(os.path.dirname(config_path), "config.toml")
+
+    return config_path
+
+
 # ------------------------------------------------------------------
 # Validation
 # ------------------------------------------------------------------
@@ -388,7 +400,7 @@ def load_config(config_path: str | None = None, debug: bool = False) -> dict:
     ``~/.config/lswitch/config.toml``.
     """
     default_config = copy.deepcopy(DEFAULT_CONFIG)
-    path = config_path or DEFAULT_CONFIG_PATH
+    path = _normalize_config_path(config_path)
     if os.path.exists(path):
         _read_and_merge(path, default_config, debug=debug)
     return default_config
@@ -402,7 +414,7 @@ class ConfigManager:
     """Centralized configuration management with load/save/validate."""
 
     def __init__(self, config_path: str | None = None, debug: bool = False):
-        self._config_path = config_path or DEFAULT_CONFIG_PATH
+        self._config_path = _normalize_config_path(config_path)
         self._debug = debug
         self._config: dict = copy.deepcopy(DEFAULT_CONFIG)
         self._load_config()
