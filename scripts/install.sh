@@ -165,7 +165,7 @@ check_deps() {
     local missing=()
     local needs_install=false
 
-    # Python 3.10+
+    # Python 3.11+
     if ! command -v python3 &>/dev/null; then
         error "Python3 не найден"
         exit 1
@@ -175,8 +175,8 @@ check_deps() {
     local py_major py_minor
     py_major=$(echo "$py_ver" | cut -d. -f1)
     py_minor=$(echo "$py_ver" | cut -d. -f2)
-    if [ "$py_major" -lt 3 ] || { [ "$py_major" -eq 3 ] && [ "$py_minor" -lt 10 ]; }; then
-        error "Требуется Python 3.10+, найден $py_ver"
+    if [ "$py_major" -lt 3 ] || { [ "$py_major" -eq 3 ] && [ "$py_minor" -lt 11 ]; }; then
+        error "Требуется Python 3.11+, найден $py_ver"
         exit 1
     fi
     ok "Python $py_ver"

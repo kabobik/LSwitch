@@ -89,6 +89,29 @@ class VirtualKeyboard:
         "z": 44,
     }
 
+    _SHIFTED_EN_TO_BASE: dict[str, str] = {
+        "!": "1",
+        "@": "2",
+        "#": "3",
+        "$": "4",
+        "%": "5",
+        "^": "6",
+        "&": "7",
+        "*": "8",
+        "(": "9",
+        ")": "0",
+        "_": "-",
+        "+": "=",
+        "{": "[",
+        "}": "]",
+        ":": ";",
+        '"': "'",
+        "<": ",",
+        ">": ".",
+        "?": "/",
+        "~": "`",
+    }
+
     def tap_key(self, keycode: int, n_times: int = 1) -> None:
         """Press and release a keycode n times."""
         logger.debug("VirtualKeyboard: tap_key code=%s n_times=%s", keycode, n_times)
@@ -122,6 +145,74 @@ class VirtualKeyboard:
         for code in reversed(keycodes):
             self._write(code, 0)
             time.sleep(self.KEY_PRESS_DELAY)
+
+    def type_text(self, text: str, layout_name: str = "en") -> bool:
+        """Type text through the currently active keyboard layout.
+
+        ``layout_name`` describes the layout that is active in the compositor,
+        not the source language. For ``ru`` text we convert each desired
+        character back to the physical US key that produces it on a Russian
+        layout, then send that key via UInput.
+        """
+        if self._uinput is None:
+            logger.debug("VirtualKeyboard: type_text skipped, UInput is unavailable")
+            return False
+        logger.debug(
+            "VirtualKeyboard: type_text chars=%d layout=%s",
+            len(text),
+            layout_name,
+        )
+        for ch in text:
+            key = self._text_char_to_key(ch, layout_name=layout_name)
+            if key is None:
+                logger.debug("VirtualKeyboard: unsupported text char %r", ch)
+                return False
+            code, shifted = key
+            if shifted:
+                self._write(self.KEY_LEFTSHIFT, 1)
+                time.sleep(self.KEY_PRESS_DELAY)
+            self._write(code, 1)
+            time.sleep(self.KEY_PRESS_DELAY)
+            self._write(code, 0)
+            if shifted:
+                self._write(self.KEY_LEFTSHIFT, 0)
+            time.sleep(self.KEY_REPEAT_DELAY)
+        return True
+
+    @classmethod
+    def _text_char_to_key(
+        cls,
+        ch: str,
+        layout_name: str = "en",
+    ) -> tuple[int, bool] | None:
+        from lswitch.input.key_mapper import KEYCODE_TO_CHAR_EN
+
+        if ch == "\n":
+            return cls._KEY_NAME_MAP["enter"], False
+        if ch == "\t":
+            return cls._KEY_NAME_MAP["tab"], False
+
+        physical = ch
+        normalized_layout = (layout_name or "en").strip().lower()
+        if normalized_layout.startswith("ru"):
+            from lswitch.intelligence.maps import RU_TO_EN
+
+            physical = RU_TO_EN.get(ch, ch)
+
+        base_to_code = {value: code for code, value in KEYCODE_TO_CHAR_EN.items()}
+        if physical in base_to_code:
+            return base_to_code[physical], False
+
+        if len(physical) == 1 and physical.isalpha():
+            lowered = physical.lower()
+            if lowered in base_to_code:
+                return base_to_code[lowered], physical.isupper()
+
+        base = cls._SHIFTED_EN_TO_BASE.get(physical)
+        if base and base in base_to_code:
+            return base_to_code[base], True
+
+        return None
 
     # evdev keycode for Left Shift — used to replay shifted keys.
     KEY_LEFTSHIFT = 42

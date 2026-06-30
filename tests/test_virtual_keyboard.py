@@ -260,6 +260,53 @@ class TestSendCombo:
                 vk.send_combo("ctrl+definitely_unknown")
 
 
+class TestTypeText:
+    def test_type_text_english_layout(self):
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            assert vk.type_text("Hi!", layout_name="en") is True
+
+            writes = [(c.args[1], c.args[2]) for c in mock_uinput.write.call_args_list]
+            assert writes == [
+                (42, 1),
+                (35, 1),
+                (35, 0),
+                (42, 0),
+                (23, 1),
+                (23, 0),
+                (42, 1),
+                (2, 1),
+                (2, 0),
+                (42, 0),
+            ]
+
+    def test_type_text_russian_layout_uses_physical_us_keys(self):
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            assert vk.type_text("привет", layout_name="ru") is True
+
+            writes = [(c.args[1], c.args[2]) for c in mock_uinput.write.call_args_list]
+            assert writes == [
+                (34, 1), (34, 0),  # g -> п
+                (35, 1), (35, 0),  # h -> р
+                (48, 1), (48, 0),  # b -> и
+                (32, 1), (32, 0),  # d -> в
+                (20, 1), (20, 0),  # t -> е
+                (49, 1), (49, 0),  # n -> т
+            ]
+
+    def test_type_text_reports_unsupported_character(self):
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard()
+
+            assert vk.type_text("🙂", layout_name="en") is False
+
+
 class TestWriteWithNoUInput:
     def test_write_does_not_crash_when_uinput_is_none(self):
         """If UInput creation failed, _write should silently return."""
@@ -270,6 +317,7 @@ class TestWriteWithNoUInput:
         # Should not raise
         vk.tap_key(30)
         vk.replay_events([MagicMock(code=30, value=1)])
+        assert vk.type_text("test") is False
 
 
 class TestClose:

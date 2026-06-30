@@ -16,10 +16,14 @@
 
 ## 1. Что сейчас отправляет `Ctrl+C`
 
-На Wayland `Ctrl+C` отправляется только через `WaylandSelectionAdapter`.
-Технически это вызов `selection.get_selection()`: адаптер сохраняет текущий
-clipboard, отправляет `ctrl+c`, ждет изменения clipboard и возвращает
-скопированный текст.
+На Wayland `Ctrl+C` отправляется только через `WaylandSelectionAdapter`,
+когда активна стратегия `clipboard_copy` или когда стратегия `auto` не смогла
+прочитать PRIMARY selection пассивно. В стратегии `primary_selection`
+selection-конвертация не должна отправлять ни `ctrl+c`, ни `ctrl+v`: чтение
+идет через PRIMARY, а замена - прямым набором через uinput.
+
+В clipboard-flow `selection.get_selection()` сохраняет текущий clipboard,
+отправляет `ctrl+c`, ждет изменения clipboard и возвращает скопированный текст.
 
 Текущие входы в `selection.get_selection()`:
 

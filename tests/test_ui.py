@@ -286,7 +286,7 @@ def event_bus_ui():
 
 @pytest.fixture
 def config_mgr(tmp_path):
-    path = str(tmp_path / "lswitch_test.json")
+    path = str(tmp_path / "lswitch_test.toml")
     return ConfigManager(config_path=path)
 
 

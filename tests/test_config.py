@@ -1,15 +1,14 @@
-"""Tests for lswitch.config — configuration loading, validation, ConfigManager."""
+"""Tests for lswitch.config — TOML loading, validation, ConfigManager."""
 
 from __future__ import annotations
-
-import json
 
 import pytest
 
 from lswitch.config import (
     DEFAULT_CONFIG,
+    DEFAULT_CONFIG_PATH,
+    WAYLAND_SELECTION_STRATEGIES,
     ConfigManager,
-    _sanitize_json_text,
     load_config,
     validate_config,
 )
@@ -86,6 +85,14 @@ class TestValidateConfig:
         with pytest.raises(ValueError, match="wayland_selection_strategy"):
             validate_config({'wayland_selection_strategy': 'magic'})
 
+    def test_wayland_selection_strategy_values_are_documented_set(self):
+        assert WAYLAND_SELECTION_STRATEGIES == {
+            "auto",
+            "clipboard_copy",
+            "primary_selection",
+            "disabled",
+        }
+
     def test_none_returns_defaults(self):
         result = validate_config(None)
         assert result == DEFAULT_CONFIG
@@ -96,71 +103,47 @@ class TestValidateConfig:
 
 
 # ------------------------------------------------------------------
-# _sanitize_json_text
-# ------------------------------------------------------------------
-
-class TestSanitizeJsonText:
-    """_sanitize_json_text strips comments and trailing commas."""
-
-    def test_removes_hash_comments(self):
-        text = '{\n  # this is a comment\n  "a": 1\n}'
-        result = _sanitize_json_text(text)
-        assert "#" not in result
-        data = json.loads(result)
-        assert data == {"a": 1}
-
-    def test_removes_slash_comments(self):
-        text = '{\n  "a": 1 // inline comment\n}'
-        result = _sanitize_json_text(text)
-        assert "//" not in result
-        data = json.loads(result)
-        assert data == {"a": 1}
-
-    def test_removes_trailing_commas(self):
-        text = '{\n  "a": 1,\n  "b": 2,\n}'
-        result = _sanitize_json_text(text)
-        data = json.loads(result)
-        assert data == {"a": 1, "b": 2}
-
-    def test_combined(self):
-        text = '{\n  # comment\n  "x": true, // note\n}'
-        result = _sanitize_json_text(text)
-        data = json.loads(result)
-        assert data == {"x": True}
-
-
-# ------------------------------------------------------------------
 # load_config
 # ------------------------------------------------------------------
 
 class TestLoadConfig:
-    """load_config reads JSON files and merges with defaults."""
+    """load_config reads TOML files and merges with defaults."""
 
     def test_nonexistent_file_returns_defaults(self, tmp_path):
-        result = load_config(config_path=str(tmp_path / "nope.json"))
+        result = load_config(config_path=str(tmp_path / "nope.toml"))
         assert result == DEFAULT_CONFIG
 
-    def test_loads_real_json_file(self, tmp_path):
-        cfg_file = tmp_path / "config.json"
-        cfg_file.write_text(json.dumps({"debug": True, "double_click_timeout": 0.5}))
+    def test_loads_real_toml_file(self, tmp_path):
+        cfg_file = tmp_path / "config.toml"
+        cfg_file.write_text(
+            """
+            # TOML comments are supported
+            debug = true
+            double_click_timeout = 0.5
+            wayland_selection_strategy = "primary_selection"
+            """,
+            encoding="utf-8",
+        )
         result = load_config(config_path=str(cfg_file))
         assert result['debug'] is True
         assert result['double_click_timeout'] == 0.5
+        assert result['wayland_selection_strategy'] == 'primary_selection'
         # Other keys remain default
         assert result['auto_switch'] is False
 
-    def test_loads_config_with_comments(self, tmp_path):
-        cfg_file = tmp_path / "config.json"
-        cfg_file.write_text('{\n  # a comment\n  "debug": true,\n}')
-        result = load_config(config_path=str(cfg_file))
-        assert result['debug'] is True
+    def test_invalid_toml_returns_defaults(self, tmp_path):
+        cfg_file = tmp_path / "config.toml"
+        cfg_file.write_text("debug = true\nbroken = [", encoding="utf-8")
 
-    def test_no_path_returns_defaults(self):
-        # When config_path is None and ~/.config/lswitch/config.json
-        # doesn't exist (or does — still returns dict with all keys)
+        result = load_config(config_path=str(cfg_file), debug=True)
+
+        assert result == DEFAULT_CONFIG
+
+    def test_no_path_uses_toml_default(self):
         result = load_config(config_path=None)
         for key in DEFAULT_CONFIG:
             assert key in result
+        assert DEFAULT_CONFIG_PATH.endswith("config.toml")
 
 
 # ------------------------------------------------------------------
@@ -171,37 +154,42 @@ class TestConfigManager:
     """ConfigManager get/set/update/get_all/save/reload/reset."""
 
     def test_get_returns_default(self, tmp_path):
-        mgr = ConfigManager(config_path=str(tmp_path / "cfg.json"))
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
         assert mgr.get('double_click_timeout') == 0.3
 
     def test_get_missing_key_returns_default(self, tmp_path):
-        mgr = ConfigManager(config_path=str(tmp_path / "cfg.json"))
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
         assert mgr.get('nonexistent', 42) == 42
 
     def test_set_changes_value(self, tmp_path):
-        mgr = ConfigManager(config_path=str(tmp_path / "cfg.json"))
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
         mgr.set('debug', True)
         assert mgr.get('debug') is True
 
     def test_update_multiple(self, tmp_path):
-        mgr = ConfigManager(config_path=str(tmp_path / "cfg.json"))
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
         mgr.update({'debug': True, 'auto_switch': True})
         assert mgr.get('debug') is True
         assert mgr.get('auto_switch') is True
 
     def test_get_all_excludes_internal(self, tmp_path):
-        mgr = ConfigManager(config_path=str(tmp_path / "cfg.json"))
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
         mgr._config['_internal'] = 'secret'
         all_cfg = mgr.get_all()
         assert '_internal' not in all_cfg
         assert 'debug' in all_cfg
 
     def test_save_and_reload_roundtrip(self, tmp_path):
-        cfg_path = str(tmp_path / "cfg.json")
+        cfg_path = str(tmp_path / "cfg.toml")
         mgr = ConfigManager(config_path=cfg_path)
         mgr.set('debug', True)
         mgr.set('double_click_timeout', 0.7)
         assert mgr.save() is True
+
+        saved = (tmp_path / "cfg.toml").read_text(encoding="utf-8")
+        assert "# Wayland selection strategies:" in saved
+        assert 'debug = true' in saved
+        assert 'double_click_timeout = 0.7' in saved
 
         # Reload
         mgr2 = ConfigManager(config_path=cfg_path)
@@ -209,7 +197,7 @@ class TestConfigManager:
         assert mgr2.get('double_click_timeout') == 0.7
 
     def test_reload_restores_from_file(self, tmp_path):
-        cfg_path = str(tmp_path / "cfg.json")
+        cfg_path = str(tmp_path / "cfg.toml")
         mgr = ConfigManager(config_path=cfg_path)
         mgr.set('debug', True)
         mgr.save()
@@ -221,7 +209,7 @@ class TestConfigManager:
         assert mgr.get('debug') is True
 
     def test_reset_to_defaults(self, tmp_path):
-        mgr = ConfigManager(config_path=str(tmp_path / "cfg.json"))
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
         mgr.set('debug', True)
         mgr.set('auto_switch', True)
         mgr.reset_to_defaults()
@@ -230,15 +218,15 @@ class TestConfigManager:
         assert mgr.get_all() == DEFAULT_CONFIG
 
     def test_validate_with_valid_config(self, tmp_path):
-        mgr = ConfigManager(config_path=str(tmp_path / "cfg.json"))
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
         assert mgr.validate() is True
 
     def test_validate_with_invalid_config(self, tmp_path):
-        mgr = ConfigManager(config_path=str(tmp_path / "cfg.json"))
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
         mgr.set('double_click_timeout', 'bad')
         assert mgr.validate() is False
 
     def test_config_path_property(self, tmp_path):
-        path = str(tmp_path / "cfg.json")
+        path = str(tmp_path / "cfg.toml")
         mgr = ConfigManager(config_path=path)
         assert mgr.config_path == path

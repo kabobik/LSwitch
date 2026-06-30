@@ -1,11 +1,7 @@
-"""Configuration loader and validator for LSwitch 2.0.
+"""TOML configuration loader and validator for LSwitch 2.0.
 
-Provides ``load_config(path)`` which reads a JSON config (with
-comment and trailing-comma tolerant sanitizer) and merges user
-overrides from ``~/.config/lswitch/config.json``.
-
-Also provides ``validate_config(conf)`` which normalizes and
-validates config keys, raising ``ValueError`` on invalid values.
+The user config lives at ``~/.config/lswitch/config.toml``.  JSON config
+compatibility is intentionally not supported.
 """
 
 from __future__ import annotations
@@ -13,10 +9,23 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 
-from lswitch.intelligence.persistence import save_json
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - guarded by python_requires
+    tomllib = None
 
 logger = logging.getLogger(__name__)
+
+CONFIG_DIR = os.path.expanduser("~/.config/lswitch")
+DEFAULT_CONFIG_PATH = os.path.join(CONFIG_DIR, "config.toml")
+WAYLAND_SELECTION_STRATEGIES = {
+    "auto",
+    "clipboard_copy",
+    "primary_selection",
+    "disabled",
+}
 
 # Single source of truth for default configuration
 DEFAULT_CONFIG: dict = {
@@ -31,22 +40,84 @@ DEFAULT_CONFIG: dict = {
     'wayland_selection_strategy': 'auto',
 }
 
+_CONFIG_KEY_ORDER = tuple(DEFAULT_CONFIG.keys())
+
 
 # ------------------------------------------------------------------
-# Helpers
+# TOML IO
 # ------------------------------------------------------------------
 
-def _sanitize_json_text(s: str) -> str:
-    """Remove ``#``/``//`` comments and trailing commas from JSON-like text."""
-    import re
+def _load_toml(path: str) -> dict:
+    if tomllib is None:
+        raise RuntimeError("TOML config requires Python 3.11+")
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("TOML config root must be a table")
+    return data
 
-    # Hash-style line comments
-    s = re.sub(r"^[ \t]*#.*$", "", s, flags=re.MULTILINE)
-    # C++-style line comments
-    s = re.sub(r"//.*$", "", s, flags=re.MULTILINE)
-    # Trailing commas before } or ]
-    s = re.sub(r",[ \t\r\n]+(\}|\])", r"\1", s)
-    return s
+
+def _toml_value(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    raise TypeError(f"Unsupported TOML value type: {type(value).__name__}")
+
+
+def _dump_config_toml(config: dict) -> str:
+    lines = [
+        "# LSwitch configuration",
+        "#",
+        "# Wayland selection strategies:",
+        "#   auto              - read PRIMARY selection first, fallback to clipboard copy/paste",
+        "#   clipboard_copy    - always use clipboard copy/paste flow",
+        "#   primary_selection - read PRIMARY and replace selection by direct UInput typing",
+        "#   disabled          - disable Wayland selection conversion",
+        "",
+    ]
+
+    for key in _CONFIG_KEY_ORDER:
+        if key in config:
+            lines.append(f"{key} = {_toml_value(config[key])}")
+
+    extra_keys = sorted(
+        key for key in config
+        if key not in DEFAULT_CONFIG and not key.startswith("_")
+    )
+    if extra_keys:
+        lines.append("")
+    for key in extra_keys:
+        value = config[key]
+        if isinstance(value, dict):
+            lines.append(f"[{key}]")
+            for child_key in sorted(value):
+                lines.append(f"{child_key} = {_toml_value(value[child_key])}")
+            lines.append("")
+        else:
+            lines.append(f"{key} = {_toml_value(value)}")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _save_toml(path: str, config: dict) -> None:
+    dir_path = os.path.dirname(os.path.abspath(path))
+    os.makedirs(dir_path, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".toml.tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(_dump_config_toml(config))
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ------------------------------------------------------------------
@@ -127,11 +198,10 @@ def validate_config(conf: dict | None) -> dict:
 
     # wayland_selection_strategy — advanced Wayland selection strategy
     wss = conf.get('wayland_selection_strategy', defaults['wayland_selection_strategy'])
-    valid_strategies = {'auto', 'clipboard_copy', 'primary_selection', 'disabled'}
-    if wss not in valid_strategies:
+    if wss not in WAYLAND_SELECTION_STRATEGIES:
         raise ValueError(
             "Invalid 'wayland_selection_strategy': "
-            f"must be one of {sorted(valid_strategies)}"
+            f"must be one of {sorted(WAYLAND_SELECTION_STRATEGIES)}"
         )
     out['wayland_selection_strategy'] = wss
 
@@ -139,33 +209,20 @@ def validate_config(conf: dict | None) -> dict:
 
 
 def _read_and_merge(path: str, target_config: dict, debug: bool = False) -> bool:
-    """Read a JSON file, validate, and merge into *target_config*.
-
-    Returns True on success, False on any error.
-    """
+    """Read a TOML file, validate it, and merge known keys."""
     try:
-        with open(path, 'r', encoding='utf-8') as f:
-            raw = f.read()
-    except Exception:
+        cfg = _load_toml(path)
+    except Exception as exc:
+        if debug:
+            logger.warning("TOML parse error in %s: %s", path, exc)
         return False
-
-    try:
-        cfg = json.loads(raw)
-    except json.JSONDecodeError:
-        try:
-            sanitized = _sanitize_json_text(raw)
-            cfg = json.loads(sanitized)
-        except json.JSONDecodeError as exc:
-            if debug:
-                logger.warning("JSON parse error in %s: %s", path, exc)
-            return False
 
     try:
         validated = validate_config(cfg)
         # Only override keys explicitly present in source
-        for k in cfg:
-            if k in validated:
-                target_config[k] = validated[k]
+        for key in cfg:
+            if key in validated:
+                target_config[key] = validated[key]
         return True
     except ValueError as verr:
         if debug:
@@ -178,26 +235,15 @@ def _read_and_merge(path: str, target_config: dict, debug: bool = False) -> bool
 # ------------------------------------------------------------------
 
 def load_config(config_path: str | None = None, debug: bool = False) -> dict:
-    """Load and merge configuration.
+    """Load and merge TOML configuration.
 
-    If *config_path* is given, uses only that file (returns defaults if
-    the file does not exist).  Otherwise falls back to
-    ``~/.config/lswitch/config.json``.
-
-    Returns the effective configuration dict (always has all default keys).
+    If *config_path* is given, uses only that file.  Otherwise reads
+    ``~/.config/lswitch/config.toml``.
     """
     default_config = dict(DEFAULT_CONFIG)
-
-    if config_path is not None:
-        # Explicit path — use only it, no fallback
-        if os.path.exists(config_path):
-            _read_and_merge(config_path, default_config, debug=debug)
-        return default_config
-
-    user_cfg = os.path.expanduser('~/.config/lswitch/config.json')
-    if os.path.exists(user_cfg):
-        _read_and_merge(user_cfg, default_config, debug=debug)
-
+    path = config_path or DEFAULT_CONFIG_PATH
+    if os.path.exists(path):
+        _read_and_merge(path, default_config, debug=debug)
     return default_config
 
 
@@ -209,7 +255,7 @@ class ConfigManager:
     """Centralized configuration management with load/save/validate."""
 
     def __init__(self, config_path: str | None = None, debug: bool = False):
-        self._config_path = config_path or os.path.expanduser('~/.config/lswitch/config.json')
+        self._config_path = config_path or DEFAULT_CONFIG_PATH
         self._debug = debug
         self._config: dict = dict(DEFAULT_CONFIG)
         self._load_config()
@@ -217,7 +263,7 @@ class ConfigManager:
     # -- internal -------------------------------------------------------
 
     def _load_config(self) -> None:
-        """Reset to defaults, then overlay from file (if exists)."""
+        """Reset to defaults, then overlay from TOML file if it exists."""
         self._config = dict(DEFAULT_CONFIG)
         if self._config_path and os.path.exists(self._config_path):
             _read_and_merge(self._config_path, self._config, debug=self._debug)
@@ -233,11 +279,11 @@ class ConfigManager:
             return False
 
     def save(self, target_path: str | None = None) -> bool:
-        """Atomically save configuration to file. Returns True on success."""
+        """Atomically save configuration to TOML. Returns True on success."""
         save_path = target_path or self._config_path
         try:
             save_data = {k: v for k, v in self._config.items() if not k.startswith('_')}
-            save_json(save_path, save_data)
+            _save_toml(save_path, save_data)
             return True
         except Exception:
             return False

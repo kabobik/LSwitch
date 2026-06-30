@@ -39,7 +39,7 @@ def _make_app(tmp_path=None) -> LSwitchApp:
     """Create an LSwitchApp with mocked platform components."""
     config_path = None
     if tmp_path is not None:
-        config_path = str(tmp_path / "config.json")
+        config_path = str(tmp_path / "config.toml")
     app = LSwitchApp(headless=True, debug=True, config_path=config_path)
     # Inject mocks instead of calling _init_platform()
     app.xkb = MockXKBAdapter()
@@ -312,7 +312,7 @@ class TestConfigManagerRoundtrip:
 
     def test_save_and_reload_preserves_values(self, tmp_path):
         """Saving config and reloading should preserve all values."""
-        cfg_path = str(tmp_path / "cfg.json")
+        cfg_path = str(tmp_path / "cfg.toml")
 
         # Create and modify config
         cm = ConfigManager(config_path=cfg_path, debug=True)
@@ -329,7 +329,7 @@ class TestConfigManagerRoundtrip:
 
     def test_reset_to_defaults_works(self, tmp_path):
         """reset_to_defaults should restore DEFAULT_CONFIG values."""
-        cfg_path = str(tmp_path / "cfg2.json")
+        cfg_path = str(tmp_path / "cfg2.toml")
         cm = ConfigManager(config_path=cfg_path, debug=True)
         cm.set("auto_switch", True)
         cm.reset_to_defaults()

@@ -152,15 +152,38 @@ class SelectionMode(BaseMode):
         direction = "en_to_ru" if source_lang == "en" else "ru_to_en"
 
         converted = convert_text(sel.text, direction=direction)
-        self.selection.replace_selection(converted)
-
         # Switch to the layout that matches the converted text.
         layouts = self.xkb.get_layouts()
         target_layout = next(
             (l for l in layouts if l.name == target_lang),
             None,
         )
-        self.xkb.switch_layout(target=target_layout)  # None = cycle, which is ok as fallback
+
+        direct_replacement = None
+        if getattr(type(self.selection), "prefers_direct_replacement", None) is not None:
+            direct_replacement = getattr(
+                self.selection,
+                "prefers_direct_replacement",
+                None,
+            )
+        if callable(direct_replacement) and direct_replacement():
+            if target_layout is None:
+                logger.debug(
+                    "SelectionMode: direct replacement skipped, no target layout for %s",
+                    target_lang,
+                )
+                return False
+            self.xkb.switch_layout(target=target_layout)
+            time.sleep(0.03)
+            replace_by_typing = getattr(self.selection, "replace_selection_by_typing")
+            if not callable(replace_by_typing):
+                return False
+            if not replace_by_typing(converted, layout_name=target_layout.name):
+                return False
+        else:
+            if not self.selection.replace_selection(converted):
+                return False
+            self.xkb.switch_layout(target=target_layout)  # None = cycle, which is ok as fallback
 
         logger.debug(
             "SelectionMode: '%s' (%s) → '%s' (%s), switching to layout '%s'",

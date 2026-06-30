@@ -240,6 +240,10 @@ class LSwitchApp:
         self._platform = create_platform_adapters(
             debug=self.debug,
             main_thread=main_thread,
+            wayland_selection_strategy=self.config.get(
+                'wayland_selection_strategy',
+                'auto',
+            ),
         )
         self.system = self._platform.system
         self.xkb = self._platform.xkb

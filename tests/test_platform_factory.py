@@ -96,6 +96,7 @@ class TestCreatePlatformAdapters:
                 debug=True,
                 main_thread=main_thread,
                 layout_backend=fake_layout_backend,
+                wayland_selection_strategy="primary_selection",
                 env={
                     "XDG_SESSION_TYPE": "wayland",
                     "XDG_CURRENT_DESKTOP": "KDE",
@@ -108,6 +109,7 @@ class TestCreatePlatformAdapters:
         assert isinstance(adapters.system, WaylandSystemAdapter)
         assert isinstance(adapters.xkb, WaylandLayoutAdapter)
         assert isinstance(adapters.selection, WaylandSelectionAdapter)
+        assert adapters.selection.strategy == "primary_selection"
         assert adapters.virtual_kb is fake_vk
         assert adapters.selection_polling_enabled is False
         assert adapters.main_thread is main_thread

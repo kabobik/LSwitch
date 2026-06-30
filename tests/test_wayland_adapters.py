@@ -96,6 +96,19 @@ class TestWaylandSystemAdapter:
 
         vk.send_combo.assert_called_once_with("ctrl+v")
 
+    def test_type_text_uses_virtual_keyboard(self):
+        vk = MagicMock()
+        adapter = WaylandSystemAdapter(
+            virtual_kb=vk,
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            enable_wl_clipboard=False,
+        )
+        vk.type_text.return_value = True
+
+        assert adapter.type_text("привет", layout_name="ru") is True
+        vk.type_text.assert_called_once_with("привет", layout_name="ru")
+
     def test_clipboard_get_set_uses_qt_clipboard(self, monkeypatch):
         clipboard = _FakeClipboard()
         clipboard.values["clipboard"] = "old"
@@ -298,6 +311,7 @@ class _RecordingWaylandSystem:
         self.copy_text = copy_text
         self.copy_text_by_sequence = copy_text_by_sequence or {}
         self.keys_sent: list[str] = []
+        self.typed_text: list[tuple[str, str]] = []
         self.clipboard_writes: list[str] = []
         self.clipboard_mime_writes: list[tuple[str, str]] = []
 
@@ -331,6 +345,10 @@ class _RecordingWaylandSystem:
         elif sequence == "ctrl+c" and self.copy_text is not None:
             self.clipboard = self.copy_text
 
+    def type_text(self, text: str, layout_name: str = "en") -> bool:
+        self.typed_text.append((text, layout_name))
+        return True
+
 
 def _make_selection_adapter(system: _RecordingWaylandSystem) -> WaylandSelectionAdapter:
     adapter = WaylandSelectionAdapter(
@@ -344,6 +362,14 @@ def _make_selection_adapter(system: _RecordingWaylandSystem) -> WaylandSelection
     adapter.PASTE_DELAY = 0.0
     adapter.RESTORE_DELAY = 0.0
     adapter.EXPAND_SELECTION_DELAY = 0.0
+    return adapter
+
+
+def _make_primary_selection_adapter(
+    system: _RecordingWaylandSystem,
+) -> WaylandSelectionAdapter:
+    adapter = _make_selection_adapter(system)
+    adapter.strategy = "primary_selection"
     return adapter
 
 
@@ -366,6 +392,34 @@ class TestWaylandSelectionAdapter:
 
         assert info.text == "selected"
         assert info.owner_id == 0
+        assert system.keys_sent == []
+        assert system.clipboard == "old"
+
+    def test_auto_get_selection_prefers_passive_primary(self):
+        system = _RecordingWaylandSystem(
+            clipboard="old",
+            primary="selected",
+            copy_text="copied",
+        )
+        adapter = _make_selection_adapter(system)
+
+        info = adapter.get_selection()
+
+        assert info.text == "selected"
+        assert system.keys_sent == []
+        assert system.clipboard == "old"
+
+    def test_primary_strategy_get_selection_never_sends_copy_shortcut(self):
+        system = _RecordingWaylandSystem(
+            clipboard="old",
+            primary="selected",
+            copy_text="copied",
+        )
+        adapter = _make_primary_selection_adapter(system)
+
+        info = adapter.get_selection()
+
+        assert info.text == "selected"
         assert system.keys_sent == []
         assert system.clipboard == "old"
 
@@ -437,6 +491,27 @@ class TestWaylandSelectionAdapter:
         assert system.keys_sent == ["ctrl+v"]
         assert system.clipboard == "current"
 
+    def test_primary_strategy_replace_selection_does_not_paste(self):
+        system = _RecordingWaylandSystem(clipboard="current", primary="selected")
+        adapter = _make_primary_selection_adapter(system)
+
+        result = adapter.replace_selection("converted")
+
+        assert result is False
+        assert system.keys_sent == []
+        assert system.clipboard == "current"
+
+    def test_primary_strategy_replace_selection_by_typing(self):
+        system = _RecordingWaylandSystem(clipboard="current", primary="selected")
+        adapter = _make_primary_selection_adapter(system)
+
+        result = adapter.replace_selection_by_typing("привет", layout_name="ru")
+
+        assert result is True
+        assert system.typed_text == [("привет", "ru")]
+        assert system.keys_sent == []
+        assert system.clipboard == "current"
+
     def test_expand_selection_to_word_expands_then_copies(self):
         system = _RecordingWaylandSystem(clipboard="old", copy_text="word")
         adapter = _make_selection_adapter(system)
@@ -445,6 +520,27 @@ class TestWaylandSelectionAdapter:
 
         assert info.text == "word"
         assert system.keys_sent == ["ctrl+shift+Left", "ctrl+c"]
+
+    def test_primary_strategy_expand_reads_primary_without_copy(self):
+        system = _RecordingWaylandSystem(clipboard="old", primary="word", copy_text="copied")
+        adapter = _make_primary_selection_adapter(system)
+
+        info = adapter.expand_selection_to_word()
+
+        assert info.text == "word"
+        assert system.keys_sent == ["ctrl+shift+Left"]
+        assert system.clipboard == "old"
+
+    def test_invalid_strategy_fails_clearly(self):
+        system = _RecordingWaylandSystem()
+
+        with pytest.raises(ValueError, match="Invalid Wayland selection strategy"):
+            WaylandSelectionAdapter(
+                system=system,
+                main_thread=DirectMainThreadInvoker(),
+                compositor="kde",
+                strategy="magic",
+            )
 
 
 class _FakeKdeDbus:

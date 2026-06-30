@@ -1,0 +1,19 @@
+# LSwitch configuration
+
+double_click_timeout = 0.3
+debug = true
+switch_layout_after_convert = true
+layout_switch_key = "Alt_L+Shift_L"
+
+auto_switch = true
+auto_switch_threshold = 10
+
+user_dict_enabled = true
+user_dict_min_weight = 2
+
+# Wayland selection strategies:
+#   auto              - read PRIMARY selection first, fallback to clipboard copy/paste
+#   clipboard_copy    - always use clipboard copy/paste flow
+#   primary_selection - read PRIMARY and replace selection by direct UInput typing
+#   disabled          - disable Wayland selection conversion
+wayland_selection_strategy = "auto"

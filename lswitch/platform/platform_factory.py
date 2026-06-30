@@ -99,6 +99,7 @@ def create_platform_adapters(
     env: Mapping[str, str] | None = None,
     main_thread: MainThreadInvoker | None = None,
     layout_backend=None,
+    wayland_selection_strategy: str = "auto",
 ) -> PlatformAdapters:
     """Create adapters for the current session.
 
@@ -115,6 +116,7 @@ def create_platform_adapters(
             compositor=compositor,
             main_thread=main_thread,
             layout_backend=layout_backend,
+            selection_strategy=wayland_selection_strategy,
         )
     if session_type == "unknown":
         raise RuntimeError(
@@ -155,6 +157,7 @@ def create_wayland_platform_adapters(
     compositor: str | None = None,
     main_thread: MainThreadInvoker | None = None,
     layout_backend=None,
+    selection_strategy: str = "auto",
 ) -> PlatformAdapters:
     """Create the Wayland adapter skeleton.
 
@@ -193,6 +196,7 @@ def create_wayland_platform_adapters(
         main_thread=main_thread,
         compositor=compositor or "unknown",
         debug=debug,
+        strategy=selection_strategy,
     )
     return PlatformAdapters(
         session_type="wayland",

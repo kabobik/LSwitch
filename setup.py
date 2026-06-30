@@ -25,7 +25,7 @@ setup(
     author='Anton',
     url='https://github.com/kabobik/lswitch',
     packages=find_packages(exclude=['tests', 'docs', 'archive']),
-    python_requires='>=3.10',
+    python_requires='>=3.11',
     install_requires=[
         'evdev',         # Чтение событий клавиатуры из /dev/input
         'python-xlib',   # Определение раскладки и работа с X11
@@ -49,10 +49,10 @@ setup(
         'Topic :: Utilities',
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
         'Operating System :: POSIX :: Linux',
         'Environment :: X11 Applications',
         'Environment :: Wayland',

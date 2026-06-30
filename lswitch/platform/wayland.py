@@ -88,6 +88,9 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
     def send_key_sequence(self, sequence: str, timeout: float = 0.3) -> None:
         self.virtual_kb.send_combo(sequence)
 
+    def type_text(self, text: str, layout_name: str = "en") -> bool:
+        return self.virtual_kb.type_text(text, layout_name=layout_name)
+
     def get_clipboard(self, selection: str = "primary") -> str:
         text = self._get_wl_clipboard(selection)
         if text is not None:
@@ -293,6 +296,7 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
     selection owner equivalent.
     """
 
+    VALID_STRATEGIES = {"auto", "clipboard_copy", "primary_selection", "disabled"}
     COPY_WAIT_TIMEOUT = 1.0
     COPY_POLL_INTERVAL = 0.05
     COPY_RETRY_DELAY = 0.1
@@ -309,14 +313,24 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         main_thread: MainThreadInvoker,
         compositor: str = "unknown",
         debug: bool = False,
+        strategy: str = "auto",
     ) -> None:
         super().__init__(compositor=compositor, debug=debug)
         self.system = system
         self.main_thread = main_thread
+        self.strategy = self._normalize_strategy(strategy)
         self._prev_text: str = ""
         self._saved_clipboard: str | None = None
 
     def get_selection(self) -> SelectionInfo:
+        if self.strategy == "disabled":
+            return self.empty_selection()
+
+        if self.strategy in {"auto", "primary_selection"}:
+            passive = self.get_passive_selection()
+            if passive.text or self.strategy == "primary_selection":
+                return passive
+
         old_clipboard = self.system.get_clipboard(selection="clipboard")
         self._saved_clipboard = old_clipboard
         sentinel = self._copy_sentinel()
@@ -338,7 +352,7 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
             logger.debug("Wayland passive primary selection read failed: %s", exc)
             text = ""
         if text:
-            logger.debug("Wayland passive primary selection read %d chars", len(text))
+            logger.log(5, "Wayland passive primary selection read %d chars", len(text))
         return SelectionInfo(text=text, owner_id=0, timestamp=time.time())
 
     def has_fresh_selection(self) -> bool:
@@ -353,6 +367,9 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         return fresh
 
     def replace_selection(self, new_text: str) -> bool:
+        if self.strategy in {"disabled", "primary_selection"}:
+            return False
+
         old_clipboard = self._saved_clipboard
         if old_clipboard is None:
             old_clipboard = self.system.get_clipboard(selection="clipboard")
@@ -369,9 +386,38 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         finally:
             self._saved_clipboard = None
 
+    def prefers_direct_replacement(self) -> bool:
+        return self.strategy == "primary_selection"
+
+    def replace_selection_by_typing(
+        self,
+        new_text: str,
+        layout_name: str = "en",
+    ) -> bool:
+        if not self.prefers_direct_replacement():
+            return False
+        typer = getattr(self.system, "type_text", None)
+        if not callable(typer):
+            logger.warning(
+                "Wayland primary_selection strategy requires direct text typing"
+            )
+            return False
+        try:
+            return bool(typer(new_text, layout_name=layout_name))
+        except Exception as exc:
+            logger.warning("Wayland direct selection replace failed: %s", exc)
+            return False
+
     def expand_selection_to_word(self) -> SelectionInfo:
+        if self.strategy == "disabled":
+            return self.empty_selection()
+
         self.system.send_key_sequence("ctrl+shift+Left")
         time.sleep(self.EXPAND_SELECTION_DELAY)
+        if self.strategy in {"auto", "primary_selection"}:
+            passive = self.get_passive_selection()
+            if passive.text or self.strategy == "primary_selection":
+                return passive
         return self.get_selection()
 
     @staticmethod
@@ -414,6 +460,16 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
             except Exception as exc:
                 logger.debug("Wayland clipboard MIME sentinel failed: %s", exc)
         self.system.set_clipboard(sentinel, selection="clipboard")
+
+    @classmethod
+    def _normalize_strategy(cls, strategy: str) -> str:
+        normalized = (strategy or "auto").strip().lower()
+        if normalized not in cls.VALID_STRATEGIES:
+            raise ValueError(
+                "Invalid Wayland selection strategy: "
+                f"{strategy!r}; expected one of {sorted(cls.VALID_STRATEGIES)}"
+            )
+        return normalized
 
 
 class KdeKeyboardDbusClient:
