@@ -12,8 +12,8 @@ from lswitch.i18n import t
 class ContextMenu:
     """Context menu shown on tray icon right-click.
 
-    Builds a QMenu with toggle actions, service management,
-    about dialog entry, and quit action.
+    Builds a QMenu with toggle actions, process status, about dialog entry,
+    and quit action.
     """
 
     def __init__(self, config=None, event_bus=None, app=None):

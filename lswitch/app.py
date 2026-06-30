@@ -1,4 +1,4 @@
-"""LSwitchApp — main application class, unifies service and GUI."""
+"""LSwitchApp — main application class, unifies input runtime and GUI."""
 
 from __future__ import annotations
 
@@ -101,8 +101,7 @@ class _PidLock:
             msg = (
                 f"LSwitch уже запущен (PID {existing_pid}). "
                 f"Для замены: lswitch --replace\n"
-                f"Для остановки: kill {existing_pid}  или  "
-                f"systemctl --user stop lswitch"
+                f"Для остановки: kill {existing_pid}"
             )
             raise SystemExit(msg)
 
@@ -174,7 +173,7 @@ class LSwitchApp:
     """Single-process application combining input daemon and tray GUI.
 
     Modes:
-        headless=True  — no GUI, runs as a background service
+        headless=True  — no visible GUI/tray
         headless=False — with tray icon (default)
 
     ``_init_platform()`` is separated from ``__init__`` so that tests

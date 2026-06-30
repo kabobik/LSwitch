@@ -12,11 +12,16 @@ APP_NAME="lswitch"
 VERSION="2.0.0"
 
 # Пути установки
-INSTALL_DIR="$HOME/.local/share/$APP_NAME"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+INSTALL_DIR="$DATA_HOME/$APP_NAME"
 BIN_DIR="$HOME/.local/bin"
-SYSTEMD_DIR="$HOME/.config/systemd/user"
-DESKTOP_DIR="$HOME/.local/share/applications"
-ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+SYSTEMD_DIR="$CONFIG_HOME/systemd/user"
+AUTOSTART_DIR="$CONFIG_HOME/autostart"
+DESKTOP_DIR="$DATA_HOME/applications"
+ICON_THEME_DIR="$DATA_HOME/icons/hicolor"
+ICON_DIR="$ICON_THEME_DIR/scalable/apps"
+LEGACY_ICON_DIR="$HOME/.icons"
 UDEV_RULES="/etc/udev/rules.d/99-lswitch.rules"
 CURRENT_USER="${USER:-$(id -un)}"
 
@@ -130,11 +135,33 @@ ensure_input_group() {
     sudo groupadd -r input
 }
 
+detect_desktop_environment() {
+    local desktop
+    desktop="$(
+        printf '%s:%s:%s:%s' \
+            "${XDG_CURRENT_DESKTOP:-}" \
+            "${DESKTOP_SESSION:-}" \
+            "${GDMSESSION:-}" \
+            "${KDE_FULL_SESSION:-}" |
+        tr '[:upper:]' '[:lower:]'
+    )"
+
+    if [ -n "${KDE_FULL_SESSION:-}" ] || [[ "$desktop" == *kde* ]] || [[ "$desktop" == *plasma* ]]; then
+        echo "KDE Plasma"
+    elif [[ "$desktop" == *cinnamon* ]]; then
+        echo "Cinnamon"
+    elif [[ "$desktop" == *gnome* ]]; then
+        echo "GNOME"
+    else
+        echo "XDG-compatible desktop"
+    fi
+}
+
 # ─── Удаление ─────────────────────────────────────────────────
 remove() {
     info "Удаление LSwitch..."
 
-    # Остановить и отключить сервис
+    # Остановить и отключить legacy user-service
     systemctl --user stop "$APP_NAME" 2>/dev/null || true
     systemctl --user disable "$APP_NAME" 2>/dev/null || true
 
@@ -142,10 +169,13 @@ remove() {
     rm -rf "$INSTALL_DIR"
     rm -f  "$BIN_DIR/$APP_NAME"
     rm -f  "$SYSTEMD_DIR/$APP_NAME.service"
+    rm -f  "$AUTOSTART_DIR/lswitch-control.desktop"
     rm -f  "$DESKTOP_DIR/lswitch-control.desktop"
     rm -f  "$ICON_DIR/$APP_NAME.svg"
+    rm -f  "$LEGACY_ICON_DIR/$APP_NAME.svg"
 
     systemctl --user daemon-reload 2>/dev/null || true
+    refresh_desktop_integration
 
     # udev — требует sudo
     if [ -f "$UDEV_RULES" ]; then
@@ -241,6 +271,124 @@ check_deps() {
     ok "Зависимости в порядке"
 }
 
+install_desktop_file() {
+    local target="$1"
+    local exec_cmd="$2"
+    local mode="${3:-menu}"
+
+    cp "$PROJECT_DIR/config/lswitch-control.desktop" "$target"
+    set_desktop_key "$target" "Exec" "$exec_cmd"
+    set_desktop_key "$target" "TryExec" "$BIN_DIR/$APP_NAME"
+
+    if [ "$mode" = "autostart" ]; then
+        set_desktop_key "$target" "Hidden" "false"
+        set_desktop_key "$target" "X-GNOME-Autostart-enabled" "true"
+        set_desktop_key "$target" "X-KDE-autostart-after" "panel"
+    fi
+
+    chmod 644 "$target"
+    validate_desktop_file "$target"
+}
+
+set_desktop_key() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    local escaped
+
+    escaped="${value//\\/\\\\}"
+    escaped="${escaped//&/\\&}"
+    escaped="${escaped//|/\\|}"
+
+    if grep -q "^$key=" "$file"; then
+        sed -i "s|^$key=.*|$key=$escaped|" "$file"
+    else
+        printf '%s=%s\n' "$key" "$value" >> "$file"
+    fi
+}
+
+validate_desktop_file() {
+    local file="$1"
+
+    if command -v desktop-file-validate &>/dev/null; then
+        if ! desktop-file-validate "$file"; then
+            error "Некорректный desktop-файл: $file"
+            exit 1
+        fi
+    fi
+}
+
+refresh_desktop_integration() {
+    info "Обновление меню и кэша иконок..."
+
+    if command -v update-desktop-database &>/dev/null; then
+        update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
+    fi
+    if command -v xdg-desktop-menu &>/dev/null; then
+        xdg-desktop-menu forceupdate --mode user >/dev/null 2>&1 || true
+    fi
+    if command -v gtk-update-icon-cache &>/dev/null; then
+        gtk-update-icon-cache -q -t -f "$ICON_THEME_DIR" >/dev/null 2>&1 || true
+    fi
+    if command -v xdg-icon-resource &>/dev/null; then
+        xdg-icon-resource forceupdate --theme hicolor >/dev/null 2>&1 || true
+    fi
+    if command -v kbuildsycoca6 &>/dev/null; then
+        kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
+    elif command -v kbuildsycoca5 &>/dev/null; then
+        kbuildsycoca5 --noincremental >/dev/null 2>&1 || true
+    fi
+
+    ok "Меню и кэш иконок обновлены"
+}
+
+verify_desktop_integration() {
+    local autostart_expected="${1:-false}"
+    local menu_file="$DESKTOP_DIR/lswitch-control.desktop"
+    local autostart_file="$AUTOSTART_DIR/lswitch-control.desktop"
+
+    [ -f "$menu_file" ] || { error "Не создан ярлык меню: $menu_file"; exit 1; }
+    grep -Fxq "Exec=$BIN_DIR/$APP_NAME" "$menu_file" || {
+        error "В ярлыке меню неверный Exec: $menu_file"
+        exit 1
+    }
+    [ -f "$ICON_DIR/$APP_NAME.svg" ] || { error "Не установлена иконка: $ICON_DIR/$APP_NAME.svg"; exit 1; }
+
+    if [ "$autostart_expected" = "true" ]; then
+        [ -f "$autostart_file" ] || { error "Не создан GUI автозапуск: $autostart_file"; exit 1; }
+        grep -Fxq "Exec=$BIN_DIR/$APP_NAME --replace" "$autostart_file" || {
+            error "В автозапуске неверный Exec: $autostart_file"
+            exit 1
+        }
+        grep -Fxq "Hidden=false" "$autostart_file" || {
+            error "Автозапуск отключён через Hidden=true/нет Hidden=false: $autostart_file"
+            exit 1
+        }
+    fi
+
+    ok "Интеграция с рабочим столом проверена"
+}
+
+disable_legacy_service() {
+    info "Отключение legacy systemd сервиса..."
+    systemctl --user stop "$APP_NAME" 2>/dev/null || true
+    systemctl --user disable "$APP_NAME" 2>/dev/null || true
+    rm -f "$SYSTEMD_DIR/$APP_NAME.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+    ok "Systemd автозапуск отключён"
+}
+
+enable_gui_autostart() {
+    mkdir -p "$AUTOSTART_DIR"
+    install_desktop_file "$AUTOSTART_DIR/lswitch-control.desktop" "$BIN_DIR/$APP_NAME --replace" "autostart"
+    ok "GUI автозапуск включён: $AUTOSTART_DIR/lswitch-control.desktop"
+}
+
+disable_gui_autostart() {
+    rm -f "$AUTOSTART_DIR/lswitch-control.desktop"
+    ok "GUI автозапуск отключён"
+}
+
 # ─── Установка ─────────────────────────────────────────────────
 install() {
     echo ""
@@ -251,6 +399,7 @@ install() {
 
     # 1. Проверка зависимостей
     info "Проверка зависимостей..."
+    info "Окружение рабочего стола: $(detect_desktop_environment)"
     check_deps
 
     # 2. Копирование приложения
@@ -273,7 +422,11 @@ import sys
 import os
 
 # Добавляем директорию установки в путь
-install_dir = os.path.join(os.path.expanduser("~"), ".local", "share", "lswitch")
+data_home = os.environ.get(
+    "XDG_DATA_HOME",
+    os.path.join(os.path.expanduser("~"), ".local", "share"),
+)
+install_dir = os.path.join(data_home, "lswitch")
 if install_dir not in sys.path:
     sys.path.insert(0, install_dir)
 
@@ -283,24 +436,21 @@ ENTRY
     chmod +x "$BIN_DIR/$APP_NAME"
     ok "Команда: $BIN_DIR/$APP_NAME"
 
-    # 4. systemd unit
-    info "Установка systemd сервиса..."
-    mkdir -p "$SYSTEMD_DIR"
-    cp "$PROJECT_DIR/config/lswitch.service" "$SYSTEMD_DIR/$APP_NAME.service"
-    sed -i "s|^ExecStart=.*|ExecStart=$BIN_DIR/$APP_NAME --headless|" "$SYSTEMD_DIR/$APP_NAME.service"
-    systemctl --user daemon-reload
-    ok "Сервис установлен"
+    # 4. Legacy systemd cleanup
+    disable_legacy_service
 
     # 5. Иконка
     info "Установка иконки..."
     mkdir -p "$ICON_DIR"
+    mkdir -p "$LEGACY_ICON_DIR"
     cp "$PROJECT_DIR/assets/lswitch.svg" "$ICON_DIR/$APP_NAME.svg"
+    cp "$PROJECT_DIR/assets/lswitch.svg" "$LEGACY_ICON_DIR/$APP_NAME.svg"
     ok "Иконка установлена"
 
     # 6. .desktop файл
     info "Установка ярлыка в меню приложений..."
     mkdir -p "$DESKTOP_DIR"
-    cp "$PROJECT_DIR/config/lswitch-control.desktop" "$DESKTOP_DIR/"
+    install_desktop_file "$DESKTOP_DIR/lswitch-control.desktop" "$BIN_DIR/$APP_NAME" "menu"
     ok "Ярлык установлен"
 
     # 7. udev правила (нужен sudo)
@@ -335,18 +485,23 @@ ENTRY
     echo "║   Установка завершена!               ║"
     echo "╚══════════════════════════════════════╝"
     echo ""
-    echo "  Запуск:       $APP_NAME"
-    echo "  Автозапуск:   systemctl --user enable --now $APP_NAME"
-    echo "  Статус:       systemctl --user status $APP_NAME"
-    echo "  Удаление:     bash scripts/install.sh --remove"
+    echo "  Запуск:         $BIN_DIR/$APP_NAME"
+    echo "  Перезапуск:     $BIN_DIR/$APP_NAME --replace"
+    echo "  GUI автозапуск: $AUTOSTART_DIR/lswitch-control.desktop"
+    echo "  Удаление:       bash scripts/install.sh --remove"
     echo ""
 
     # Предложить включить автозапуск
-    read -rp "Включить автозапуск? [Y/n] " answer
+    read -rp "Включить GUI автозапуск при входе в сеанс? [Y/n] " answer
     answer="${answer:-y}"
     if [[ "$answer" =~ ^[Yy]$ ]]; then
-        systemctl --user enable --now "$APP_NAME"
-        ok "Автозапуск включён, сервис запущен"
+        enable_gui_autostart
+        refresh_desktop_integration
+        verify_desktop_integration "true"
+    else
+        disable_gui_autostart
+        refresh_desktop_integration
+        verify_desktop_integration "false"
     fi
 }
 
