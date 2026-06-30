@@ -134,7 +134,7 @@ class SelectionMode(BaseMode):
         self.expand = expand
 
     def execute(self, context: "StateContext") -> bool:
-        from lswitch.core.text_converter import convert_text, detect_language
+        from lswitch.core.text_converter import invert_layout_runs
 
         if self.expand or context.backspace_hold_active:
             logger.debug(f"SelectionMode: expanding selection... (expand={self.expand}, backspace_hold={context.backspace_hold_active})")
@@ -145,19 +145,16 @@ class SelectionMode(BaseMode):
         if not sel.text:
             return False
 
-        # Detect source language to determine conversion direction and
-        # which layout to switch to after replacing the selection.
-        source_lang = detect_language(sel.text)  # 'en' or 'ru'
-        target_lang = "ru" if source_lang == "en" else "en"
-        direction = "en_to_ru" if source_lang == "en" else "ru_to_en"
+        # Selection can contain fragments from both layouts. Convert each
+        # non-whitespace fragment independently instead of forcing one global
+        # direction for the whole selection.
+        converted_runs = invert_layout_runs(sel.text)
+        converted = "".join(text for text, _target_lang in converted_runs)
+        target_langs = [lang for _text, lang in converted_runs if lang]
+        final_target_lang = target_langs[-1] if target_langs else None
 
-        converted = convert_text(sel.text, direction=direction)
-        # Switch to the layout that matches the converted text.
         layouts = self.xkb.get_layouts()
-        target_layout = next(
-            (l for l in layouts if l.name == target_lang),
-            None,
-        )
+        target_layout = self._find_layout_for_lang(layouts, final_target_lang)
 
         direct_replacement = None
         if getattr(type(self.selection), "prefers_direct_replacement", None) is not None:
@@ -167,28 +164,49 @@ class SelectionMode(BaseMode):
                 None,
             )
         if callable(direct_replacement) and direct_replacement():
-            if target_layout is None:
-                logger.debug(
-                    "SelectionMode: direct replacement skipped, no target layout for %s",
-                    target_lang,
-                )
-                return False
-            self.xkb.switch_layout(target=target_layout)
-            time.sleep(0.03)
             replace_by_typing = getattr(self.selection, "replace_selection_by_typing")
             if not callable(replace_by_typing):
                 return False
-            if not replace_by_typing(converted, layout_name=target_layout.name):
-                return False
+            fallback_lang = final_target_lang or "en"
+            for run_text, run_lang in converted_runs:
+                layout = self._find_layout_for_lang(layouts, run_lang or fallback_lang)
+                if layout is None:
+                    logger.debug(
+                        "SelectionMode: direct replacement skipped, no target layout for %s",
+                        run_lang or fallback_lang,
+                    )
+                    return False
+                self.xkb.switch_layout(target=layout)
+                time.sleep(0.03)
+                if not replace_by_typing(run_text, layout_name=layout.name):
+                    return False
         else:
             if not self.selection.replace_selection(converted):
                 return False
             self.xkb.switch_layout(target=target_layout)  # None = cycle, which is ok as fallback
 
         logger.debug(
-            "SelectionMode: '%s' (%s) → '%s' (%s), switching to layout '%s'",
-            sel.text[:50], source_lang,
-            converted[:50], target_lang,
+            "SelectionMode: '%s' → '%s', target_langs=%s, switching to layout '%s'",
+            sel.text[:50],
+            converted[:50],
+            target_langs,
             target_layout.name if target_layout else "next",
         )
         return True
+
+    @staticmethod
+    def _find_layout_for_lang(layouts, lang: str | None):
+        if not lang:
+            return None
+
+        wanted = lang.lower()
+        for layout in layouts:
+            name = getattr(layout, "name", "").lower()
+            xkb_name = getattr(layout, "xkb_name", "").lower()
+            if wanted == "en" and (name in {"en", "us"} or xkb_name == "us"):
+                return layout
+            if wanted == "ru" and (name == "ru" or xkb_name.startswith("ru")):
+                return layout
+            if name == wanted or xkb_name == wanted:
+                return layout
+        return None

@@ -4,6 +4,9 @@
 Он нужен для тонкой проверки поведения после того, как базовая диагностика
 `lswitch --diagnose-wayland-switch-test` уже проходит.
 
+Известные ограничения selection freshness на Wayland описаны отдельно:
+[`WAYLAND_SELECTION_LIMITATIONS.md`](WAYLAND_SELECTION_LIMITATIONS.md).
+
 Целевая среда MVP:
 
 - KDE Plasma Wayland;
@@ -306,7 +309,9 @@ Double-click selection:
 
 - поведение как в mouse selection;
 - `fresh=False -> True` может появиться уже на mouse press, до release;
-- повторное выделение того же слова после deselect тоже должно давать fresh.
+- повторное выделение того же слова после deselect на Wayland может не дать
+  fresh, если passive PRIMARY read видит тот же текст и `owner_id=0`. Это
+  известное ограничение, см. `WAYLAND_SELECTION_LIMITATIONS.md`.
 
 Keyboard selection:
 
@@ -446,6 +451,7 @@ Keyboard selection:
 | Sticky repeat | Чередование текста |  |  |
 | Empty-buffer Double Shift | Нет бесконечного `ctrl+c` |  |  |
 | Mouse selection | Selection conversion + clipboard restore |  |  |
+| Same-text reselection | Известное Wayland limitation, лог сохранен |  |  |
 | Keyboard selection | Selection conversion + clipboard restore |  |  |
 | Backspace hold | Selection mode only while gesture active |  |  |
 | Debug Monitor | Нет idle `ctrl+c` от selection poller |  |  |

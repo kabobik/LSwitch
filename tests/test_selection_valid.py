@@ -135,6 +135,29 @@ class TestSelectionValidInitial:
         app = _make_app()
         assert app._prev_sel_owner_id == 0
 
+    def test_selection_generation_zero_initially(self):
+        app = _make_app()
+        assert app._selection_generation == 0
+
+    def test_selection_repeat_false_initially(self):
+        app = _make_app()
+        assert app._selection_repeat_valid is False
+
+    def test_selection_generation_increments_on_fresh_transition(self):
+        app = _make_app()
+
+        app._selection_valid = True
+        assert app._selection_generation == 1
+
+        app._selection_valid = True
+        assert app._selection_generation == 1
+
+        app._selection_valid = False
+        assert app._selection_generation == 1
+
+        app._selection_valid = True
+        assert app._selection_generation == 2
+
 
 class TestMouseRelease:
     """Tests for _on_mouse_release — detects drag-select and sets fresh."""
@@ -189,6 +212,7 @@ class TestMouseRelease:
         app = _make_app()
         app._prev_sel_text = "old"
         app._prev_sel_owner_id = 1
+        app._selection_repeat_valid = True
 
         app.selection.get_selection.return_value = SelectionInfo(
             text="", owner_id=0, timestamp=time.time(),
@@ -197,6 +221,7 @@ class TestMouseRelease:
         app._on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is False
+        assert app._selection_repeat_valid is False
         assert app._prev_sel_text == ""
 
     def test_mouse_release_no_selection_adapter(self):
@@ -444,10 +469,13 @@ class TestSelectionValidOnEvents:
     def test_selection_valid_false_after_key_press(self):
         app = _make_app()
         app._selection_valid = True
+        app._selection_repeat_valid = True
+        app._selection_repeat_generation = app._selection_generation
 
         app._on_key_press(_key_event(KEY_Q))
 
         assert app._selection_valid is False
+        assert app._selection_repeat_valid is False
 
     def test_selection_valid_false_after_space(self):
         app = _make_app()
@@ -526,6 +554,53 @@ class TestDoConversionUsesSelectionValid:
         assert convert_calls[0] is True
         # After conversion, _selection_valid should be consumed (False)
         assert app._selection_valid is False
+
+    def test_successful_selection_conversion_enables_repeat_selection(self):
+        app = _make_app()
+        app._selection_valid = True
+
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager._state = State.CONVERTING
+
+        convert_calls = []
+
+        def mock_convert(ctx, selection_valid=False):
+            convert_calls.append(selection_valid)
+            return True
+
+        app.conversion_engine.convert = mock_convert
+
+        app._do_conversion()
+
+        assert convert_calls == [True]
+        assert app._selection_valid is False
+        assert app._selection_repeat_valid is True
+
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager._state = State.CONVERTING
+
+        app._do_conversion()
+
+        assert convert_calls == [True, True]
+
+    def test_failed_repeat_selection_conversion_clears_repeat(self):
+        app = _make_app()
+        app._selection_valid = True
+
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager._state = State.CONVERTING
+
+        app.conversion_engine.convert = MagicMock(return_value=True)
+        app._do_conversion()
+        assert app._selection_repeat_valid is True
+
+        app.state_manager.context.state = State.CONVERTING
+        app.state_manager._state = State.CONVERTING
+        app.conversion_engine.convert = MagicMock(return_value=False)
+
+        app._do_conversion()
+
+        assert app._selection_repeat_valid is False
 
     def test_do_conversion_resets_selection_valid_even_on_failure(self):
         app = _make_app()

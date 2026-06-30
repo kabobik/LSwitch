@@ -327,3 +327,7 @@ LSwitchApp
 - Точный KDE D-Bus contract: backend использует runtime validation, но service/object/interface/method names надо подтвердить на целевой Plasma версии manual QA.
 - Clipboard restore timing после Wayland selection conversion: нужен manual QA на медленных приложениях (Electron/браузеры/IDE).
 - Нужен ли отдельный config для задержек copy/paste/restore или достаточно internal constants с логированием?
+- Для неоднозначных Wayland selection случаев может понадобиться отдельная
+  комбинация клавиш, которая явно запускает selection-конвертацию через другой
+  маршрут и не полагается на passive PRIMARY freshness. См.
+  `WAYLAND_SELECTION_LIMITATIONS.md`.

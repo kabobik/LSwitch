@@ -218,6 +218,9 @@ class LSwitchApp:
         self.user_dict = None
         self._last_auto_marker = None
         self.__selection_valid: bool = False
+        self._selection_generation: int = 0
+        self._selection_repeat_valid: bool = False
+        self._selection_repeat_generation: int = 0
         self._prev_sel_text: str = ""
         self._prev_sel_owner_id: int = 0
         self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
@@ -325,6 +328,8 @@ class LSwitchApp:
                 "fresh=%s → %s",
                 self.__selection_valid, value,
             )
+            if value:
+                self._selection_generation += 1
             self.__selection_valid = value
         # Log at TRACE every assignment and its source (guarded to avoid extract_stack overhead)
         if logger.isEnabledFor(5):  # TRACE = 5
@@ -334,6 +339,10 @@ class LSwitchApp:
                 "fresh=%s (set by %s:%d)",
                 self.__selection_valid, caller.name, caller.lineno,
             )
+
+    def _clear_selection_repeat(self) -> None:
+        self._selection_repeat_valid = False
+        self._selection_repeat_generation = 0
 
     def _on_key_press(self, event):
         from lswitch.core.event_manager import SHIFT_KEYS, KEY_BACKSPACE, KEY_SPACE, MODIFIER_KEYS
@@ -370,11 +379,13 @@ class LSwitchApp:
             )
             ctx.backspace_repeats = 0
             self._selection_valid = False
+            self._clear_selection_repeat()
             self._last_retype_events = []
         elif data.code == KEY_SPACE:
             # Word boundary — try auto-conversion if enabled
             if self.auto_detector and self.config.get('auto_switch'):
                 if self._try_auto_conversion_at_space():
+                    self._clear_selection_repeat()
                     return  # space was consumed by auto-conversion
             # Normal space: add to buffer
             self.state_manager.on_key_press(data.code)
@@ -390,6 +401,7 @@ class LSwitchApp:
             )
             self.state_manager.context.backspace_repeats = 0
             self._selection_valid = False
+            self._clear_selection_repeat()
             self._last_retype_events = []
         else:
             self.state_manager.on_key_press(data.code)
@@ -405,6 +417,7 @@ class LSwitchApp:
             )
             self.state_manager.context.backspace_repeats = 0
             self._selection_valid = False
+            self._clear_selection_repeat()
             self._last_retype_events = []
 
     def _on_key_release(self, event):
@@ -426,19 +439,22 @@ class LSwitchApp:
             if is_double:
                 logger.debug(
                     "DoubleShift detected → _do_conversion() "
-                    "[sel_valid=%s, chars=%d]",
+                    "[sel_valid=%s, sel_repeat=%s, chars=%d]",
                     self._selection_valid,
+                    self._selection_repeat_valid,
                     self.state_manager.context.chars_in_buffer,
                 )
                 self._do_conversion()
         elif data.code in NAVIGATION_KEYS:
             self._last_auto_marker = None
             self._selection_valid = False
+            self._clear_selection_repeat()
             self._last_retype_events = []
             self.state_manager.on_navigation()
         elif data.code == KEY_ENTER:
             self._last_auto_marker = None
             self._selection_valid = False
+            self._clear_selection_repeat()
             self._last_retype_events = []
             self.state_manager.on_navigation()
         elif data.code == KEY_BACKSPACE:
@@ -469,6 +485,7 @@ class LSwitchApp:
     def _on_mouse_click(self, event):
         self._last_auto_marker = None
         self._selection_valid = False
+        self._clear_selection_repeat()
         self._last_retype_events = []
         # Do NOT actively request selection here. Some adapters must ask the
         # owner app (for example via Ctrl+C), and doing that during click
@@ -507,6 +524,7 @@ class LSwitchApp:
             self._prev_sel_owner_id = info.owner_id
             if not info.text:
                 self._selection_valid = False
+                self._clear_selection_repeat()
                 logger.trace(  # type: ignore[attr-defined]
                     "MouseRelease: selection empty"
                 )
@@ -657,6 +675,13 @@ class LSwitchApp:
         manual_lang: str = ""
         is_selection_conversion = False
         chars_in_buffer = self.state_manager.context.chars_in_buffer
+        selection_valid_for_convert = (
+            self._selection_valid
+            or (
+                self._selection_repeat_valid
+                and self._selection_repeat_generation == self._selection_generation
+            )
+        )
         if self.user_dict and chars_in_buffer > 0:
             try:
                 layout_info = self.xkb.get_current_layout() if self.xkb else None
@@ -664,7 +689,7 @@ class LSwitchApp:
                 manual_word, _ = self._extract_last_word_events(layout_info)
             except Exception:
                 pass
-        elif self.user_dict and chars_in_buffer == 0 and self._selection_valid and self._last_auto_marker is None:
+        elif self.user_dict and chars_in_buffer == 0 and selection_valid_for_convert and self._last_auto_marker is None:
             try:
                 from lswitch.core.text_converter import detect_language
                 sel_obj = self.selection.get_selection() if self.selection else None
@@ -757,7 +782,7 @@ class LSwitchApp:
             # If buffer has multiple words (contains space), trim to last word only.
             # Selection mode uses clipboard, not buffer — so trimming applies only
             # when retype would be chosen (chars > 0 and selection not valid).
-            if saved_count > 0 and not self._selection_valid:
+            if saved_count > 0 and not selection_valid_for_convert:
                 try:
                     _, last_word_events = self._extract_last_word_events(
                         self.xkb.get_current_layout() if self.xkb else None
@@ -785,20 +810,30 @@ class LSwitchApp:
                     logger.debug("DoConversion: trim skipped: %s", exc)
 
             logger.debug(
-                "DoConversion: selection_valid=%s, chars_in_buffer=%d, "
+                "DoConversion: selection_valid=%s, selection_repeat=%s, "
+                "effective_selection=%s, chars_in_buffer=%d, "
                 "saved_events=%d, sticky=%d, buffer=%r",
-                self._selection_valid, saved_count,
+                self._selection_valid,
+                self._selection_repeat_valid,
+                selection_valid_for_convert,
+                saved_count,
                 len(saved_events), len(self._last_retype_events),
                 self._decode_buffer(saved_events),
             )
 
             success = self.conversion_engine.convert(
                 self.state_manager.context,
-                selection_valid=self._selection_valid,
+                selection_valid=selection_valid_for_convert,
             )
 
             # Remember events for potential repeat retype
-            if success and saved_count > 0 and not self._selection_valid:
+            if success and saved_count == 0 and selection_valid_for_convert:
+                self._selection_repeat_valid = True
+                self._selection_repeat_generation = self._selection_generation
+            elif not success:
+                self._clear_selection_repeat()
+
+            if success and saved_count > 0 and not selection_valid_for_convert:
                 self._last_retype_events = saved_events
             else:
                 self._last_retype_events = []
