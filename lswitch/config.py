@@ -6,6 +6,7 @@ compatibility is intentionally not supported.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -27,6 +28,36 @@ WAYLAND_SELECTION_STRATEGIES = {
     "disabled",
 }
 
+DEFAULT_TIMING: dict[str, float] = {
+    'key_press_delay': 0.001,
+    'key_repeat_delay': 0.001,
+    'retype_before_replay_delay': 0.05,
+    'direct_type_after_layout_switch_delay': 0.03,
+    'undo_before_replay_delay': 0.03,
+    'auto_before_replay_delay': 0.03,
+    'auto_before_space_delay': 0.01,
+}
+
+DEFAULT_X11_SELECTION_TIMING: dict[str, float] = {
+    'poll_interval': 0.5,
+    'paste_delay': 0.02,
+    'restore_delay': 0.05,
+    'expand_selection_delay': 0.05,
+}
+
+DEFAULT_WAYLAND_TIMING: dict[str, float] = {
+    'wl_clipboard_timeout': 1.0,
+}
+
+DEFAULT_WAYLAND_SELECTION_TIMING: dict[str, float] = {
+    'copy_wait_timeout': 1.0,
+    'copy_poll_interval': 0.05,
+    'copy_retry_delay': 0.1,
+    'paste_delay': 0.12,
+    'restore_delay': 0.15,
+    'expand_selection_delay': 0.2,
+}
+
 # Single source of truth for default configuration
 DEFAULT_CONFIG: dict = {
     'double_click_timeout': 0.3,
@@ -38,9 +69,52 @@ DEFAULT_CONFIG: dict = {
     'user_dict_enabled': False,
     'user_dict_min_weight': 2,
     'wayland_selection_strategy': 'auto',
+    'timing': DEFAULT_TIMING,
+    'x11_selection_timing': DEFAULT_X11_SELECTION_TIMING,
+    'wayland_timing': DEFAULT_WAYLAND_TIMING,
+    'wayland_selection_timing': DEFAULT_WAYLAND_SELECTION_TIMING,
 }
 
-_CONFIG_KEY_ORDER = tuple(DEFAULT_CONFIG.keys())
+_CONFIG_KEY_ORDER = tuple(
+    key for key, value in DEFAULT_CONFIG.items()
+    if not isinstance(value, dict)
+)
+_CONFIG_SECTION_ORDER = (
+    'timing',
+    'x11_selection_timing',
+    'wayland_timing',
+    'wayland_selection_timing',
+)
+_CONFIG_SECTION_KEY_ORDER = {
+    key: tuple(value.keys())
+    for key, value in DEFAULT_CONFIG.items()
+    if isinstance(value, dict)
+}
+
+_CONFIG_COMMENTS: dict[str, str] = {
+    'timing': 'Common input/conversion timings, seconds.',
+    'timing.key_press_delay': 'Delay between virtual key press and release.',
+    'timing.key_repeat_delay': 'Delay between successive virtual key taps.',
+    'timing.retype_before_replay_delay': 'After layout switch before replaying typed word.',
+    'timing.direct_type_after_layout_switch_delay': 'After layout switch before direct selection typing.',
+    'timing.undo_before_replay_delay': 'After layout switch before undo replay.',
+    'timing.auto_before_replay_delay': 'After layout switch before auto-conversion replay.',
+    'timing.auto_before_space_delay': 'After auto-conversion replay before final Space handling.',
+    'x11_selection_timing': 'X11-only selection timings, seconds.',
+    'x11_selection_timing.poll_interval': 'PRIMARY selection polling interval.',
+    'x11_selection_timing.paste_delay': 'After writing clipboard before Ctrl+V.',
+    'x11_selection_timing.restore_delay': 'After Ctrl+V before restoring clipboard.',
+    'x11_selection_timing.expand_selection_delay': 'After Ctrl+Shift+Left before reading PRIMARY.',
+    'wayland_timing': 'Wayland-only system timings, seconds.',
+    'wayland_timing.wl_clipboard_timeout': 'Timeout for wl-copy/wl-paste helper commands.',
+    'wayland_selection_timing': 'Wayland-only selection timings, seconds.',
+    'wayland_selection_timing.copy_wait_timeout': 'Maximum wait for Ctrl+C to update clipboard.',
+    'wayland_selection_timing.copy_poll_interval': 'Clipboard poll interval after copy shortcut.',
+    'wayland_selection_timing.copy_retry_delay': 'Delay before trying fallback copy shortcut.',
+    'wayland_selection_timing.paste_delay': 'After writing clipboard before Ctrl+V.',
+    'wayland_selection_timing.restore_delay': 'After Ctrl+V before restoring clipboard.',
+    'wayland_selection_timing.expand_selection_delay': 'After Ctrl+Shift+Left before reading selection.',
+}
 
 
 # ------------------------------------------------------------------
@@ -84,6 +158,24 @@ def _dump_config_toml(config: dict) -> str:
     for key in _CONFIG_KEY_ORDER:
         if key in config:
             lines.append(f"{key} = {_toml_value(config[key])}")
+
+    for section in _CONFIG_SECTION_ORDER:
+        values = config.get(section)
+        if not isinstance(values, dict):
+            continue
+        lines.append("")
+        comment = _CONFIG_COMMENTS.get(section)
+        if comment:
+            lines.append(f"# {comment}")
+        lines.append(f"[{section}]")
+        key_order = _CONFIG_SECTION_KEY_ORDER.get(section, tuple(values.keys()))
+        for child_key in key_order:
+            if child_key not in values:
+                continue
+            child_comment = _CONFIG_COMMENTS.get(f"{section}.{child_key}")
+            if child_comment:
+                lines.append(f"# {child_comment}")
+            lines.append(f"{child_key} = {_toml_value(values[child_key])}")
 
     extra_keys = sorted(
         key for key in config
@@ -133,8 +225,8 @@ def validate_config(conf: dict | None) -> dict:
     if conf is None:
         conf = {}
 
-    defaults = dict(DEFAULT_CONFIG)
-    out = dict(defaults)
+    defaults = copy.deepcopy(DEFAULT_CONFIG)
+    out = copy.deepcopy(defaults)
 
     # double_click_timeout — positive float in [0.05, 10.0]
     dct = conf.get('double_click_timeout', defaults['double_click_timeout'])
@@ -205,6 +297,61 @@ def validate_config(conf: dict | None) -> dict:
         )
     out['wayland_selection_strategy'] = wss
 
+    out['timing'] = _validate_timing_table(
+        conf,
+        'timing',
+        defaults['timing'],
+    )
+    out['x11_selection_timing'] = _validate_timing_table(
+        conf,
+        'x11_selection_timing',
+        defaults['x11_selection_timing'],
+    )
+    out['wayland_timing'] = _validate_timing_table(
+        conf,
+        'wayland_timing',
+        defaults['wayland_timing'],
+    )
+    out['wayland_selection_timing'] = _validate_timing_table(
+        conf,
+        'wayland_selection_timing',
+        defaults['wayland_selection_timing'],
+    )
+
+    return out
+
+
+def _validate_timing_table(
+    conf: dict,
+    section: str,
+    defaults: dict[str, float],
+) -> dict[str, float]:
+    raw = conf.get(section, {})
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Invalid '{section}': must be a TOML table")
+
+    unknown = sorted(key for key in raw if key not in defaults)
+    if unknown:
+        raise ValueError(
+            f"Invalid '{section}': unknown keys {unknown}"
+        )
+
+    out: dict[str, float] = {}
+    for key, default_value in defaults.items():
+        value = raw.get(key, default_value)
+        if isinstance(value, bool):
+            raise ValueError(f"Invalid '{section}.{key}': must be a number")
+        try:
+            f_value = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid '{section}.{key}': {value}")
+        if not (0.0 <= f_value <= 30.0):
+            raise ValueError(
+                f"Invalid '{section}.{key}': must be between 0.0 and 30.0"
+            )
+        out[key] = f_value
     return out
 
 
@@ -240,7 +387,7 @@ def load_config(config_path: str | None = None, debug: bool = False) -> dict:
     If *config_path* is given, uses only that file.  Otherwise reads
     ``~/.config/lswitch/config.toml``.
     """
-    default_config = dict(DEFAULT_CONFIG)
+    default_config = copy.deepcopy(DEFAULT_CONFIG)
     path = config_path or DEFAULT_CONFIG_PATH
     if os.path.exists(path):
         _read_and_merge(path, default_config, debug=debug)
@@ -257,14 +404,14 @@ class ConfigManager:
     def __init__(self, config_path: str | None = None, debug: bool = False):
         self._config_path = config_path or DEFAULT_CONFIG_PATH
         self._debug = debug
-        self._config: dict = dict(DEFAULT_CONFIG)
+        self._config: dict = copy.deepcopy(DEFAULT_CONFIG)
         self._load_config()
 
     # -- internal -------------------------------------------------------
 
     def _load_config(self) -> None:
         """Reset to defaults, then overlay from TOML file if it exists."""
-        self._config = dict(DEFAULT_CONFIG)
+        self._config = copy.deepcopy(DEFAULT_CONFIG)
         if self._config_path and os.path.exists(self._config_path):
             _read_and_merge(self._config_path, self._config, debug=self._debug)
 
@@ -306,7 +453,7 @@ class ConfigManager:
 
     def reset_to_defaults(self) -> None:
         """Reset configuration to DEFAULT_CONFIG."""
-        self._config = dict(DEFAULT_CONFIG)
+        self._config = copy.deepcopy(DEFAULT_CONFIG)
 
     def validate(self) -> bool:
         """Validate current configuration. Returns True if valid."""

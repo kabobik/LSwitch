@@ -29,6 +29,7 @@ class ConversionEngine:
         system: "ISystemAdapter",
         user_dict: "UserDictionary | None" = None,
         debug: bool = False,
+        timing: dict | None = None,
     ):
         self.xkb = xkb
         self.selection = selection
@@ -37,6 +38,7 @@ class ConversionEngine:
         self.system = system
         self.user_dict = user_dict
         self.debug = debug
+        self.timing = timing or {}
 
     def choose_mode(self, context: "StateContext", selection_valid: bool = False) -> str:
         """Return 'selection', 'selection_expand', or 'retype' based on state.
@@ -75,11 +77,30 @@ class ConversionEngine:
         mode = self.choose_mode(context, selection_valid=selection_valid)
         logger.debug("Converting in mode: %s", mode)
         if mode == "retype":
-            retype = RetypeMode(self.virtual_kb, self.xkb, self.system, self.debug)
+            retype = RetypeMode(
+                self.virtual_kb,
+                self.xkb,
+                self.system,
+                self.debug,
+                timing=self.timing,
+            )
             return retype.execute(context)
         elif mode == "selection_expand":
-            sel_mode = SelectionMode(self.selection, self.xkb, self.system, self.debug, expand=True)
+            sel_mode = SelectionMode(
+                self.selection,
+                self.xkb,
+                self.system,
+                self.debug,
+                expand=True,
+                timing=self.timing,
+            )
             return sel_mode.execute(context)
         else:
-            sel_mode = SelectionMode(self.selection, self.xkb, self.system, self.debug)
+            sel_mode = SelectionMode(
+                self.selection,
+                self.xkb,
+                self.system,
+                self.debug,
+                timing=self.timing,
+            )
             return sel_mode.execute(context)

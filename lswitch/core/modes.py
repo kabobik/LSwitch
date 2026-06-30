@@ -53,11 +53,16 @@ class RetypeMode(BaseMode):
         xkb: "IXKBAdapter",
         system: "ISystemAdapter",
         debug: bool = False,
+        timing: dict | None = None,
     ):
         self.virtual_kb = virtual_kb
         self.xkb = xkb
         self.system = system
         self.debug = debug
+        timing = timing or {}
+        self.before_replay_delay = float(
+            timing.get("retype_before_replay_delay", 0.05)
+        )
 
     def execute(self, context: "StateContext") -> bool:
         if context.chars_in_buffer <= 0:
@@ -94,7 +99,7 @@ class RetypeMode(BaseMode):
 
         # 3. Brief pause so the application finishes processing the backspaces
         # before receiving the replayed characters.
-        time.sleep(0.05)
+        time.sleep(self.before_replay_delay)
 
         # 4. Replay saved events.
         # event_buffer contains KEY_PRESS events only (value=1).
@@ -126,12 +131,17 @@ class SelectionMode(BaseMode):
         system: "ISystemAdapter",
         debug: bool = False,
         expand: bool = False,
+        timing: dict | None = None,
     ):
         self.selection = selection
         self.xkb = xkb
         self.system = system
         self.debug = debug
         self.expand = expand
+        timing = timing or {}
+        self.direct_type_after_layout_switch_delay = float(
+            timing.get("direct_type_after_layout_switch_delay", 0.03)
+        )
 
     def execute(self, context: "StateContext") -> bool:
         from lswitch.core.text_converter import invert_layout_runs
@@ -146,8 +156,8 @@ class SelectionMode(BaseMode):
             return False
 
         # Selection can contain fragments from both layouts. Convert each
-        # non-whitespace fragment independently instead of forcing one global
-        # direction for the whole selection.
+        # alphabet run independently instead of forcing one global direction
+        # for the whole selection.
         converted_runs = invert_layout_runs(sel.text)
         converted = "".join(text for text, _target_lang in converted_runs)
         target_langs = [lang for _text, lang in converted_runs if lang]
@@ -177,7 +187,7 @@ class SelectionMode(BaseMode):
                     )
                     return False
                 self.xkb.switch_layout(target=layout)
-                time.sleep(0.03)
+                time.sleep(self.direct_type_after_layout_switch_delay)
                 if not replace_by_typing(run_text, layout_name=layout.name):
                     return False
         else:

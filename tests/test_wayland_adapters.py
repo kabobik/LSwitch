@@ -83,6 +83,17 @@ def _real_pyqt_modules():
 
 
 class TestWaylandSystemAdapter:
+    def test_applies_timing_config(self):
+        adapter = WaylandSystemAdapter(
+            virtual_kb=MagicMock(),
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            enable_wl_clipboard=False,
+            timing={"wl_clipboard_timeout": 2.5},
+        )
+
+        assert adapter.WL_CLIPBOARD_TIMEOUT == 2.5
+
     def test_send_key_sequence_uses_virtual_keyboard_combo(self):
         vk = MagicMock()
         adapter = WaylandSystemAdapter(
@@ -500,6 +511,29 @@ class TestWaylandSelectionAdapter:
         assert result is False
         assert system.keys_sent == []
         assert system.clipboard == "current"
+
+    def test_applies_timing_config(self):
+        system = _RecordingWaylandSystem(clipboard="current", primary="selected")
+        adapter = WaylandSelectionAdapter(
+            system=system,
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            timing={
+                "copy_wait_timeout": 0.2,
+                "copy_poll_interval": 0.03,
+                "copy_retry_delay": 0.04,
+                "paste_delay": 0.05,
+                "restore_delay": 0.06,
+                "expand_selection_delay": 0.07,
+            },
+        )
+
+        assert adapter.COPY_WAIT_TIMEOUT == 0.2
+        assert adapter.COPY_POLL_INTERVAL == 0.03
+        assert adapter.COPY_RETRY_DELAY == 0.04
+        assert adapter.PASTE_DELAY == 0.05
+        assert adapter.RESTORE_DELAY == 0.06
+        assert adapter.EXPAND_SELECTION_DELAY == 0.07
 
     def test_primary_strategy_replace_selection_by_typing(self):
         system = _RecordingWaylandSystem(clipboard="current", primary="selected")

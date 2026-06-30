@@ -65,9 +65,29 @@ class X11SelectionAdapter(ISelectionAdapter):
     re-selects the same text, a new owner_id marks the selection as fresh.
     """
 
-    def __init__(self, system: ISystemAdapter, debug: bool = False) -> None:
+    PASTE_DELAY = 0.02
+    RESTORE_DELAY = 0.05
+    EXPAND_SELECTION_DELAY = 0.05
+
+    def __init__(
+        self,
+        system: ISystemAdapter,
+        debug: bool = False,
+        timing: dict | None = None,
+    ) -> None:
         self._system = system
         self._debug = debug
+        timing = timing or {}
+        self.PASTE_DELAY = float(timing.get("paste_delay", type(self).PASTE_DELAY))
+        self.RESTORE_DELAY = float(
+            timing.get("restore_delay", type(self).RESTORE_DELAY)
+        )
+        self.EXPAND_SELECTION_DELAY = float(
+            timing.get(
+                "expand_selection_delay",
+                type(self).EXPAND_SELECTION_DELAY,
+            )
+        )
 
         # Cached previous state for freshness comparison
         self._prev_owner_id: int = 0
@@ -114,9 +134,9 @@ class X11SelectionAdapter(ISelectionAdapter):
         try:
             old_clip = self._system.get_clipboard(selection="clipboard")
             self._system.set_clipboard(new_text, selection="clipboard")
-            time.sleep(0.02)
+            time.sleep(self.PASTE_DELAY)
             self._system.send_key_sequence("ctrl+v")
-            time.sleep(0.05)
+            time.sleep(self.RESTORE_DELAY)
             # Restore the original clipboard
             if old_clip is not None:
                 self._system.set_clipboard(old_clip, selection="clipboard")
@@ -128,7 +148,7 @@ class X11SelectionAdapter(ISelectionAdapter):
         """Expand the current selection to the surrounding word via Ctrl+Shift+Left."""
         try:
             self._system.send_key_sequence("ctrl+shift+Left")
-            time.sleep(0.05)
+            time.sleep(self.EXPAND_SELECTION_DELAY)
         except Exception:
             pass
         return self.get_selection()

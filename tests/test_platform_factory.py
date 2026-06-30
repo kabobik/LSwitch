@@ -91,12 +91,18 @@ class TestCreatePlatformAdapters:
         fake_vk = MagicMock()
         fake_layout_backend = MagicMock()
         main_thread = DirectMainThreadInvoker()
-        with patch("lswitch.platform.platform_factory.VirtualKeyboard", return_value=fake_vk):
+        with patch(
+            "lswitch.platform.platform_factory.VirtualKeyboard",
+            return_value=fake_vk,
+        ) as vk_cls:
             adapters = create_platform_adapters(
                 debug=True,
                 main_thread=main_thread,
                 layout_backend=fake_layout_backend,
                 wayland_selection_strategy="primary_selection",
+                timing={"key_press_delay": 0.004},
+                wayland_timing={"wl_clipboard_timeout": 2.0},
+                wayland_selection_timing={"paste_delay": 0.2},
                 env={
                     "XDG_SESSION_TYPE": "wayland",
                     "XDG_CURRENT_DESKTOP": "KDE",
@@ -111,6 +117,12 @@ class TestCreatePlatformAdapters:
         assert isinstance(adapters.selection, WaylandSelectionAdapter)
         assert adapters.selection.strategy == "primary_selection"
         assert adapters.virtual_kb is fake_vk
+        assert adapters.system.WL_CLIPBOARD_TIMEOUT == 2.0
+        assert adapters.selection.PASTE_DELAY == 0.2
+        vk_cls.assert_called_once_with(
+            debug=True,
+            timing={"key_press_delay": 0.004},
+        )
         assert adapters.selection_polling_enabled is False
         assert adapters.main_thread is main_thread
         assert adapters.selection_mouse_release_tracking_enabled is True
@@ -130,9 +142,17 @@ class TestCreatePlatformAdapters:
 
     def test_create_x11_platform_adapters_wires_concrete_types(self):
         fake_vk = MagicMock()
-        with patch("lswitch.platform.platform_factory.VirtualKeyboard", return_value=fake_vk):
+        with patch(
+            "lswitch.platform.platform_factory.VirtualKeyboard",
+            return_value=fake_vk,
+        ) as vk_cls:
             with patch.object(X11XKBAdapter, "__init__", return_value=None):
-                adapters = create_x11_platform_adapters(debug=True, compositor="kde")
+                adapters = create_x11_platform_adapters(
+                    debug=True,
+                    compositor="kde",
+                    timing={"key_repeat_delay": 0.006},
+                    selection_timing={"paste_delay": 0.03},
+                )
 
         assert isinstance(adapters, PlatformAdapters)
         assert adapters.session_type == "x11"
@@ -141,6 +161,11 @@ class TestCreatePlatformAdapters:
         assert isinstance(adapters.xkb, X11XKBAdapter)
         assert isinstance(adapters.selection, X11SelectionAdapter)
         assert adapters.virtual_kb is fake_vk
+        assert adapters.selection.PASTE_DELAY == 0.03
+        vk_cls.assert_called_once_with(
+            debug=True,
+            timing={"key_repeat_delay": 0.006},
+        )
         assert adapters.selection_polling_enabled is True
         assert adapters.selection_mouse_release_tracking_enabled is True
 

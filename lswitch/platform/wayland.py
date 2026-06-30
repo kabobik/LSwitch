@@ -73,6 +73,7 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         enable_wl_clipboard: bool = True,
         command_lookup: Callable[[str], str | None] | None = None,
         command_runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+        timing: dict | None = None,
     ) -> None:
         super().__init__(compositor=compositor, debug=debug)
         self.virtual_kb = virtual_kb
@@ -81,6 +82,10 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         self._command_lookup = command_lookup or shutil.which
         self._command_runner = command_runner or subprocess.run
         self._wl_clipboard_available: bool | None = None
+        timing = timing or {}
+        self.WL_CLIPBOARD_TIMEOUT = float(
+            timing.get("wl_clipboard_timeout", type(self).WL_CLIPBOARD_TIMEOUT)
+        )
 
     def run_command(self, args: list[str], timeout: float = 1.0) -> CommandResult:
         raise self._unsupported("run_command")
@@ -314,6 +319,7 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         compositor: str = "unknown",
         debug: bool = False,
         strategy: str = "auto",
+        timing: dict | None = None,
     ) -> None:
         super().__init__(compositor=compositor, debug=debug)
         self.system = system
@@ -321,6 +327,26 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         self.strategy = self._normalize_strategy(strategy)
         self._prev_text: str = ""
         self._saved_clipboard: str | None = None
+        timing = timing or {}
+        self.COPY_WAIT_TIMEOUT = float(
+            timing.get("copy_wait_timeout", type(self).COPY_WAIT_TIMEOUT)
+        )
+        self.COPY_POLL_INTERVAL = float(
+            timing.get("copy_poll_interval", type(self).COPY_POLL_INTERVAL)
+        )
+        self.COPY_RETRY_DELAY = float(
+            timing.get("copy_retry_delay", type(self).COPY_RETRY_DELAY)
+        )
+        self.PASTE_DELAY = float(timing.get("paste_delay", type(self).PASTE_DELAY))
+        self.RESTORE_DELAY = float(
+            timing.get("restore_delay", type(self).RESTORE_DELAY)
+        )
+        self.EXPAND_SELECTION_DELAY = float(
+            timing.get(
+                "expand_selection_delay",
+                type(self).EXPAND_SELECTION_DELAY,
+            )
+        )
 
     def get_selection(self) -> SelectionInfo:
         if self.strategy == "disabled":

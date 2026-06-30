@@ -45,6 +45,18 @@ class TestDeviceName:
     def test_device_name_constant(self):
         assert VirtualKeyboard.DEVICE_NAME == "LSwitch Virtual Keyboard"
 
+    def test_init_applies_timing_config(self):
+        with patch.object(_evdev_mod, "UInput", return_value=MagicMock()):
+            vk = VirtualKeyboard(
+                timing={
+                    "key_press_delay": 0.004,
+                    "key_repeat_delay": 0.005,
+                },
+            )
+
+        assert vk.KEY_PRESS_DELAY == 0.004
+        assert vk.KEY_REPEAT_DELAY == 0.005
+
 
 class TestTapKey:
     def test_tap_key_press_release(self):

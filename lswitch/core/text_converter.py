@@ -39,12 +39,12 @@ def convert_text(text: str, direction: str | None = None) -> str:
 
 
 def invert_layout_text(text: str) -> str:
-    """Invert layout direction independently for each non-whitespace fragment.
+    """Invert layout direction independently for each alphabet run.
 
     ``convert_text(text)`` intentionally chooses one direction for the whole
     string. Selection conversion needs different behavior: a multi-word or
-    multi-line selection can contain fragments from both layouts, and each
-    fragment should be inverted on its own.
+    multi-line selection can contain fragments from both layouts, and each EN
+    or RU run should be inverted on its own.
     """
     return "".join(converted for converted, _target_lang in invert_layout_runs(text))
 

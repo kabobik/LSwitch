@@ -14,9 +14,16 @@ class VirtualKeyboard:
 
     DEVICE_NAME = "LSwitch Virtual Keyboard"
 
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = False, timing: dict | None = None):
         self.debug = debug
         self._uinput: Any = None
+        timing = timing or {}
+        self.KEY_PRESS_DELAY = float(
+            timing.get("key_press_delay", type(self).KEY_PRESS_DELAY)
+        )
+        self.KEY_REPEAT_DELAY = float(
+            timing.get("key_repeat_delay", type(self).KEY_REPEAT_DELAY)
+        )
         self._open()
 
     def _open(self) -> None:

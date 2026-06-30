@@ -157,6 +157,36 @@ user_dict_min_weight = 2
 #   primary_selection - read PRIMARY and replace selection by direct UInput typing
 #   disabled          - disable Wayland selection conversion
 wayland_selection_strategy = "auto"
+
+# Common input/conversion timings, seconds.
+[timing]
+key_press_delay = 0.001
+key_repeat_delay = 0.001
+retype_before_replay_delay = 0.05
+direct_type_after_layout_switch_delay = 0.03
+undo_before_replay_delay = 0.03
+auto_before_replay_delay = 0.03
+auto_before_space_delay = 0.01
+
+# X11-only selection timings, seconds.
+[x11_selection_timing]
+poll_interval = 0.5
+paste_delay = 0.02
+restore_delay = 0.05
+expand_selection_delay = 0.05
+
+# Wayland-only system timings, seconds.
+[wayland_timing]
+wl_clipboard_timeout = 1.0
+
+# Wayland-only selection timings, seconds.
+[wayland_selection_timing]
+copy_wait_timeout = 1.0
+copy_poll_interval = 0.05
+copy_retry_delay = 0.1
+paste_delay = 0.12
+restore_delay = 0.15
+expand_selection_delay = 0.2
 ```
 
 **Параметры:**
@@ -172,6 +202,10 @@ wayland_selection_strategy = "auto"
   `"clipboard_copy"` всегда использует copy/paste flow;
   `"primary_selection"` читает PRIMARY и заменяет выделение прямым набором без `Ctrl+C/Ctrl+V`;
   `"disabled"` отключает selection-конвертацию на Wayland
+- `[timing]` — общие задержки виртуальной клавиатуры и replay после смены раскладки
+- `[x11_selection_timing]` — X11-only задержки polling, expand, paste и restore для selection
+- `[wayland_timing]` — Wayland-only системные задержки clipboard backend-а
+- `[wayland_selection_timing]` — Wayland-only задержки copy/paste/restore и expand для selection
 
 Пользовательский словарь хранится отдельно: `~/.config/lswitch/user_dict.toml`.
 Он запоминает не "правильные слова", а решения для текста, набранного в конкретной раскладке:

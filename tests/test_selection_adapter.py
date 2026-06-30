@@ -168,3 +168,17 @@ class TestX11SelectionAdapterUnit:
         info = adapter.expand_selection_to_word()
         assert isinstance(info, SelectionInfo)
         assert "ctrl+shift+Left" in sys.keys_sent
+
+    def test_applies_timing_config(self):
+        adapter = X11SelectionAdapter(
+            system=_RecordingSystemAdapter(),
+            timing={
+                "paste_delay": 0.03,
+                "restore_delay": 0.04,
+                "expand_selection_delay": 0.06,
+            },
+        )
+
+        assert adapter.PASTE_DELAY == 0.03
+        assert adapter.RESTORE_DELAY == 0.04
+        assert adapter.EXPAND_SELECTION_DELAY == 0.06

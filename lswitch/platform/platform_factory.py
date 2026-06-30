@@ -100,6 +100,10 @@ def create_platform_adapters(
     main_thread: MainThreadInvoker | None = None,
     layout_backend=None,
     wayland_selection_strategy: str = "auto",
+    timing: Mapping[str, float] | None = None,
+    x11_selection_timing: Mapping[str, float] | None = None,
+    wayland_timing: Mapping[str, float] | None = None,
+    wayland_selection_timing: Mapping[str, float] | None = None,
 ) -> PlatformAdapters:
     """Create adapters for the current session.
 
@@ -117,18 +121,28 @@ def create_platform_adapters(
             main_thread=main_thread,
             layout_backend=layout_backend,
             selection_strategy=wayland_selection_strategy,
+            timing=timing,
+            wayland_timing=wayland_timing,
+            wayland_selection_timing=wayland_selection_timing,
         )
     if session_type == "unknown":
         raise RuntimeError(
             "LSwitch requires an active X11 or Wayland graphical session "
             "(DISPLAY or WAYLAND_DISPLAY is not set)."
         )
-    return create_x11_platform_adapters(debug=debug, compositor=compositor)
+    return create_x11_platform_adapters(
+        debug=debug,
+        compositor=compositor,
+        timing=timing,
+        selection_timing=x11_selection_timing,
+    )
 
 
 def create_x11_platform_adapters(
     debug: bool = False,
     compositor: str | None = None,
+    timing: Mapping[str, float] | None = None,
+    selection_timing: Mapping[str, float] | None = None,
 ) -> PlatformAdapters:
     """Create the current production X11 adapter set."""
     from lswitch.platform.selection_adapter import X11SelectionAdapter
@@ -137,8 +151,12 @@ def create_x11_platform_adapters(
 
     system = SubprocessSystemAdapter(debug=debug)
     xkb = X11XKBAdapter(debug=debug)
-    selection = X11SelectionAdapter(system=system, debug=debug)
-    virtual_kb = VirtualKeyboard(debug=debug)
+    selection = X11SelectionAdapter(
+        system=system,
+        debug=debug,
+        timing=dict(selection_timing or {}),
+    )
+    virtual_kb = VirtualKeyboard(debug=debug, timing=dict(timing or {}))
     return PlatformAdapters(
         session_type="x11",
         compositor=compositor or "unknown",
@@ -158,6 +176,9 @@ def create_wayland_platform_adapters(
     main_thread: MainThreadInvoker | None = None,
     layout_backend=None,
     selection_strategy: str = "auto",
+    timing: Mapping[str, float] | None = None,
+    wayland_timing: Mapping[str, float] | None = None,
+    wayland_selection_timing: Mapping[str, float] | None = None,
 ) -> PlatformAdapters:
     """Create the Wayland adapter skeleton.
 
@@ -177,12 +198,13 @@ def create_wayland_platform_adapters(
             "Create the Qt runtime before calling create_platform_adapters()."
         )
 
-    virtual_kb = VirtualKeyboard(debug=debug)
+    virtual_kb = VirtualKeyboard(debug=debug, timing=dict(timing or {}))
     system = WaylandSystemAdapter(
         virtual_kb=virtual_kb,
         main_thread=main_thread,
         compositor=compositor or "unknown",
         debug=debug,
+        timing=dict(wayland_timing or {}),
     )
     xkb = WaylandLayoutAdapter(
         main_thread=main_thread,
@@ -197,6 +219,7 @@ def create_wayland_platform_adapters(
         compositor=compositor or "unknown",
         debug=debug,
         strategy=selection_strategy,
+        timing=dict(wayland_selection_timing or {}),
     )
     return PlatformAdapters(
         session_type="wayland",

@@ -136,13 +136,19 @@ class _SelectionPollerThread(threading.Thread):
     Enabled only when the platform factory marks polling as appropriate.
     """
 
-    def __init__(self, selection_adapter, on_selection_changed=None):
+    def __init__(
+        self,
+        selection_adapter,
+        on_selection_changed=None,
+        poll_interval: float = 0.5,
+    ):
         super().__init__(daemon=True, name="selection-poller")
         self._selection = selection_adapter
         self._running = True
         self._prev_text: str = ""
         self._prev_owner_id: int = 0
         self._on_selection_changed = on_selection_changed  # callback(text, owner_id)
+        self._poll_interval = poll_interval
 
     def run(self):
         import time
@@ -163,7 +169,7 @@ class _SelectionPollerThread(threading.Thread):
                         self._on_selection_changed(info.text, info.owner_id)
             except Exception as exc:
                 _logger.trace("selection-poller error: %s", exc)  # type: ignore[attr-defined]
-            time.sleep(0.5)
+            time.sleep(self._poll_interval)
 
     def stop(self):
         self._running = False
@@ -197,6 +203,13 @@ class LSwitchApp:
 
         # Configuration
         self.config = ConfigManager(config_path=config_path, debug=debug)
+        self.timing = self.config.get('timing', {})
+        self.x11_selection_timing = self.config.get('x11_selection_timing', {})
+        self.wayland_timing = self.config.get('wayland_timing', {})
+        self.wayland_selection_timing = self.config.get(
+            'wayland_selection_timing',
+            {},
+        )
 
         # Core components
         self.event_bus = EventBus()
@@ -246,6 +259,10 @@ class LSwitchApp:
                 'wayland_selection_strategy',
                 'auto',
             ),
+            timing=self.timing,
+            x11_selection_timing=self.x11_selection_timing,
+            wayland_timing=self.wayland_timing,
+            wayland_selection_timing=self.wayland_selection_timing,
         )
         self.system = self._platform.system
         self.xkb = self._platform.xkb
@@ -279,6 +296,7 @@ class LSwitchApp:
             system=self.system,
             user_dict=self.user_dict,
             debug=self.debug,
+            timing=self.timing,
         )
 
         self.event_manager = EventManager(self.event_bus, debug=self.debug)
@@ -728,7 +746,9 @@ class LSwitchApp:
                         if target:
                             self.xkb.switch_layout(target=target)
                     import time as _time_mod
-                    _time_mod.sleep(0.03)
+                    _time_mod.sleep(
+                        self.timing.get('undo_before_replay_delay', 0.03)
+                    )
                     self.virtual_kb.replay_events(marker['word_events'])
                     self.virtual_kb.tap_key(KEY_SPACE)
                 except Exception as exc:
@@ -1018,13 +1038,13 @@ class LSwitchApp:
             if target and self.xkb:
                 self.xkb.switch_layout(target=target)
 
-            _time_mod.sleep(0.03)
+            _time_mod.sleep(self.timing.get('auto_before_replay_delay', 0.03))
 
             # Replay original keycodes in the new layout (produces converted text)
             self.virtual_kb.replay_events(word_events)
             
             # Дать приложению переварить введенный текст перед финальным пробелом
-            _time_mod.sleep(0.01)
+            _time_mod.sleep(self.timing.get('auto_before_space_delay', 0.01))
 
             # We DO NOT tap_key(KEY_SPACE) here, because the physical Space key
             # is almost certainly still held down by the user, and desktop
@@ -1084,6 +1104,7 @@ class LSwitchApp:
             self._selection_poller = _SelectionPollerThread(
                 self.selection,
                 on_selection_changed=self._on_poller_selection_changed,
+                poll_interval=self.x11_selection_timing.get('poll_interval', 0.5),
             )
             self._selection_poller.start()
 
