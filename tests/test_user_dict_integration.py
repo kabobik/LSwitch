@@ -87,7 +87,7 @@ def _make_user_dict_in_memory() -> UserDictionary:
     """Create an in-memory UserDictionary (no disk I/O)."""
     ud = UserDictionary.__new__(UserDictionary)
     ud.path = ":memory:"
-    ud.data = {"words": {}}
+    ud.data = UserDictionary._empty_data()
     ud.flush = MagicMock()  # suppress file writes
     return ud
 
@@ -235,7 +235,6 @@ class TestNegativeWeightBlocksConversion:
 
     def test_weight_above_threshold_allows(self):
         ud = _make_user_dict_in_memory()
-        key = ud._key('ghbdtn', 'en')
 
         dict_svc = MagicMock()
         dict_svc.should_convert.return_value = (True, "converted found in target dict")

@@ -640,10 +640,10 @@ class LSwitchApp:
         User-dict learning logic:
           A) Shift+Shift right after auto-conversion (undo):
              _last_auto_marker is set, event_buffer is empty (reset by auto-conv).
-             → add_correction(typed_word, typed_lang)  — weight -1
+             → add_correction(typed_word, typed_lang)  — keep confidence +2
           B) Pure manual Shift+Shift (no prior auto-conversion):
              _last_auto_marker is None, event_buffer has the typed chars.
-             → add_confirmation(typed_word, typed_lang)  — weight +1
+             → add_confirmation(typed_word, typed_lang)  — convert confidence +2
              Weight accumulates across sessions; once |weight| >= min_weight
              AutoDetector will handle this word automatically.
         """
@@ -687,7 +687,7 @@ class LSwitchApp:
                     marker['word'], marker['lang'], debug=self.debug,
                 )
                 logger.info(
-                    "Correction: '%s' (%s) — weight -2",
+                    "Correction: '%s' (%s) — keep +2",
                     marker['word'], marker['lang'],
                 )
             
@@ -726,7 +726,7 @@ class LSwitchApp:
                     converted_word, target_lang, debug=self.debug, weight_step=self.MANUAL_WEIGHT_STEP
                 )
                 logger.info(
-                    "Selection manual conversion: '%s' (%s) -> penalizing result '%s' (%s) — weight -%d",
+                    "Selection manual conversion: '%s' (%s) -> keeping result '%s' (%s) +%d",
                     manual_word, manual_lang, converted_word, target_lang, self.MANUAL_WEIGHT_STEP
                 )
             else:
@@ -734,7 +734,7 @@ class LSwitchApp:
                     manual_word, manual_lang, debug=self.debug, weight_step=self.MANUAL_WEIGHT_STEP
                 )
                 logger.info(
-                    "Manual conversion: '%s' (%s) — weight +%d",
+                    "Manual conversion: '%s' (%s) — convert +%d",
                     manual_word, manual_lang, self.MANUAL_WEIGHT_STEP,
                 )
 

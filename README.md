@@ -175,6 +175,25 @@ wayland_selection_strategy = "auto"
   `"primary_selection"` читает PRIMARY и заменяет выделение прямым набором без `Ctrl+C/Ctrl+V`;
   `"disabled"` отключает selection-конвертацию на Wayland
 
+Пользовательский словарь хранится отдельно: `~/.config/lswitch/user_dict.toml`.
+Он запоминает не "правильные слова", а решения для текста, набранного в конкретной раскладке:
+
+```toml
+[convert.en]
+"ghbdtn" = 2
+
+[keep.en]
+"hello" = 2
+
+[convert.ru]
+"руддщ" = 2
+
+[keep.ru]
+"привет" = 2
+```
+
+Число — это уверенность. Итоговый score считается как `convert - keep`; когда `abs(score)` достигает `user_dict_min_weight`, правило начинает влиять на автоопределение.
+
 После изменения конфига:
 ```bash
 make restart
