@@ -7,7 +7,6 @@ import sys
 
 import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.config import ConfigManager
-from lswitch.core.learning_service import LearningService
 from lswitch.runtime import (
     PidLock,
     SelectionPollerThread,
@@ -188,7 +187,7 @@ class LSwitchApp:
             manual_weight_step=self.MANUAL_WEIGHT_STEP,
         )
 
-    def _learning(self) -> LearningService:
+    def _learning(self):
         """Return LearningService synced with the current app-level user_dict."""
         sync_user_dictionary_components(
             user_dict=self.user_dict,
@@ -497,10 +496,6 @@ class LSwitchApp:
         )
         self._last_auto_marker = result.last_auto_marker
         self._last_retype_events = result.sticky_events
-
-    @staticmethod
-    def _is_single_word_for_learning(text: str) -> bool:
-        return LearningService.is_single_word_for_learning(text)
 
     # ------------------------------------------------------------------
     # Auto-conversion (space-triggered, AutoDetector)
