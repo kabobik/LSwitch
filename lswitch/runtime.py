@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from dataclasses import dataclass
 
 from lswitch.core.conversion_engine import ConversionEngine
@@ -15,6 +17,51 @@ from lswitch.core.typed_buffer import TypedBufferService
 from lswitch.intelligence.auto_detector import AutoDetector
 from lswitch.intelligence.dictionary_service import DictionaryService
 from lswitch.intelligence.ngram_analyzer import NgramAnalyzer
+
+logger = logging.getLogger(__name__)
+
+
+class SelectionPollerThread(threading.Thread):
+    """Background daemon thread polling platform selection changes."""
+
+    def __init__(
+        self,
+        selection_adapter,
+        on_selection_changed=None,
+        poll_interval: float = 0.5,
+    ):
+        super().__init__(daemon=True, name="selection-poller")
+        self._selection = selection_adapter
+        self._running = True
+        self._prev_text: str = ""
+        self._prev_owner_id: int = 0
+        self._on_selection_changed = on_selection_changed
+        self._poll_interval = poll_interval
+
+    def run(self):
+        import time
+
+        while self._running:
+            try:
+                info = self._selection.get_selection()
+                text_changed = info.text != self._prev_text
+                owner_changed = info.owner_id != self._prev_owner_id
+                if text_changed or owner_changed:
+                    self._prev_text = info.text
+                    self._prev_owner_id = info.owner_id
+                    logger.debug(
+                        "Selection changed: text=%r owner=0x%x",
+                        info.text[:80] if info.text else "",
+                        info.owner_id,
+                    )
+                    if self._on_selection_changed:
+                        self._on_selection_changed(info.text, info.owner_id)
+            except Exception as exc:
+                logger.trace("selection-poller error: %s", exc)  # type: ignore[attr-defined]
+            time.sleep(self._poll_interval)
+
+    def stop(self):
+        self._running = False
 
 
 @dataclass(frozen=True)

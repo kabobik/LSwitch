@@ -19,6 +19,7 @@ from lswitch.runtime import (
     ConversionRuntimeComponents,
     InputDeviceRuntimeComponents,
     RuntimeCoreComponents,
+    SelectionPollerThread,
     create_conversion_runtime,
     create_core_components,
     create_input_device_runtime,
@@ -172,3 +173,25 @@ def test_create_input_device_runtime_leaves_virtual_keyboard_name_unset_without_
     )
 
     assert components.device_manager._virtual_kb_name is None
+
+
+def test_selection_poller_thread_initializes_and_stops():
+    selection = MagicMock()
+    callback = MagicMock()
+
+    poller = SelectionPollerThread(
+        selection,
+        on_selection_changed=callback,
+        poll_interval=0.25,
+    )
+
+    assert poller.daemon is True
+    assert poller.name == "selection-poller"
+    assert poller._selection is selection
+    assert poller._on_selection_changed is callback
+    assert poller._poll_interval == 0.25
+    assert poller._running is True
+
+    poller.stop()
+
+    assert poller._running is False

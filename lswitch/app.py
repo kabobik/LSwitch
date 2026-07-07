@@ -12,6 +12,7 @@ import threading
 import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.config import ConfigManager
 from lswitch.runtime import (
+    SelectionPollerThread,
     create_conversion_runtime,
     create_core_components,
     create_input_device_runtime,
@@ -130,54 +131,6 @@ class _PidLock:
 from lswitch.core.learning_service import LearningService
 
 
-class _SelectionPollerThread(threading.Thread):
-    """Background daemon thread polling platform selection every 500ms.
-
-    Logs changes at DEBUG level, and notifies ``LSwitchApp`` via
-    ``on_selection_changed`` callback so the baseline is always up to date.
-    Does NOT read selection at click time (avoids platform races).
-    Enabled only when the platform factory marks polling as appropriate.
-    """
-
-    def __init__(
-        self,
-        selection_adapter,
-        on_selection_changed=None,
-        poll_interval: float = 0.5,
-    ):
-        super().__init__(daemon=True, name="selection-poller")
-        self._selection = selection_adapter
-        self._running = True
-        self._prev_text: str = ""
-        self._prev_owner_id: int = 0
-        self._on_selection_changed = on_selection_changed  # callback(text, owner_id)
-        self._poll_interval = poll_interval
-
-    def run(self):
-        import time
-        _logger = logging.getLogger(__name__)
-        while self._running:
-            try:
-                info = self._selection.get_selection()
-                text_changed = info.text != self._prev_text
-                owner_changed = info.owner_id != self._prev_owner_id
-                if text_changed or owner_changed:
-                    self._prev_text = info.text
-                    self._prev_owner_id = info.owner_id
-                    _logger.debug(
-                        "Selection changed: text=%r owner=0x%x",
-                        info.text[:80] if info.text else "", info.owner_id,
-                    )
-                    if self._on_selection_changed:
-                        self._on_selection_changed(info.text, info.owner_id)
-            except Exception as exc:
-                _logger.trace("selection-poller error: %s", exc)  # type: ignore[attr-defined]
-            time.sleep(self._poll_interval)
-
-    def stop(self):
-        self._running = False
-
-
 class LSwitchApp:
     """Single-process application combining input daemon and tray GUI.
 
@@ -256,7 +209,7 @@ class LSwitchApp:
         self._last_auto_marker = None
         self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
         self._platform = None
-        self._selection_poller: _SelectionPollerThread | None = None
+        self._selection_poller: SelectionPollerThread | None = None
 
     # ------------------------------------------------------------------
     # Platform initialisation (lazy — for testability)
@@ -596,7 +549,7 @@ class LSwitchApp:
     # ------------------------------------------------------------------
 
     def _on_poller_selection_changed(self, text: str, owner_id: int) -> None:
-        """Called by _SelectionPollerThread when platform selection changes.
+        """Called by SelectionPollerThread when platform selection changes.
 
         Sets fresh=True so the next Shift+Shift will use SelectionMode.
         Does NOT update baseline (_prev_sel_text / _prev_sel_owner_id) —
@@ -801,7 +754,7 @@ class LSwitchApp:
             raise
 
         if self.selection and getattr(self._platform, "selection_polling_enabled", False):
-            self._selection_poller = _SelectionPollerThread(
+            self._selection_poller = SelectionPollerThread(
                 self.selection,
                 on_selection_changed=self._on_poller_selection_changed,
                 poll_interval=self.x11_selection_timing.get('poll_interval', 0.5),
