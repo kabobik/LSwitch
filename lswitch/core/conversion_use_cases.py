@@ -4,21 +4,31 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lswitch.core.auto_marker import AutoConversionMarker
 
 if TYPE_CHECKING:
+    from lswitch.core.conversion_engine import ConversionEngine
     from lswitch.input.virtual_keyboard import VirtualKeyboard
     from lswitch.platform.xkb_adapter import IXKBAdapter
     from lswitch.core.learning_service import LearningService
+    from lswitch.core.learning_service import PendingManualLearning
     from lswitch.core.selection_tracker import SelectionFreshnessTracker
     from lswitch.intelligence.user_dictionary import UserDictionary
+    from lswitch.core.states import StateContext
 
 logger = logging.getLogger(__name__)
 
 KEY_BACKSPACE = 14
 KEY_SPACE = 57
+
+
+@dataclass(frozen=True)
+class ManualConversionResult:
+    success: bool
+    sticky_events: list
 
 
 class UndoAutoConversionUseCase:
@@ -102,3 +112,55 @@ class PostConversionStateUpdater:
         if success and saved_count > 0 and not selection_valid_for_convert:
             return list(saved_events)
         return []
+
+
+class ManualConversionUseCase:
+    """Execute manual conversion and related learning/state updates."""
+
+    def __init__(
+        self,
+        *,
+        conversion_engine: "ConversionEngine",
+        learning_service: "LearningService",
+        post_conversion_updater: PostConversionStateUpdater,
+    ):
+        self.conversion_engine = conversion_engine
+        self.learning_service = learning_service
+        self.post_conversion_updater = post_conversion_updater
+
+    def execute(
+        self,
+        *,
+        context: "StateContext",
+        selection_valid_for_convert: bool,
+        saved_events: list,
+        saved_count: int,
+        pending_manual_learning: "PendingManualLearning | None",
+    ) -> ManualConversionResult:
+        success = self.conversion_engine.convert(
+            context,
+            selection_valid=selection_valid_for_convert,
+        )
+
+        if success and self.learning_service.user_dict is not None:
+            if pending_manual_learning is not None:
+                self.learning_service.record_manual_conversion(
+                    pending_manual_learning.word,
+                    pending_manual_learning.lang,
+                    pending_manual_learning.is_selection_conversion,
+                )
+            elif saved_count == 0:
+                self.learning_service.record_selection_conversion(
+                    getattr(self.conversion_engine, "last_conversion", None)
+                )
+
+        sticky_events = self.post_conversion_updater.update(
+            success=success,
+            saved_count=saved_count,
+            saved_events=saved_events,
+            selection_valid_for_convert=selection_valid_for_convert,
+        )
+        return ManualConversionResult(
+            success=success,
+            sticky_events=sticky_events,
+        )

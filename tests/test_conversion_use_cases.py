@@ -8,11 +8,14 @@ from lswitch.core.auto_marker import AutoConversionMarker
 from lswitch.core.conversion_use_cases import (
     KEY_BACKSPACE,
     KEY_SPACE,
+    ManualConversionUseCase,
     PostConversionStateUpdater,
     UndoAutoConversionUseCase,
 )
 from lswitch.core.events import KeyEventData
+from lswitch.core.learning_service import PendingManualLearning
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
+from lswitch.core.states import StateContext
 from lswitch.platform.xkb_adapter import LayoutInfo
 
 
@@ -137,3 +140,98 @@ def test_post_conversion_returns_sticky_events_for_successful_retype_only():
     )
 
     assert selection_sticky == []
+
+
+def test_manual_conversion_use_case_records_pending_learning_and_sticky_events():
+    conversion_engine = MagicMock()
+    conversion_engine.convert.return_value = True
+    learning_service = MagicMock()
+    learning_service.user_dict = object()
+    tracker = SelectionFreshnessTracker()
+    use_case = ManualConversionUseCase(
+        conversion_engine=conversion_engine,
+        learning_service=learning_service,
+        post_conversion_updater=PostConversionStateUpdater(tracker),
+    )
+    events = [KeyEventData(code=34, value=1)]
+    pending = PendingManualLearning("ghbdtn", "en", False)
+
+    result = use_case.execute(
+        context=StateContext(),
+        selection_valid_for_convert=False,
+        saved_events=events,
+        saved_count=1,
+        pending_manual_learning=pending,
+    )
+
+    assert result.success is True
+    assert result.sticky_events == events
+    assert result.sticky_events is not events
+    conversion_engine.convert.assert_called_once()
+    learning_service.record_manual_conversion.assert_called_once_with(
+        "ghbdtn",
+        "en",
+        False,
+    )
+
+
+def test_manual_conversion_use_case_records_selection_learning_from_last_conversion():
+    conversion_engine = MagicMock()
+    conversion_engine.convert.return_value = True
+    conversion_engine.last_conversion = {
+        "mode": "selection",
+        "original": "ghbdtn",
+        "converted": "привет",
+        "target_lang": "ru",
+    }
+    learning_service = MagicMock()
+    learning_service.user_dict = object()
+    tracker = SelectionFreshnessTracker(valid=True)
+    tracker.set_valid(True)
+    use_case = ManualConversionUseCase(
+        conversion_engine=conversion_engine,
+        learning_service=learning_service,
+        post_conversion_updater=PostConversionStateUpdater(tracker),
+    )
+
+    result = use_case.execute(
+        context=StateContext(),
+        selection_valid_for_convert=True,
+        saved_events=[],
+        saved_count=0,
+        pending_manual_learning=None,
+    )
+
+    assert result.success is True
+    assert result.sticky_events == []
+    assert tracker.repeat_valid is True
+    learning_service.record_selection_conversion.assert_called_once_with(
+        conversion_engine.last_conversion
+    )
+
+
+def test_manual_conversion_use_case_failure_skips_learning_and_clears_repeat():
+    conversion_engine = MagicMock()
+    conversion_engine.convert.return_value = False
+    learning_service = MagicMock()
+    learning_service.user_dict = object()
+    tracker = SelectionFreshnessTracker(repeat_valid=True, repeat_generation=1)
+    use_case = ManualConversionUseCase(
+        conversion_engine=conversion_engine,
+        learning_service=learning_service,
+        post_conversion_updater=PostConversionStateUpdater(tracker),
+    )
+
+    result = use_case.execute(
+        context=StateContext(),
+        selection_valid_for_convert=True,
+        saved_events=[],
+        saved_count=0,
+        pending_manual_learning=PendingManualLearning("word", "en", False),
+    )
+
+    assert result.success is False
+    assert result.sticky_events == []
+    assert tracker.repeat_valid is False
+    learning_service.record_manual_conversion.assert_not_called()
+    learning_service.record_selection_conversion.assert_not_called()

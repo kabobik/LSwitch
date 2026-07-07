@@ -888,56 +888,30 @@ class LSwitchApp:
                 self._decode_buffer(saved_events),
             )
 
-            success = self.conversion_engine.convert(
-                self.state_manager.context,
-                selection_valid=selection_valid_for_convert,
+            from lswitch.core.conversion_use_cases import (
+                ManualConversionUseCase,
+                PostConversionStateUpdater,
             )
-
-            if success and self.user_dict:
-                if pending_manual_learning is not None:
-                    self._record_manual_conversion_learning(
-                        pending_manual_learning.word,
-                        pending_manual_learning.lang,
-                        pending_manual_learning.is_selection_conversion,
-                    )
-                elif saved_count == 0:
-                    self._record_last_selection_conversion_learning()
-
-            from lswitch.core.conversion_use_cases import PostConversionStateUpdater
 
             updater = PostConversionStateUpdater(self.selection_tracker)
-            self._last_retype_events = updater.update(
-                success=success,
-                saved_count=saved_count,
-                saved_events=saved_events,
-                selection_valid_for_convert=selection_valid_for_convert,
+            manual_conversion = ManualConversionUseCase(
+                conversion_engine=self.conversion_engine,
+                learning_service=self._learning(),
+                post_conversion_updater=updater,
             )
+            result = manual_conversion.execute(
+                context=self.state_manager.context,
+                selection_valid_for_convert=selection_valid_for_convert,
+                saved_events=saved_events,
+                saved_count=saved_count,
+                pending_manual_learning=pending_manual_learning,
+            )
+            self._last_retype_events = result.sticky_events
         finally:
             # Update baseline to prevent re-conversion of same text
             self._update_selection_baseline()
             self._selection_valid = False  # consumed
             self.state_manager.on_conversion_complete()
-
-    def _record_manual_conversion_learning(
-        self,
-        manual_word: str,
-        manual_lang: str,
-        is_selection_conversion: bool,
-    ) -> None:
-        if self.user_dict is None:
-            return
-        self._learning().record_manual_conversion(
-            manual_word,
-            manual_lang,
-            is_selection_conversion,
-        )
-
-    def _record_last_selection_conversion_learning(self) -> None:
-        if self.user_dict is None or self.conversion_engine is None:
-            return
-
-        conversion = getattr(self.conversion_engine, "last_conversion", None)
-        self._learning().record_selection_conversion(conversion)
 
     @staticmethod
     def _is_single_word_for_learning(text: str) -> bool:
