@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from lswitch.app import LSwitchApp
+from lswitch.core.auto_marker import AutoConversionMarker
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.states import State
 from lswitch.platform.xkb_adapter import LayoutInfo
@@ -499,14 +500,17 @@ class TestUndoAutoConversion:
         # Prepare marker simulating a recent auto-conversion
         word_events = [KeyEventData(code=KEY_G, value=1, device_name="test"),
                        KeyEventData(code=KEY_P, value=1, device_name="test")]
-        app._last_auto_marker = {
-            'word': 'gp',
-            'direction': 'en_to_ru',
-            'lang': 'en',
-            'time': time.time(),
-            'word_events': word_events,
-            'converted_len': 2
-        }
+        app._last_auto_marker = AutoConversionMarker(
+            kind="space",
+            original_word="gp",
+            original_lang="en",
+            target_lang="ru",
+            direction="en_to_ru",
+            word_events=word_events,
+            converted_len=2,
+            had_space=True,
+            created_at=time.time(),
+        )
         app.xkb.switch_layout = MagicMock()
         
         # Set state to converting (simulate Double Shift)
@@ -540,14 +544,17 @@ class TestUndoAutoConversion:
         app = _make_app(auto_switch=True, threshold=0)
         app.user_dict = MagicMock()
         
-        app._last_auto_marker = {
-            'word': 'gp',
-            'direction': 'en_to_ru',
-            'lang': 'en',
-            'time': time.time(),
-            'word_events': [],
-            'converted_len': 2
-        }
+        app._last_auto_marker = AutoConversionMarker(
+            kind="space",
+            original_word="gp",
+            original_lang="en",
+            target_lang="ru",
+            direction="en_to_ru",
+            word_events=[],
+            converted_len=2,
+            had_space=True,
+            created_at=time.time(),
+        )
         
         # State converting but chars_in_buffer > 0
         app.state_manager.context.state = State.CONVERTING
@@ -653,4 +660,3 @@ class TestAutoConversionGuard:
         # Should reach auto_detector.should_convert (returns False → result False)
         assert result is False
         app.auto_detector.should_convert.assert_called_once()
-

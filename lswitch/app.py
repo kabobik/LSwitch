@@ -793,37 +793,22 @@ class LSwitchApp:
 
         # --- Case A: undo of recent auto-conversion → penalise ---
         if self._last_auto_marker is not None:
-            marker = self._last_auto_marker
-            if self.user_dict and chars_in_buffer == 0:
-                self.user_dict.add_correction(
-                    marker['word'], marker['lang'], debug=self.debug,
+            from lswitch.core.auto_marker import AutoConversionMarker
+
+            marker = AutoConversionMarker.from_legacy(self._last_auto_marker)
+            self._last_auto_marker = marker
+
+            if chars_in_buffer == 0:
+                from lswitch.core.conversion_use_cases import UndoAutoConversionUseCase
+
+                undo = UndoAutoConversionUseCase(
+                    virtual_kb=self.virtual_kb,
+                    xkb=self.xkb,
+                    user_dict=self.user_dict,
+                    timing=self.timing,
+                    debug=self.debug,
                 )
-                logger.info(
-                    "Correction: '%s' (%s) — keep +2",
-                    marker['word'], marker['lang'],
-                )
-            
-            # Undo auto-conversion (Case A undo block)
-            if chars_in_buffer == 0 and 'word_events' in marker:
-                from lswitch.core.event_manager import KEY_BACKSPACE, KEY_SPACE
-                try:
-                    self.virtual_kb.tap_key(KEY_BACKSPACE, n_times=marker['converted_len'] + 1)
-                    if self.xkb:
-                        target = next((
-                            l for l in self.xkb.get_layouts()
-                            if l.name.lower().startswith(marker['lang'])
-                        ), None)
-                        if target:
-                            self.xkb.switch_layout(target=target)
-                    import time as _time_mod
-                    _time_mod.sleep(
-                        self.timing.get('undo_before_replay_delay', 0.03)
-                    )
-                    self.virtual_kb.replay_events(marker['word_events'])
-                    self.virtual_kb.tap_key(KEY_SPACE)
-                except Exception as exc:
-                    logger.error("Undo auto-conversion failed: %s", exc)
-                
+                undo.execute(marker)
                 self.state_manager.on_conversion_complete()
                 self._last_auto_marker = None
                 return
@@ -1075,11 +1060,14 @@ class LSwitchApp:
         # Learning from that implicit acceptance is optional; the marker is
         # consumed either way so stale auto-conversions do not linger.
         if self._last_auto_marker is not None:
-            old = self._last_auto_marker
+            from lswitch.core.auto_marker import AutoConversionMarker
+
+            old = AutoConversionMarker.from_legacy(self._last_auto_marker)
+            self._last_auto_marker = old
             if self.user_dict and self.config.get('user_dict_auto_confirm', False):
                 self.user_dict.add_confirmation(
-                    old['word'],
-                    old['lang'],
+                    old.original_word,
+                    old.original_lang,
                     debug=self.debug,
                 )
             self._last_auto_marker = None
@@ -1179,16 +1167,15 @@ class LSwitchApp:
             self._pending_auto_space = True
 
             # Save marker BEFORE reset so correction can be detected later
-            import time as _time
             if orig_word and conversion_ok:
-                self._last_auto_marker = {
-                    'word': orig_word,
-                    'direction': direction,
-                    'lang': orig_lang,
-                    'time': _time.time(),
-                    'word_events': list(word_events),
-                    'converted_len': len(word_events),
-                }
+                from lswitch.core.auto_marker import AutoConversionMarker
+
+                self._last_auto_marker = AutoConversionMarker.for_space_conversion(
+                    original_word=orig_word,
+                    original_lang=orig_lang,
+                    direction=direction,
+                    word_events=word_events,
+                )
             ctx.reset()
             ctx.state = State.IDLE
 

@@ -121,9 +121,9 @@ class TestAutoConversionSavesMarker:
         app._on_key_press(_event(KEY_SPACE))
 
         assert app._last_auto_marker is not None
-        assert app._last_auto_marker['word'] == 'ghbdtn'
-        assert app._last_auto_marker['lang'] == 'en'
-        assert app._last_auto_marker['direction'] == 'en_to_ru'
+        assert app._last_auto_marker.original_word == 'ghbdtn'
+        assert app._last_auto_marker.original_lang == 'en'
+        assert app._last_auto_marker.direction == 'en_to_ru'
         assert 'time' in app._last_auto_marker
 
     def test_marker_none_when_no_conversion(self):
@@ -175,7 +175,7 @@ class TestDoubleShiftAfterAutoCallsCorrection:
         app._on_key_press(_event(KEY_SPACE))
 
         # Simulate user returning after a very long time
-        app._last_auto_marker['time'] -= 3600.0
+        app._last_auto_marker.created_at -= 3600.0
 
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
@@ -288,7 +288,8 @@ class TestContinuedTypingConfirmsPrevious:
         _fill_buffer(app, WORD_GHBDTN)
         app._on_key_press(_event(KEY_SPACE))
         assert app._last_auto_marker is not None
-        old_marker = app._last_auto_marker.copy()
+        old_word = app._last_auto_marker.original_word
+        old_lang = app._last_auto_marker.original_lang
 
         # Second word: another auto-conversion → previous should be confirmed
         _fill_buffer(app, [KEY_A, KEY_B, KEY_D])
@@ -296,9 +297,9 @@ class TestContinuedTypingConfirmsPrevious:
 
         # Auto-confirmation is disabled by default; the old marker is consumed
         # without writing an implicit confirmation.
-        assert ud.get_weight(old_marker['word'], old_marker['lang']) == 0
+        assert ud.get_weight(old_word, old_lang) == 0
         assert app._last_auto_marker is not None
-        assert app._last_auto_marker['word'] != old_marker['word']
+        assert app._last_auto_marker.original_word != old_word
 
     def test_confirmation_called_on_next_space_when_enabled(self):
         app = _make_app(auto_switch=True)
@@ -312,14 +313,15 @@ class TestContinuedTypingConfirmsPrevious:
         _fill_buffer(app, WORD_GHBDTN)
         app._on_key_press(_event(KEY_SPACE))
         assert app._last_auto_marker is not None
-        old_marker = app._last_auto_marker.copy()
+        old_word = app._last_auto_marker.original_word
+        old_lang = app._last_auto_marker.original_lang
 
         # Second word: another auto-conversion → previous should be confirmed
         _fill_buffer(app, [KEY_A, KEY_B, KEY_D])
         app._on_key_press(_event(KEY_SPACE))
 
         # Old word was confirmed (+1)
-        assert ud.get_weight(old_marker['word'], old_marker['lang']) == 1
+        assert ud.get_weight(old_word, old_lang) == 1
 
     def test_no_confirmation_without_user_dict(self):
         """user_dict=None → no crash, no confirmation."""
