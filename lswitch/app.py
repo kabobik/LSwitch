@@ -17,6 +17,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    run_evdev_event_loop,
     stop_runtime_resources,
 )
 
@@ -792,9 +793,11 @@ class LSwitchApp:
     def _run_evdev_loop(self):
         """Evdev event loop (blocking, main thread)."""
         try:
-            while self._running:
-                for device, event in self.device_manager.get_events(timeout=0.1):
-                    self.event_manager.handle_raw_event(event, device.name)
+            run_evdev_event_loop(
+                is_running=lambda: self._running,
+                device_manager=self.device_manager,
+                event_manager=self.event_manager,
+            )
         except KeyboardInterrupt:
             pass
         finally:
@@ -840,9 +843,11 @@ class LSwitchApp:
         # Evdev loop in background thread
         def _evdev_thread():
             try:
-                while self._running:
-                    for device, event in self.device_manager.get_events(timeout=0.1):
-                        self.event_manager.handle_raw_event(event, device.name)
+                run_evdev_event_loop(
+                    is_running=lambda: self._running,
+                    device_manager=self.device_manager,
+                    event_manager=self.event_manager,
+                )
             except Exception as exc:
                 logger.error("Evdev thread error: %s", exc)
             finally:

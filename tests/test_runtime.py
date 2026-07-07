@@ -24,6 +24,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    run_evdev_event_loop,
     stop_runtime_resources,
 )
 
@@ -196,6 +197,45 @@ def test_selection_poller_thread_initializes_and_stops():
     poller.stop()
 
     assert poller._running is False
+
+
+def test_run_evdev_event_loop_dispatches_events_until_stopped():
+    device = types.SimpleNamespace(name="keyboard")
+    event = object()
+    state = {"running": True}
+    event_manager = MagicMock()
+
+    class DeviceManager:
+        def get_events(self, timeout):
+            assert timeout == 0.25
+            state["running"] = False
+            return [(device, event)]
+
+    run_evdev_event_loop(
+        is_running=lambda: state["running"],
+        device_manager=DeviceManager(),
+        event_manager=event_manager,
+        timeout=0.25,
+    )
+
+    event_manager.handle_raw_event.assert_called_once_with(event, "keyboard")
+
+
+def test_run_evdev_event_loop_propagates_polling_errors():
+    class DeviceManager:
+        def get_events(self, timeout):
+            raise RuntimeError("poll failed")
+
+    try:
+        run_evdev_event_loop(
+            is_running=lambda: True,
+            device_manager=DeviceManager(),
+            event_manager=MagicMock(),
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "poll failed"
+    else:
+        raise AssertionError("expected polling error")
 
 
 def test_stop_runtime_resources_stops_owned_resources_and_releases_pid_lock():

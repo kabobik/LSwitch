@@ -207,6 +207,19 @@ def create_input_device_runtime(
     )
 
 
+def run_evdev_event_loop(
+    *,
+    is_running,
+    device_manager,
+    event_manager,
+    timeout: float = 0.1,
+) -> None:
+    """Run the blocking evdev polling loop until the runtime is stopped."""
+    while is_running():
+        for device, event in device_manager.get_events(timeout=timeout):
+            event_manager.handle_raw_event(event, device.name)
+
+
 def stop_runtime_resources(
     *,
     selection_poller,
