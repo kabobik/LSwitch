@@ -19,6 +19,7 @@ from lswitch.runtime import (
     ConversionRuntimeComponents,
     InputDeviceRuntimeComponents,
     PidLock,
+    PlatformRuntimeComponents,
     QtRuntimeBootstrap,
     RuntimeCoreComponents,
     SelectionPollerThread,
@@ -27,6 +28,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    create_platform_runtime_components,
     create_qt_runtime_bootstrap,
     create_tray_indicator,
     install_reload_signal_handler,
@@ -314,6 +316,84 @@ def test_create_input_device_runtime_leaves_virtual_keyboard_name_unset_without_
     )
 
     assert components.device_manager._virtual_kb_name is None
+
+
+def test_create_platform_runtime_components_wires_platform_conversion_and_input(monkeypatch):
+    platform = types.SimpleNamespace(
+        system=object(),
+        xkb=object(),
+        selection=object(),
+        virtual_kb=object(),
+    )
+    conversion = ConversionRuntimeComponents(
+        dictionary=object(),
+        ngrams=object(),
+        auto_detector=object(),
+        conversion_engine=object(),
+    )
+    input_devices = InputDeviceRuntimeComponents(
+        event_manager=object(),
+        device_manager=object(),
+        udev_monitor=object(),
+    )
+    create_platform_adapters = MagicMock(return_value=platform)
+    create_conversion = MagicMock(return_value=conversion)
+    create_input = MagicMock(return_value=input_devices)
+    monkeypatch.setattr(
+        "lswitch.platform.platform_factory.create_platform_adapters",
+        create_platform_adapters,
+    )
+    monkeypatch.setattr("lswitch.runtime.create_conversion_runtime", create_conversion)
+    monkeypatch.setattr("lswitch.runtime.create_input_device_runtime", create_input)
+    event_bus = EventBus()
+    user_dict = object()
+    timing = {"a": 1}
+    x11_selection_timing = {"b": 2}
+    wayland_timing = {"c": 3}
+    wayland_selection_timing = {"d": 4}
+    main_thread = object()
+
+    components = create_platform_runtime_components(
+        debug=True,
+        main_thread=main_thread,
+        wayland_selection_strategy="primary",
+        timing=timing,
+        x11_selection_timing=x11_selection_timing,
+        wayland_timing=wayland_timing,
+        wayland_selection_timing=wayland_selection_timing,
+        event_bus=event_bus,
+        user_dict=user_dict,
+        user_dict_min_weight=7,
+    )
+
+    assert isinstance(components, PlatformRuntimeComponents)
+    assert components.platform is platform
+    assert components.conversion is conversion
+    assert components.input_devices is input_devices
+    create_platform_adapters.assert_called_once_with(
+        debug=True,
+        main_thread=main_thread,
+        wayland_selection_strategy="primary",
+        timing=timing,
+        x11_selection_timing=x11_selection_timing,
+        wayland_timing=wayland_timing,
+        wayland_selection_timing=wayland_selection_timing,
+    )
+    create_conversion.assert_called_once_with(
+        xkb=platform.xkb,
+        selection=platform.selection,
+        virtual_kb=platform.virtual_kb,
+        system=platform.system,
+        user_dict=user_dict,
+        user_dict_min_weight=7,
+        debug=True,
+        timing=timing,
+    )
+    create_input.assert_called_once_with(
+        event_bus=event_bus,
+        virtual_kb=platform.virtual_kb,
+        debug=True,
+    )
 
 
 def test_selection_poller_thread_initializes_and_stops():

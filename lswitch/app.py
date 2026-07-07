@@ -11,10 +11,9 @@ from lswitch.core.learning_service import LearningService
 from lswitch.runtime import (
     PidLock,
     SelectionPollerThread,
-    create_conversion_runtime,
     create_core_components,
-    create_input_device_runtime,
     create_input_router,
+    create_platform_runtime_components,
     create_qt_runtime_bootstrap,
     create_tray_indicator,
     install_reload_signal_handler,
@@ -118,9 +117,11 @@ class LSwitchApp:
         Separated from ``__init__`` so that tests can substitute mocks
         without requiring real platform / evdev resources.
         """
-        from lswitch.platform.platform_factory import create_platform_adapters
+        # UserDictionary: self-learning word weights
+        if self.config.get('user_dict_enabled'):
+            self._enable_user_dictionary()
 
-        self._platform = create_platform_adapters(
+        platform_runtime = create_platform_runtime_components(
             debug=self.debug,
             main_thread=main_thread,
             wayland_selection_strategy=self.config.get(
@@ -131,35 +132,22 @@ class LSwitchApp:
             x11_selection_timing=self.x11_selection_timing,
             wayland_timing=self.wayland_timing,
             wayland_selection_timing=self.wayland_selection_timing,
+            event_bus=self.event_bus,
+            user_dict=self.user_dict,
+            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
         )
+        self._platform = platform_runtime.platform
         self.system = self._platform.system
         self.xkb = self._platform.xkb
         self.selection = self._platform.selection
         self.virtual_kb = self._platform.virtual_kb
 
-        # UserDictionary: self-learning word weights
-        if self.config.get('user_dict_enabled'):
-            self._enable_user_dictionary()
-
-        conversion_runtime = create_conversion_runtime(
-            xkb=self.xkb,
-            selection=self.selection,
-            virtual_kb=self.virtual_kb,
-            system=self.system,
-            user_dict=self.user_dict,
-            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
-            debug=self.debug,
-            timing=self.timing,
-        )
+        conversion_runtime = platform_runtime.conversion
         self.auto_detector = conversion_runtime.auto_detector
         self.conversion_engine = conversion_runtime.conversion_engine
         self._sync_learning_components()
 
-        input_runtime = create_input_device_runtime(
-            event_bus=self.event_bus,
-            virtual_kb=self.virtual_kb,
-            debug=self.debug,
-        )
+        input_runtime = platform_runtime.input_devices
         self.event_manager = input_runtime.event_manager
         self.device_manager = input_runtime.device_manager
         self._udev_monitor = input_runtime.udev_monitor

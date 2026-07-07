@@ -188,6 +188,13 @@ class InputDeviceRuntimeComponents:
 
 
 @dataclass(frozen=True)
+class PlatformRuntimeComponents:
+    platform: object
+    conversion: ConversionRuntimeComponents
+    input_devices: InputDeviceRuntimeComponents
+
+
+@dataclass(frozen=True)
 class StartedRuntimeResources:
     selection_poller: object | None
     device_count: int
@@ -329,6 +336,53 @@ def create_input_device_runtime(
         event_manager=event_manager,
         device_manager=device_manager,
         udev_monitor=udev_monitor,
+    )
+
+
+def create_platform_runtime_components(
+    *,
+    debug: bool,
+    main_thread,
+    wayland_selection_strategy,
+    timing: dict,
+    x11_selection_timing: dict,
+    wayland_timing: dict,
+    wayland_selection_timing: dict,
+    event_bus: EventBus,
+    user_dict,
+    user_dict_min_weight: int,
+) -> PlatformRuntimeComponents:
+    """Create platform adapters plus dependent conversion and input runtimes."""
+    from lswitch.platform.platform_factory import create_platform_adapters
+
+    platform = create_platform_adapters(
+        debug=debug,
+        main_thread=main_thread,
+        wayland_selection_strategy=wayland_selection_strategy,
+        timing=timing,
+        x11_selection_timing=x11_selection_timing,
+        wayland_timing=wayland_timing,
+        wayland_selection_timing=wayland_selection_timing,
+    )
+    conversion = create_conversion_runtime(
+        xkb=platform.xkb,
+        selection=platform.selection,
+        virtual_kb=platform.virtual_kb,
+        system=platform.system,
+        user_dict=user_dict,
+        user_dict_min_weight=user_dict_min_weight,
+        debug=debug,
+        timing=timing,
+    )
+    input_devices = create_input_device_runtime(
+        event_bus=event_bus,
+        virtual_kb=platform.virtual_kb,
+        debug=debug,
+    )
+    return PlatformRuntimeComponents(
+        platform=platform,
+        conversion=conversion,
+        input_devices=input_devices,
     )
 
 
