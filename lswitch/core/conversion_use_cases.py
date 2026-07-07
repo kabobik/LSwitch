@@ -33,6 +33,11 @@ class ManualConversionResult:
 
 
 @dataclass(frozen=True)
+class RecentAutoConversionResult:
+    handled: bool
+
+
+@dataclass(frozen=True)
 class SpaceAutoConversionResult:
     space_consumed: bool
     pending_space: bool = False
@@ -85,6 +90,26 @@ class UndoAutoConversionUseCase:
         except Exception as exc:
             logger.error("Undo auto-conversion failed: %s", exc)
             return False
+
+
+class RecentAutoConversionUseCase:
+    """Handle a recent auto-conversion before manual conversion proceeds."""
+
+    def __init__(self, *, undo_use_case: UndoAutoConversionUseCase):
+        self.undo_use_case = undo_use_case
+
+    def execute(
+        self,
+        *,
+        marker: AutoConversionMarker | dict,
+        chars_in_buffer: int,
+    ) -> RecentAutoConversionResult:
+        auto_marker = AutoConversionMarker.from_legacy(marker)
+        if chars_in_buffer == 0:
+            self.undo_use_case.execute(auto_marker)
+            return RecentAutoConversionResult(handled=True)
+        return RecentAutoConversionResult(handled=False)
+
 
 class PostConversionStateUpdater:
     """Update repeat-selection and sticky-retype state after conversion."""

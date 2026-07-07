@@ -707,27 +707,28 @@ class LSwitchApp:
 
         # --- Case A: undo of recent auto-conversion → penalise ---
         if self._last_auto_marker is not None:
-            from lswitch.core.auto_marker import AutoConversionMarker
+            from lswitch.core.conversion_use_cases import (
+                RecentAutoConversionUseCase,
+                UndoAutoConversionUseCase,
+            )
 
-            marker = AutoConversionMarker.from_legacy(self._last_auto_marker)
-            self._last_auto_marker = marker
-
-            if chars_in_buffer == 0:
-                from lswitch.core.conversion_use_cases import UndoAutoConversionUseCase
-
-                undo = UndoAutoConversionUseCase(
+            recent_auto = RecentAutoConversionUseCase(
+                undo_use_case=UndoAutoConversionUseCase(
                     virtual_kb=self.virtual_kb,
                     xkb=self.xkb,
                     learning_service=self._learning(),
                     timing=self.timing,
                     debug=self.debug,
                 )
-                undo.execute(marker)
-                self.state_manager.on_conversion_complete()
-                self._last_auto_marker = None
-                return
-
+            )
+            result = recent_auto.execute(
+                marker=self._last_auto_marker,
+                chars_in_buffer=chars_in_buffer,
+            )
             self._last_auto_marker = None
+            if result.handled:
+                self.state_manager.on_conversion_complete()
+                return
 
         try:
             try:

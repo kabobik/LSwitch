@@ -10,6 +10,7 @@ from lswitch.core.conversion_use_cases import (
     KEY_SPACE,
     ManualConversionUseCase,
     PostConversionStateUpdater,
+    RecentAutoConversionUseCase,
     SpaceAutoConversionUseCase,
     UndoAutoConversionUseCase,
 )
@@ -86,6 +87,46 @@ def test_undo_auto_conversion_without_space_does_not_readd_space():
     assert ok is True
     virtual_kb.tap_key.assert_called_once_with(KEY_BACKSPACE, n_times=3)
     virtual_kb.replay_events.assert_called_once_with([])
+
+
+def test_recent_auto_conversion_undo_handles_empty_buffer():
+    marker = AutoConversionMarker(
+        kind="space",
+        original_word="ghb",
+        original_lang="en",
+        target_lang="ru",
+        direction="en_to_ru",
+        word_events=[],
+        converted_len=3,
+        had_space=True,
+    )
+    undo = MagicMock()
+    use_case = RecentAutoConversionUseCase(undo_use_case=undo)
+
+    result = use_case.execute(marker=marker, chars_in_buffer=0)
+
+    assert result.handled is True
+    undo.execute.assert_called_once_with(marker)
+
+
+def test_recent_auto_conversion_undo_skips_when_user_typed_more_text():
+    marker = AutoConversionMarker(
+        kind="space",
+        original_word="ghb",
+        original_lang="en",
+        target_lang="ru",
+        direction="en_to_ru",
+        word_events=[],
+        converted_len=3,
+        had_space=True,
+    )
+    undo = MagicMock()
+    use_case = RecentAutoConversionUseCase(undo_use_case=undo)
+
+    result = use_case.execute(marker=marker, chars_in_buffer=1)
+
+    assert result.handled is False
+    undo.execute.assert_not_called()
 
 
 def test_post_conversion_marks_repeat_for_successful_selection_conversion():
