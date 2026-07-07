@@ -5,8 +5,14 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from lswitch.core.auto_marker import AutoConversionMarker
-from lswitch.core.conversion_use_cases import KEY_BACKSPACE, KEY_SPACE, UndoAutoConversionUseCase
+from lswitch.core.conversion_use_cases import (
+    KEY_BACKSPACE,
+    KEY_SPACE,
+    PostConversionStateUpdater,
+    UndoAutoConversionUseCase,
+)
 from lswitch.core.events import KeyEventData
+from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.platform.xkb_adapter import LayoutInfo
 
 
@@ -74,3 +80,60 @@ def test_undo_auto_conversion_without_space_does_not_readd_space():
     assert ok is True
     virtual_kb.tap_key.assert_called_once_with(KEY_BACKSPACE, n_times=3)
     virtual_kb.replay_events.assert_called_once_with([])
+
+
+def test_post_conversion_marks_repeat_for_successful_selection_conversion():
+    tracker = SelectionFreshnessTracker(valid=True)
+    tracker.set_valid(True)
+    updater = PostConversionStateUpdater(tracker)
+
+    sticky = updater.update(
+        success=True,
+        saved_count=0,
+        saved_events=[],
+        selection_valid_for_convert=True,
+    )
+
+    assert sticky == []
+    assert tracker.repeat_valid is True
+    assert tracker.repeat_generation == tracker.generation
+
+
+def test_post_conversion_clears_repeat_on_failure():
+    tracker = SelectionFreshnessTracker(repeat_valid=True, repeat_generation=1)
+    updater = PostConversionStateUpdater(tracker)
+
+    updater.update(
+        success=False,
+        saved_count=0,
+        saved_events=[],
+        selection_valid_for_convert=True,
+    )
+
+    assert tracker.repeat_valid is False
+    assert tracker.repeat_generation == 0
+
+
+def test_post_conversion_returns_sticky_events_for_successful_retype_only():
+    tracker = SelectionFreshnessTracker()
+    updater = PostConversionStateUpdater(tracker)
+    events = [KeyEventData(code=34, value=1)]
+
+    sticky = updater.update(
+        success=True,
+        saved_count=1,
+        saved_events=events,
+        selection_valid_for_convert=False,
+    )
+
+    assert sticky == events
+    assert sticky is not events
+
+    selection_sticky = updater.update(
+        success=True,
+        saved_count=0,
+        saved_events=[],
+        selection_valid_for_convert=True,
+    )
+
+    assert selection_sticky == []

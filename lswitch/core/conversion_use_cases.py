@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from lswitch.input.virtual_keyboard import VirtualKeyboard
     from lswitch.platform.xkb_adapter import IXKBAdapter
     from lswitch.core.learning_service import LearningService
+    from lswitch.core.selection_tracker import SelectionFreshnessTracker
     from lswitch.intelligence.user_dictionary import UserDictionary
 
 logger = logging.getLogger(__name__)
@@ -77,3 +78,27 @@ class UndoAutoConversionUseCase:
             )
         except Exception:
             return None
+
+
+class PostConversionStateUpdater:
+    """Update repeat-selection and sticky-retype state after conversion."""
+
+    def __init__(self, selection_tracker: "SelectionFreshnessTracker"):
+        self.selection_tracker = selection_tracker
+
+    def update(
+        self,
+        *,
+        success: bool,
+        saved_count: int,
+        saved_events: list,
+        selection_valid_for_convert: bool,
+    ) -> list:
+        if success and saved_count == 0 and selection_valid_for_convert:
+            self.selection_tracker.mark_repeat_for_current_generation()
+        elif not success:
+            self.selection_tracker.clear_repeat()
+
+        if success and saved_count > 0 and not selection_valid_for_convert:
+            return list(saved_events)
+        return []

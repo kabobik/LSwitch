@@ -903,16 +903,15 @@ class LSwitchApp:
                 elif saved_count == 0:
                     self._record_last_selection_conversion_learning()
 
-            # Remember events for potential repeat retype
-            if success and saved_count == 0 and selection_valid_for_convert:
-                self.selection_tracker.mark_repeat_for_current_generation()
-            elif not success:
-                self._clear_selection_repeat()
+            from lswitch.core.conversion_use_cases import PostConversionStateUpdater
 
-            if success and saved_count > 0 and not selection_valid_for_convert:
-                self._last_retype_events = saved_events
-            else:
-                self._last_retype_events = []
+            updater = PostConversionStateUpdater(self.selection_tracker)
+            self._last_retype_events = updater.update(
+                success=success,
+                saved_count=saved_count,
+                saved_events=saved_events,
+                selection_valid_for_convert=selection_valid_for_convert,
+            )
         finally:
             # Update baseline to prevent re-conversion of same text
             self._update_selection_baseline()
