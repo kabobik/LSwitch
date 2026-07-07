@@ -11,7 +11,7 @@ import threading
 
 import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.config import ConfigManager
-from lswitch.runtime import create_core_components
+from lswitch.runtime import create_core_components, create_input_router
 
 logger = logging.getLogger(__name__)
 
@@ -221,12 +221,9 @@ class LSwitchApp:
         self.typed_buffer = core.typed_buffer
         self.selection_tracker = core.selection_tracker
         self.learning_service = core.learning_service
-        from lswitch.core.input_router import InputEventRouter
 
-        self.input_router = InputEventRouter(
-            state_manager=self.state_manager,
-            typed_buffer=self.typed_buffer,
-            selection_tracker=self.selection_tracker,
+        self.input_router = create_input_router(
+            core=core,
             decode_buffer=self._decode_buffer,
             auto_conversion_enabled=self._auto_conversion_enabled,
             try_auto_conversion_at_space=lambda: self._try_auto_conversion_at_space(),
