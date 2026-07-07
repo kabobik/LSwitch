@@ -41,6 +41,7 @@ from lswitch.runtime import (
     read_existing_pid,
     start_runtime_resources,
     stop_runtime_resources,
+    sync_user_dictionary_components,
     wire_runtime_event_bus,
 )
 
@@ -245,6 +246,47 @@ def test_wire_runtime_event_bus_subscribes_input_router_and_config_handlers():
     assert input_router.on_mouse_click in event_bus._handlers[EventType.MOUSE_CLICK]
     assert input_router.on_mouse_release in event_bus._handlers[EventType.MOUSE_RELEASE]
     assert on_config_changed in event_bus._handlers[EventType.CONFIG_CHANGED]
+
+
+def test_sync_user_dictionary_components_updates_mutable_runtime_services():
+    user_dict = object()
+    auto_detector = MagicMock()
+    conversion_engine = MagicMock()
+    learning_service = MagicMock()
+
+    sync_user_dictionary_components(
+        user_dict=user_dict,
+        user_dict_min_weight="5",
+        auto_detector=auto_detector,
+        conversion_engine=conversion_engine,
+        learning_service=learning_service,
+        debug=True,
+        manual_weight_step=3,
+    )
+
+    assert auto_detector.user_dict is user_dict
+    assert auto_detector.user_dict_min_weight == 5
+    assert conversion_engine.user_dict is user_dict
+    assert learning_service.user_dict is user_dict
+    assert learning_service.debug is True
+    assert learning_service.manual_weight_step == 3
+
+
+def test_sync_user_dictionary_components_falls_back_to_default_min_weight():
+    auto_detector = MagicMock()
+
+    sync_user_dictionary_components(
+        user_dict=None,
+        user_dict_min_weight="bad",
+        auto_detector=auto_detector,
+        conversion_engine=None,
+        learning_service=None,
+        debug=False,
+        manual_weight_step=2,
+    )
+
+    assert auto_detector.user_dict is None
+    assert auto_detector.user_dict_min_weight == 2
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():

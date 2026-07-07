@@ -22,6 +22,7 @@ from lswitch.runtime import (
     run_selected_runtime_loop,
     start_runtime_resources,
     stop_runtime_resources,
+    sync_user_dictionary_components,
     wire_runtime_event_bus,
 )
 
@@ -176,27 +177,27 @@ class LSwitchApp:
 
     def _sync_learning_components(self) -> None:
         """Propagate current UserDictionary settings into runtime components."""
-        min_weight = self.config.get('user_dict_min_weight', 2)
-        try:
-            min_weight = int(min_weight)
-        except (TypeError, ValueError):
-            min_weight = 2
-
-        if self.auto_detector is not None:
-            self.auto_detector.user_dict = self.user_dict
-            self.auto_detector.user_dict_min_weight = min_weight
-        if self.conversion_engine is not None:
-            self.conversion_engine.user_dict = self.user_dict
-        if self.learning_service is not None:
-            self.learning_service.user_dict = self.user_dict
-            self.learning_service.debug = self.debug
-            self.learning_service.manual_weight_step = self.MANUAL_WEIGHT_STEP
+        sync_user_dictionary_components(
+            user_dict=self.user_dict,
+            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
+            auto_detector=self.auto_detector,
+            conversion_engine=self.conversion_engine,
+            learning_service=self.learning_service,
+            debug=self.debug,
+            manual_weight_step=self.MANUAL_WEIGHT_STEP,
+        )
 
     def _learning(self) -> LearningService:
         """Return LearningService synced with the current app-level user_dict."""
-        self.learning_service.user_dict = self.user_dict
-        self.learning_service.debug = self.debug
-        self.learning_service.manual_weight_step = self.MANUAL_WEIGHT_STEP
+        sync_user_dictionary_components(
+            user_dict=self.user_dict,
+            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
+            auto_detector=None,
+            conversion_engine=None,
+            learning_service=self.learning_service,
+            debug=self.debug,
+            manual_weight_step=self.MANUAL_WEIGHT_STEP,
+        )
         return self.learning_service
 
     def _apply_runtime_config(self) -> None:

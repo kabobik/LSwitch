@@ -289,6 +289,33 @@ def wire_runtime_event_bus(*, event_bus: EventBus, input_router, on_config_chang
     event_bus.subscribe(EventType.CONFIG_CHANGED, on_config_changed)
 
 
+def sync_user_dictionary_components(
+    *,
+    user_dict,
+    user_dict_min_weight,
+    auto_detector,
+    conversion_engine,
+    learning_service,
+    debug: bool,
+    manual_weight_step: int,
+) -> None:
+    """Propagate user dictionary settings into mutable runtime components."""
+    try:
+        min_weight = int(user_dict_min_weight)
+    except (TypeError, ValueError):
+        min_weight = 2
+
+    if auto_detector is not None:
+        auto_detector.user_dict = user_dict
+        auto_detector.user_dict_min_weight = min_weight
+    if conversion_engine is not None:
+        conversion_engine.user_dict = user_dict
+    if learning_service is not None:
+        learning_service.user_dict = user_dict
+        learning_service.debug = debug
+        learning_service.manual_weight_step = manual_weight_step
+
+
 def create_conversion_runtime(
     *,
     xkb,
