@@ -257,10 +257,10 @@ class TestTryAutoConversionAtSpace:
         app = _make_app(auto_switch=True, threshold=0)
         app.auto_detector = _MockAutoDetector(should=True)
         _fill_buffer(app, [KEY_G, KEY_H, KEY_B, KEY_D, KEY_T, KEY_N])  # "ghbdtn"
-        with patch.object(app, '_do_auto_conversion_at_space') as mock_do:
-            result = app._try_auto_conversion_at_space()
+        result = app._try_auto_conversion_at_space()
         assert result is True
-        mock_do.assert_called_once()
+        assert app._last_auto_marker is not None
+        app.virtual_kb.replay_events.assert_called_once()
 
     def test_word_too_short_returns_false(self):
         """Words shorter than MIN_WORD_LEN are skipped (currently MIN_WORD_LEN=1)."""

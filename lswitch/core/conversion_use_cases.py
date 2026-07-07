@@ -31,6 +31,14 @@ class ManualConversionResult:
     sticky_events: list
 
 
+@dataclass(frozen=True)
+class SpaceAutoConversionResult:
+    space_consumed: bool
+    pending_space: bool = False
+    marker: AutoConversionMarker | None = None
+    marker_changed: bool = False
+
+
 class UndoAutoConversionUseCase:
     """Undo the latest automatic conversion and record a keep correction."""
 
@@ -164,3 +172,202 @@ class ManualConversionUseCase:
             success=success,
             sticky_events=sticky_events,
         )
+
+
+class SpaceAutoConversionUseCase:
+    """Execute space-triggered auto conversion at a word boundary."""
+
+    min_word_len = 1
+
+    def __init__(
+        self,
+        *,
+        auto_detector,
+        typed_buffer,
+        xkb: "IXKBAdapter",
+        retype_service,
+        learning_service: "LearningService",
+        timing: dict | None = None,
+        debug: bool = False,
+    ):
+        self.auto_detector = auto_detector
+        self.typed_buffer = typed_buffer
+        self.xkb = xkb
+        self.retype_service = retype_service
+        self.learning_service = learning_service
+        self.timing = timing or {}
+        self.debug = debug
+
+    def execute(
+        self,
+        *,
+        context: "StateContext",
+        threshold: int,
+        last_auto_marker: AutoConversionMarker | dict | None,
+        auto_confirm_enabled: bool,
+    ) -> SpaceAutoConversionResult:
+        if self.auto_detector is None:
+            return SpaceAutoConversionResult(space_consumed=False)
+
+        if context.chars_in_buffer == 0:
+            return SpaceAutoConversionResult(space_consumed=False)
+
+        if context.event_buffer and context.event_buffer[-1].code == KEY_SPACE:
+            return SpaceAutoConversionResult(space_consumed=False)
+
+        if context.chars_in_buffer < threshold:
+            logger.debug(
+                "Auto-conv skipped: buf=%d < threshold=%d",
+                context.chars_in_buffer,
+                threshold,
+            )
+            return SpaceAutoConversionResult(space_consumed=False)
+
+        try:
+            current_layout_info = self.xkb.get_current_layout() if self.xkb else None
+        except Exception:
+            return SpaceAutoConversionResult(space_consumed=False)
+
+        current_lang = self._layout_to_lang(current_layout_info)
+        token = self.typed_buffer.last_word(
+            context,
+            current_layout=current_layout_info,
+            xkb=self.xkb,
+        )
+
+        logger.debug(
+            "AutoConv: extracted word=%r (%d chars), lang=%s, buf=%d",
+            token.text,
+            len(token.text) if token.text else 0,
+            current_lang,
+            context.chars_in_buffer,
+        )
+
+        if not token.text or len(token.text) < self.min_word_len:
+            logger.debug(
+                "Auto-conv skipped: word %r too short (%d chars)",
+                token.text,
+                len(token.text) if token.text else 0,
+            )
+            return SpaceAutoConversionResult(space_consumed=False)
+
+        try:
+            should, reason = self.auto_detector.should_convert(
+                token.text,
+                current_lang,
+            )
+        except Exception as exc:
+            logger.warning("AutoDetector error: %s", exc)
+            return SpaceAutoConversionResult(space_consumed=False)
+
+        marker_changed = False
+        if last_auto_marker is not None:
+            old = AutoConversionMarker.from_legacy(last_auto_marker)
+            if auto_confirm_enabled:
+                self.learning_service.record_auto_confirmation(old)
+            marker_changed = True
+
+        if not should:
+            return SpaceAutoConversionResult(
+                space_consumed=False,
+                marker=None,
+                marker_changed=marker_changed,
+            )
+
+        direction = "en_to_ru" if current_lang == "en" else "ru_to_en"
+        logger.info(
+            "Auto-convert at space: '%s' → %s (%s)",
+            token.text,
+            direction,
+            reason,
+        )
+        result = self.perform_conversion(
+            context=context,
+            word_len=len(token.events),
+            word_events=token.events,
+            direction=direction,
+            original_word=token.text,
+            original_lang=current_lang,
+        )
+        return SpaceAutoConversionResult(
+            space_consumed=True,
+            pending_space=result.pending_space,
+            marker=result.marker,
+            marker_changed=True,
+        )
+
+    def perform_conversion(
+        self,
+        *,
+        context: "StateContext",
+        word_len: int,
+        word_events: list,
+        direction: str,
+        original_word: str = "",
+        original_lang: str = "",
+    ) -> SpaceAutoConversionResult:
+        from lswitch.core.states import State
+
+        conversion_ok = False
+
+        try:
+            target_lang = "ru" if direction == "en_to_ru" else "en"
+            target = self._find_layout_for_lang(target_lang)
+            conversion_ok = self.retype_service.retype_events(
+                word_events,
+                delete_count=word_len + 1,
+                target_layout=target,
+                before_replay_delay=self.timing.get(
+                    "auto_before_replay_delay",
+                    0.03,
+                ),
+                backspace_n_times_keyword=True,
+            )
+
+            if conversion_ok:
+                time.sleep(self.timing.get("auto_before_space_delay", 0.01))
+        except Exception as exc:
+            logger.error("Auto-conversion at space failed: %s", exc)
+        finally:
+            context.reset()
+            context.state = State.IDLE
+
+        marker = None
+        if original_word and conversion_ok:
+            marker = AutoConversionMarker.for_space_conversion(
+                original_word=original_word,
+                original_lang=original_lang,
+                direction=direction,
+                word_events=word_events,
+            )
+
+        return SpaceAutoConversionResult(
+            space_consumed=True,
+            pending_space=True,
+            marker=marker,
+            marker_changed=marker is not None,
+        )
+
+    def _find_layout_for_lang(self, lang: str):
+        if self.xkb is None:
+            return None
+        try:
+            return next(
+                (
+                    layout
+                    for layout in self.xkb.get_layouts()
+                    if layout.name.lower().startswith(lang)
+                ),
+                None,
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _layout_to_lang(layout_info) -> str:
+        if layout_info is None:
+            return "en"
+        name = layout_info.name.lower()
+        if name.startswith("ru") or name in ("russian", "россия"):
+            return "ru"
+        return "en"

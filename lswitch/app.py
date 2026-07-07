@@ -932,80 +932,19 @@ class LSwitchApp:
         convert from the very first word.  Increase to avoid false-positives
         at the start of a field (e.g., 5 = activate after ≥5 chars typed).
         """
-        MIN_WORD_LEN = 1
-
-        ctx = self.state_manager.context
-        if ctx.chars_in_buffer == 0:
-            return False
-
-        # Guard: if buffer ends with space(s), the last word was already
-        # evaluated on a previous space press — skip auto-conversion.
-        from lswitch.core.event_manager import KEY_SPACE as _KS_GUARD
-        if ctx.event_buffer and ctx.event_buffer[-1].code == _KS_GUARD:
-            return False
-
-        # Buffer warmup: don't activate until enough chars have been typed
-        threshold = self.config.get('auto_switch_threshold', 0)
-        if ctx.chars_in_buffer < threshold:
-            logger.debug(
-                "Auto-conv skipped: buf=%d < threshold=%d",
-                ctx.chars_in_buffer, threshold,
-            )
-            return False
-
-        # Get current layout FIRST — needed for correct char extraction below
-        try:
-            current_layout_info = self.xkb.get_current_layout() if self.xkb else None
-        except Exception:
-            return False
-
-        current_lang = self._layout_to_lang(current_layout_info)
-
-        # Extract last word using actual XKB layout mapping.
-        # This prevents false truncation on RU keys that map to non-alpha EN
-        # chars (б→, ю→. ж→; etc.) which would split the word mid-way.
-        word, word_events = self._extract_last_word_events(current_layout_info)
-
-        logger.debug(
-            "AutoConv: extracted word=%r (%d chars), lang=%s, buf=%d",
-            word, len(word) if word else 0, current_lang,
-            ctx.chars_in_buffer,
+        result = self._space_auto_conversion().execute(
+            context=self.state_manager.context,
+            threshold=self.config.get('auto_switch_threshold', 0),
+            last_auto_marker=self._last_auto_marker,
+            auto_confirm_enabled=self.config.get('user_dict_auto_confirm', False),
         )
 
-        # Skip very short words
-        if not word or len(word) < MIN_WORD_LEN:
-            logger.debug("Auto-conv skipped: word %r too short (%d chars)", word, len(word) if word else 0)
-            return False
+        if result.marker_changed:
+            self._last_auto_marker = result.marker
+        if result.pending_space:
+            self._pending_auto_space = True
 
-        # Ask AutoDetector
-        try:
-            should, reason = self.auto_detector.should_convert(word, current_lang)
-        except Exception as exc:
-            logger.warning("AutoDetector error: %s", exc)
-            return False
-
-        # Previous auto-conversion was accepted (user kept typing → next space).
-        # Learning from that implicit acceptance is optional; the marker is
-        # consumed either way so stale auto-conversions do not linger.
-        if self._last_auto_marker is not None:
-            from lswitch.core.auto_marker import AutoConversionMarker
-
-            old = AutoConversionMarker.from_legacy(self._last_auto_marker)
-            self._last_auto_marker = old
-            if self.user_dict and self.config.get('user_dict_auto_confirm', False):
-                self._learning().record_auto_confirmation(old)
-            self._last_auto_marker = None
-
-        if not should:
-            return False
-
-        direction = "en_to_ru" if current_lang == "en" else "ru_to_en"
-        logger.info("Auto-convert at space: '%s' → %s (%s)", word, direction, reason)
-        self._do_auto_conversion_at_space(
-            len(word_events), word_events, direction,
-            orig_word=word, orig_lang=current_lang,
-        )
-        return True
+        return result.space_consumed
 
     def _extract_last_word_events(self, current_layout=None) -> "tuple[str, list]":
         """Extract events for the last typed word from event_buffer.
@@ -1044,64 +983,36 @@ class LSwitchApp:
         The Space key was already delivered to the active application before LSwitch processed
         it (passive monitoring), so we must also delete that extra space character via backspace.
         """
-        import time as _time_mod
-        from lswitch.core.states import State
+        result = self._space_auto_conversion().perform_conversion(
+            context=self.state_manager.context,
+            word_len=word_len,
+            word_events=word_events,
+            direction=direction,
+            original_word=orig_word,
+            original_lang=orig_lang,
+        )
+        if result.pending_space:
+            self._pending_auto_space = True
+        if result.marker_changed:
+            self._last_auto_marker = result.marker
 
-        ctx = self.state_manager.context
-        conversion_ok = False
+    def _space_auto_conversion(self):
+        from lswitch.core.conversion_use_cases import SpaceAutoConversionUseCase
+        from lswitch.core.retype_service import RetypeService
 
-        try:
-            # Find target layout
-            target_lang = "ru" if direction == "en_to_ru" else "en"
-            try:
-                layouts = self.xkb.get_layouts() if self.xkb else []
-                target = next(
-                    (l for l in layouts if l.name.lower().startswith(target_lang)),
-                    None,
-                )
-            except Exception:
-                target = None
-
-            from lswitch.core.retype_service import RetypeService
-
-            retype = RetypeService(
+        return SpaceAutoConversionUseCase(
+            auto_detector=self.auto_detector,
+            typed_buffer=self.typed_buffer,
+            xkb=self.xkb,
+            retype_service=RetypeService(
                 self.virtual_kb,
                 self.xkb,
                 debug=self.debug,
-            )
-            conversion_ok = retype.retype_events(
-                word_events,
-                delete_count=word_len + 1,
-                target_layout=target,
-                before_replay_delay=self.timing.get('auto_before_replay_delay', 0.03),
-                backspace_n_times_keyword=True,
-            )
-
-            if conversion_ok:
-                # Дать приложению переварить введенный текст перед финальным пробелом.
-                _time_mod.sleep(self.timing.get('auto_before_space_delay', 0.01))
-                # We DO NOT tap_key(KEY_SPACE) here, because the physical Space key
-                # is almost certainly still held down by the user, and desktop
-                # input merging can eat the virtual press event. Instead, we
-                # defer sending it until the physical release event arrives.
-
-        except Exception as exc:
-            logger.error("Auto-conversion at space failed: %s", exc)
-        finally:
-            self._pending_auto_space = True
-
-            # Save marker BEFORE reset so correction can be detected later
-            if orig_word and conversion_ok:
-                from lswitch.core.auto_marker import AutoConversionMarker
-
-                self._last_auto_marker = AutoConversionMarker.for_space_conversion(
-                    original_word=orig_word,
-                    original_lang=orig_lang,
-                    direction=direction,
-                    word_events=word_events,
-                )
-            ctx.reset()
-            ctx.state = State.IDLE
+            ),
+            learning_service=self._learning(),
+            timing=self.timing,
+            debug=self.debug,
+        )
 
     # ------------------------------------------------------------------
     # Main loop

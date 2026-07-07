@@ -10,12 +10,15 @@ from lswitch.core.conversion_use_cases import (
     KEY_SPACE,
     ManualConversionUseCase,
     PostConversionStateUpdater,
+    SpaceAutoConversionUseCase,
     UndoAutoConversionUseCase,
 )
 from lswitch.core.events import KeyEventData
 from lswitch.core.learning_service import PendingManualLearning
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
-from lswitch.core.states import StateContext
+from lswitch.core.states import State, StateContext
+from lswitch.core.typed_buffer import TypedBufferService
+from lswitch.input.key_mapper import keycode_to_char
 from lswitch.platform.xkb_adapter import LayoutInfo
 
 
@@ -235,3 +238,127 @@ def test_manual_conversion_use_case_failure_skips_learning_and_clears_repeat():
     assert tracker.repeat_valid is False
     learning_service.record_manual_conversion.assert_not_called()
     learning_service.record_selection_conversion.assert_not_called()
+
+
+class _Detector:
+    def __init__(self, should: bool):
+        self.should = should
+
+    def should_convert(self, word: str, current_lang: str):
+        return self.should, "test"
+
+
+def _context_with_events(codes: list[int]) -> StateContext:
+    context = StateContext()
+    context.state = State.TYPING
+    context.event_buffer = [
+        KeyEventData(code=code, value=1, device_name="test")
+        for code in codes
+    ]
+    context.chars_in_buffer = len(context.event_buffer)
+    return context
+
+
+def _space_auto_use_case(*, should_convert: bool = True):
+    xkb = MagicMock()
+    en_layout = LayoutInfo(name="en", index=0, xkb_name="us")
+    ru_layout = LayoutInfo(name="ru", index=1, xkb_name="ru")
+    xkb.get_current_layout.return_value = en_layout
+    xkb.get_layouts.return_value = [en_layout, ru_layout]
+    xkb.keycode_to_char.side_effect = lambda code, _layout: keycode_to_char(code)
+    retype_service = MagicMock()
+    retype_service.retype_events.return_value = True
+    learning_service = MagicMock()
+    learning_service.user_dict = object()
+    use_case = SpaceAutoConversionUseCase(
+        auto_detector=_Detector(should_convert),
+        typed_buffer=TypedBufferService(),
+        xkb=xkb,
+        retype_service=retype_service,
+        learning_service=learning_service,
+        timing={
+            "auto_before_replay_delay": 0,
+            "auto_before_space_delay": 0,
+        },
+    )
+    return use_case, xkb, retype_service, learning_service
+
+
+def test_space_auto_conversion_use_case_retypes_word_and_returns_marker():
+    use_case, xkb, retype_service, _learning_service = _space_auto_use_case()
+    context = _context_with_events([34, 35, 48])
+    original_events = list(context.event_buffer)
+
+    result = use_case.execute(
+        context=context,
+        threshold=0,
+        last_auto_marker=None,
+        auto_confirm_enabled=False,
+    )
+
+    assert result.space_consumed is True
+    assert result.pending_space is True
+    assert result.marker is not None
+    assert result.marker.original_word == "ghb"
+    assert result.marker.original_lang == "en"
+    assert result.marker.direction == "en_to_ru"
+    assert result.marker_changed is True
+    retype_service.retype_events.assert_called_once_with(
+        original_events,
+        delete_count=4,
+        target_layout=xkb.get_layouts.return_value[1],
+        before_replay_delay=0,
+        backspace_n_times_keyword=True,
+    )
+    assert context.event_buffer == []
+    assert context.chars_in_buffer == 0
+    assert context.state == State.IDLE
+
+
+def test_space_auto_conversion_use_case_consumes_previous_marker_without_conversion():
+    use_case, _xkb, retype_service, learning_service = _space_auto_use_case(
+        should_convert=False
+    )
+    context = _context_with_events([34, 35, 48])
+    marker = AutoConversionMarker.for_space_conversion(
+        original_word="old",
+        original_lang="en",
+        direction="en_to_ru",
+        word_events=[],
+    )
+
+    result = use_case.execute(
+        context=context,
+        threshold=0,
+        last_auto_marker=marker,
+        auto_confirm_enabled=True,
+    )
+
+    assert result.space_consumed is False
+    assert result.marker is None
+    assert result.marker_changed is True
+    learning_service.record_auto_confirmation.assert_called_once_with(marker)
+    retype_service.retype_events.assert_not_called()
+    assert context.event_buffer
+
+
+def test_space_auto_conversion_use_case_skips_below_threshold():
+    use_case, _xkb, retype_service, learning_service = _space_auto_use_case()
+    context = _context_with_events([34, 35, 48])
+
+    result = use_case.execute(
+        context=context,
+        threshold=10,
+        last_auto_marker=AutoConversionMarker.for_space_conversion(
+            original_word="old",
+            original_lang="en",
+            direction="en_to_ru",
+            word_events=[],
+        ),
+        auto_confirm_enabled=True,
+    )
+
+    assert result.space_consumed is False
+    assert result.marker_changed is False
+    learning_service.record_auto_confirmation.assert_not_called()
+    retype_service.retype_events.assert_not_called()
