@@ -45,7 +45,6 @@ def _router(
         set_pending_auto_space=set_pending_auto_space or (lambda value: None),
         clear_last_retype_events=clear_last_retype_events or (lambda: None),
         on_key_release=MagicMock(),
-        on_key_repeat=MagicMock(),
         on_mouse_click=MagicMock(),
         on_mouse_release=MagicMock(),
     )
@@ -129,9 +128,29 @@ def test_input_router_keeps_selection_valid_on_shift_press():
     assert selection_tracker.valid is True
 
 
+def test_input_router_handles_backspace_repeat_and_hold():
+    router, state_manager, _selection_tracker = _router()
+    router.on_key_press(_event(EventType.KEY_PRESS))
+    hold = MagicMock()
+    state_manager.on_backspace_hold = hold
+    repeat = Event(
+        type=EventType.KEY_REPEAT,
+        data=KeyEventData(code=KEY_BACKSPACE, value=2, device_name="test"),
+        timestamp=0.0,
+    )
+
+    router.on_key_repeat(repeat)
+    router.on_key_repeat(repeat)
+    hold.assert_not_called()
+    router.on_key_repeat(repeat)
+
+    assert state_manager.context.backspace_repeats == 3
+    assert state_manager.context.event_buffer == []
+    hold.assert_called_once()
+
+
 def test_input_router_delegates_remaining_input_events():
     on_key_release = MagicMock()
-    on_key_repeat = MagicMock()
     on_mouse_click = MagicMock()
     on_mouse_release = MagicMock()
     router = InputEventRouter(
@@ -145,22 +164,18 @@ def test_input_router_delegates_remaining_input_events():
         set_pending_auto_space=lambda value: None,
         clear_last_retype_events=lambda: None,
         on_key_release=on_key_release,
-        on_key_repeat=on_key_repeat,
         on_mouse_click=on_mouse_click,
         on_mouse_release=on_mouse_release,
     )
 
     key_release = _event(EventType.KEY_RELEASE)
-    key_repeat = _event(EventType.KEY_REPEAT)
     mouse_click = _event(EventType.MOUSE_CLICK)
     mouse_release = _event(EventType.MOUSE_RELEASE)
 
     router.on_key_release(key_release)
-    router.on_key_repeat(key_repeat)
     router.on_mouse_click(mouse_click)
     router.on_mouse_release(mouse_release)
 
     on_key_release.assert_called_once_with(key_release)
-    on_key_repeat.assert_called_once_with(key_repeat)
     on_mouse_click.assert_called_once_with(mouse_click)
     on_mouse_release.assert_called_once_with(mouse_release)

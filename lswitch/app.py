@@ -235,7 +235,6 @@ class LSwitchApp:
             set_pending_auto_space=self._set_pending_auto_space,
             clear_last_retype_events=self._clear_last_retype_events,
             on_key_release=self._on_key_release,
-            on_key_repeat=self._on_key_repeat,
             on_mouse_click=self._on_mouse_click,
             on_mouse_release=self._on_mouse_release,
         )
@@ -568,22 +567,7 @@ class LSwitchApp:
             self.typed_buffer.decrement_count(self.state_manager.context)
 
     def _on_key_repeat(self, event):
-        from lswitch.core.event_manager import KEY_BACKSPACE
-
-        data = event.data
-        if data.code == KEY_BACKSPACE:
-            ctx = self.state_manager.context
-            ctx.backspace_repeats += 1
-            # Each auto-repeat removes one more char from the event buffer
-            self.typed_buffer.pop_event(ctx)
-            logger.trace(  # type: ignore[attr-defined]
-                "Buffer -[BS repeat] → %r (%d chars)",
-                self._decode_buffer(),
-                len(self.state_manager.context.event_buffer),
-            )
-            self.typed_buffer.decrement_count(ctx)
-            if ctx.backspace_repeats >= 3:
-                self.state_manager.on_backspace_hold()
+        self.input_router.on_key_repeat(event)
 
     def _on_mouse_click(self, event):
         self._last_auto_marker = None

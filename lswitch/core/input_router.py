@@ -44,7 +44,6 @@ class InputEventRouter:
         set_pending_auto_space: Callable[[bool], None],
         clear_last_retype_events: Callable[[], None],
         on_key_release: Callable[[Event], None],
-        on_key_repeat: Callable[[Event], None],
         on_mouse_click: Callable[[Event], None],
         on_mouse_release: Callable[[Event], None],
     ):
@@ -58,7 +57,6 @@ class InputEventRouter:
         self.set_pending_auto_space = set_pending_auto_space
         self.clear_last_retype_events = clear_last_retype_events
         self._on_key_release = on_key_release
-        self._on_key_repeat = on_key_repeat
         self._on_mouse_click = on_mouse_click
         self._on_mouse_release = on_mouse_release
 
@@ -107,7 +105,19 @@ class InputEventRouter:
         self._on_key_release(event)
 
     def on_key_repeat(self, event: Event) -> None:
-        self._on_key_repeat(event)
+        data = event.data
+        if data.code == KEY_BACKSPACE:
+            ctx = self.state_manager.context
+            ctx.backspace_repeats += 1
+            self.typed_buffer.pop_event(ctx)
+            logger.trace(  # type: ignore[attr-defined]
+                "Buffer -[BS repeat] → %r (%d chars)",
+                self.decode_buffer(),
+                len(self.state_manager.context.event_buffer),
+            )
+            self.typed_buffer.decrement_count(ctx)
+            if ctx.backspace_repeats >= 3:
+                self.state_manager.on_backspace_hold()
 
     def on_mouse_click(self, event: Event) -> None:
         self._on_mouse_click(event)
