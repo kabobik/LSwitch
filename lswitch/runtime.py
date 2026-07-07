@@ -95,6 +95,12 @@ class StartedRuntimeResources:
     device_count: int
 
 
+@dataclass(frozen=True)
+class QtRuntimeBootstrap:
+    qt_app: object | None
+    main_thread: object | None
+
+
 def create_core_components(
     *,
     double_click_timeout: float,
@@ -115,6 +121,20 @@ def create_core_components(
             debug=debug,
             manual_weight_step=manual_weight_step,
         ),
+    )
+
+
+def create_qt_runtime_bootstrap(*, runtime_plan, argv) -> QtRuntimeBootstrap:
+    """Create early Qt runtime objects required before platform initialization."""
+    if not runtime_plan.requires_qt_before_platform:
+        return QtRuntimeBootstrap(qt_app=None, main_thread=None)
+
+    from lswitch.ui.qt_bridge import QtMainThreadInvoker, ensure_qt_application
+
+    qt_app = ensure_qt_application(argv)
+    return QtRuntimeBootstrap(
+        qt_app=qt_app,
+        main_thread=QtMainThreadInvoker(qt_app),
     )
 
 

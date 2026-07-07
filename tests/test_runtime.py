@@ -18,6 +18,7 @@ from lswitch.core.typed_buffer import TypedBufferService
 from lswitch.runtime import (
     ConversionRuntimeComponents,
     InputDeviceRuntimeComponents,
+    QtRuntimeBootstrap,
     RuntimeCoreComponents,
     SelectionPollerThread,
     StartedRuntimeResources,
@@ -25,6 +26,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    create_qt_runtime_bootstrap,
     create_tray_indicator,
     install_reload_signal_handler,
     run_evdev_event_loop,
@@ -51,6 +53,44 @@ def test_create_core_components_builds_core_runtime_services():
     assert components.learning_service.debug is True
     assert components.learning_service.manual_weight_step == 3
     assert components.learning_service.user_dict is None
+
+
+def test_create_qt_runtime_bootstrap_is_noop_when_qt_is_not_required():
+    result = create_qt_runtime_bootstrap(
+        runtime_plan=types.SimpleNamespace(requires_qt_before_platform=False),
+        argv=["lswitch"],
+    )
+
+    assert isinstance(result, QtRuntimeBootstrap)
+    assert result.qt_app is None
+    assert result.main_thread is None
+
+
+def test_create_qt_runtime_bootstrap_creates_qt_app_and_main_thread(monkeypatch):
+    qt_app = object()
+    created = {}
+
+    class FakeQtMainThreadInvoker:
+        def __init__(self, app):
+            self.app = app
+            created["main_thread"] = self
+
+    qt_bridge_module = types.ModuleType("lswitch.ui.qt_bridge")
+    qt_bridge_module.ensure_qt_application = MagicMock(return_value=qt_app)
+    qt_bridge_module.QtMainThreadInvoker = FakeQtMainThreadInvoker
+    monkeypatch.setitem(sys.modules, "lswitch.ui.qt_bridge", qt_bridge_module)
+
+    argv = ["lswitch", "--gui"]
+
+    result = create_qt_runtime_bootstrap(
+        runtime_plan=types.SimpleNamespace(requires_qt_before_platform=True),
+        argv=argv,
+    )
+
+    assert result.qt_app is qt_app
+    assert result.main_thread is created["main_thread"]
+    assert result.main_thread.app is qt_app
+    qt_bridge_module.ensure_qt_application.assert_called_once_with(argv)
 
 
 def test_create_input_router_wires_core_components_and_callbacks():

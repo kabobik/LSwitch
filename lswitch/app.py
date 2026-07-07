@@ -16,6 +16,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    create_qt_runtime_bootstrap,
     create_tray_indicator,
     install_reload_signal_handler,
     run_evdev_event_loop,
@@ -738,21 +739,17 @@ class LSwitchApp:
         from lswitch.platform.platform_factory import create_runtime_plan
 
         runtime_plan = create_runtime_plan(headless=self.headless)
-        qt_app = None
-        main_thread = None
 
         # Защита от двойного запуска
         self._pid_lock = _PidLock(replace=self._replace)
         self._pid_lock.acquire()
 
         try:
-            if runtime_plan.requires_qt_before_platform:
-                from lswitch.ui.qt_bridge import QtMainThreadInvoker, ensure_qt_application
-
-                qt_app = ensure_qt_application(sys.argv)
-                main_thread = QtMainThreadInvoker(qt_app)
-
-            self._init_platform(main_thread=main_thread)
+            qt_bootstrap = create_qt_runtime_bootstrap(
+                runtime_plan=runtime_plan,
+                argv=sys.argv,
+            )
+            self._init_platform(main_thread=qt_bootstrap.main_thread)
             self._wire_event_bus()
         except Exception:
             self.stop()
@@ -784,6 +781,7 @@ class LSwitchApp:
         )
 
         if runtime_plan.uses_qt_event_loop:
+            qt_app = qt_bootstrap.qt_app
             if qt_app is None:
                 from lswitch.ui.qt_bridge import ensure_qt_application
 
