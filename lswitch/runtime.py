@@ -286,6 +286,24 @@ def start_runtime_resources(
     )
 
 
+def install_reload_signal_handler(
+    *,
+    config,
+    apply_runtime_config,
+    debug: bool,
+    log,
+):
+    """Install SIGHUP handler for runtime config reloads."""
+    def _reload_handler(signum, frame):
+        if config.reload():
+            apply_runtime_config()
+        if debug:
+            log.debug("Config reloaded via SIGHUP")
+
+    signal.signal(signal.SIGHUP, _reload_handler)
+    return _reload_handler
+
+
 def run_qt_runtime_loop(
     *,
     qt_app,

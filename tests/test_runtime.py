@@ -26,6 +26,7 @@ from lswitch.runtime import (
     create_input_device_runtime,
     create_input_router,
     create_tray_indicator,
+    install_reload_signal_handler,
     run_evdev_event_loop,
     run_qt_runtime_loop,
     start_runtime_resources,
@@ -263,6 +264,54 @@ def test_start_runtime_resources_skips_poller_and_udev_when_disabled_or_missing(
     assert result.device_count == 0
     poller_factory.assert_not_called()
     device_manager.scan_devices.assert_called_once_with()
+
+
+def test_install_reload_signal_handler_applies_runtime_config_when_reload_succeeds(monkeypatch):
+    registered = {}
+    monkeypatch.setattr(
+        "lswitch.runtime.signal.signal",
+        lambda signum, handler: registered.update({signum: handler}),
+    )
+    config = MagicMock()
+    config.reload.return_value = True
+    apply_runtime_config = MagicMock()
+    log = MagicMock()
+
+    handler = install_reload_signal_handler(
+        config=config,
+        apply_runtime_config=apply_runtime_config,
+        debug=True,
+        log=log,
+    )
+
+    assert registered[__import__("signal").SIGHUP] is handler
+
+    handler(None, None)
+
+    config.reload.assert_called_once_with()
+    apply_runtime_config.assert_called_once_with()
+    log.debug.assert_called_once_with("Config reloaded via SIGHUP")
+
+
+def test_install_reload_signal_handler_skips_apply_when_reload_is_unchanged(monkeypatch):
+    monkeypatch.setattr("lswitch.runtime.signal.signal", lambda signum, handler: None)
+    config = MagicMock()
+    config.reload.return_value = False
+    apply_runtime_config = MagicMock()
+    log = MagicMock()
+
+    handler = install_reload_signal_handler(
+        config=config,
+        apply_runtime_config=apply_runtime_config,
+        debug=False,
+        log=log,
+    )
+
+    handler(None, None)
+
+    config.reload.assert_called_once_with()
+    apply_runtime_config.assert_not_called()
+    log.debug.assert_not_called()
 
 
 def test_run_evdev_event_loop_dispatches_events_until_stopped():

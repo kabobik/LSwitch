@@ -17,6 +17,7 @@ from lswitch.runtime import (
     create_input_device_runtime,
     create_input_router,
     create_tray_indicator,
+    install_reload_signal_handler,
     run_evdev_event_loop,
     run_qt_runtime_loop,
     start_runtime_resources,
@@ -775,12 +776,12 @@ class LSwitchApp:
             started_runtime.device_count,
         )
 
-        def _reload_handler(signum, frame):
-            if self.config.reload():
-                self._apply_runtime_config()
-            if self.debug:
-                logger.debug("Config reloaded via SIGHUP")
-        signal.signal(signal.SIGHUP, _reload_handler)
+        install_reload_signal_handler(
+            config=self.config,
+            apply_runtime_config=self._apply_runtime_config,
+            debug=self.debug,
+            log=logger,
+        )
 
         if runtime_plan.uses_qt_event_loop:
             if qt_app is None:
