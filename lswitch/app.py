@@ -16,6 +16,7 @@ from lswitch.runtime import (
     create_input_router,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
+    create_space_auto_conversion_use_case,
     create_tray_indicator,
     install_reload_signal_handler,
     run_evdev_event_loop,
@@ -552,18 +553,11 @@ class LSwitchApp:
             self._last_auto_marker = result.marker
 
     def _space_auto_conversion(self):
-        from lswitch.core.conversion_use_cases import SpaceAutoConversionUseCase
-        from lswitch.core.retype_service import RetypeService
-
-        return SpaceAutoConversionUseCase(
+        return create_space_auto_conversion_use_case(
             auto_detector=self.auto_detector,
             typed_buffer=self.typed_buffer,
             xkb=self.xkb,
-            retype_service=RetypeService(
-                self.virtual_kb,
-                self.xkb,
-                debug=self.debug,
-            ),
+            virtual_kb=self.virtual_kb,
             learning_service=self._learning(),
             timing=self.timing,
             debug=self.debug,

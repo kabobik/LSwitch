@@ -371,6 +371,35 @@ def apply_user_dictionary_config(
     return None
 
 
+def create_space_auto_conversion_use_case(
+    *,
+    auto_detector,
+    typed_buffer,
+    xkb,
+    virtual_kb,
+    learning_service,
+    timing: dict,
+    debug: bool,
+):
+    """Create the space-triggered auto-conversion use case."""
+    from lswitch.core.conversion_use_cases import SpaceAutoConversionUseCase
+    from lswitch.core.retype_service import RetypeService
+
+    return SpaceAutoConversionUseCase(
+        auto_detector=auto_detector,
+        typed_buffer=typed_buffer,
+        xkb=xkb,
+        retype_service=RetypeService(
+            virtual_kb,
+            xkb,
+            debug=debug,
+        ),
+        learning_service=learning_service,
+        timing=timing,
+        debug=debug,
+    )
+
+
 def create_conversion_runtime(
     *,
     xkb,

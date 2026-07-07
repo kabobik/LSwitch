@@ -33,6 +33,7 @@ from lswitch.runtime import (
     create_input_router,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
+    create_space_auto_conversion_use_case,
     create_tray_indicator,
     install_reload_signal_handler,
     run_evdev_event_loop,
@@ -396,6 +397,76 @@ def test_apply_user_dictionary_config_disables_existing_dictionary():
     assert result is None
     enable_user_dictionary.assert_not_called()
     log.info.assert_called_once_with("User dictionary disabled")
+
+
+def test_create_space_auto_conversion_use_case_wires_retype_service(monkeypatch):
+    created = {}
+
+    class FakeRetypeService:
+        def __init__(self, virtual_kb, xkb, debug):
+            self.virtual_kb = virtual_kb
+            self.xkb = xkb
+            self.debug = debug
+            created["retype_service"] = self
+
+    class FakeSpaceAutoConversionUseCase:
+        def __init__(
+            self,
+            *,
+            auto_detector,
+            typed_buffer,
+            xkb,
+            retype_service,
+            learning_service,
+            timing,
+            debug,
+        ):
+            self.auto_detector = auto_detector
+            self.typed_buffer = typed_buffer
+            self.xkb = xkb
+            self.retype_service = retype_service
+            self.learning_service = learning_service
+            self.timing = timing
+            self.debug = debug
+
+    conversion_module = types.ModuleType("lswitch.core.conversion_use_cases")
+    conversion_module.SpaceAutoConversionUseCase = FakeSpaceAutoConversionUseCase
+    retype_module = types.ModuleType("lswitch.core.retype_service")
+    retype_module.RetypeService = FakeRetypeService
+    monkeypatch.setitem(
+        sys.modules,
+        "lswitch.core.conversion_use_cases",
+        conversion_module,
+    )
+    monkeypatch.setitem(sys.modules, "lswitch.core.retype_service", retype_module)
+    auto_detector = object()
+    typed_buffer = object()
+    xkb = object()
+    virtual_kb = object()
+    learning_service = object()
+    timing = {"auto_before_space_delay": 0.01}
+
+    use_case = create_space_auto_conversion_use_case(
+        auto_detector=auto_detector,
+        typed_buffer=typed_buffer,
+        xkb=xkb,
+        virtual_kb=virtual_kb,
+        learning_service=learning_service,
+        timing=timing,
+        debug=True,
+    )
+
+    assert isinstance(use_case, FakeSpaceAutoConversionUseCase)
+    assert use_case.auto_detector is auto_detector
+    assert use_case.typed_buffer is typed_buffer
+    assert use_case.xkb is xkb
+    assert use_case.learning_service is learning_service
+    assert use_case.timing is timing
+    assert use_case.debug is True
+    assert use_case.retype_service is created["retype_service"]
+    assert use_case.retype_service.virtual_kb is virtual_kb
+    assert use_case.retype_service.xkb is xkb
+    assert use_case.retype_service.debug is True
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():
