@@ -206,6 +206,14 @@ class QtRuntimeBootstrap:
     main_thread: object | None
 
 
+@dataclass(frozen=True)
+class RuntimeConfigSnapshot:
+    timing: dict
+    x11_selection_timing: dict
+    wayland_timing: dict
+    wayland_selection_timing: dict
+
+
 def create_core_components(
     *,
     double_click_timeout: float,
@@ -314,6 +322,33 @@ def sync_user_dictionary_components(
         learning_service.user_dict = user_dict
         learning_service.debug = debug
         learning_service.manual_weight_step = manual_weight_step
+
+
+def apply_runtime_timing_config(
+    *,
+    config,
+    state_manager,
+    conversion_engine,
+) -> RuntimeConfigSnapshot:
+    """Apply runtime timing config and return the current timing tables."""
+    timing = config.get("timing", {})
+    x11_selection_timing = config.get("x11_selection_timing", {})
+    wayland_timing = config.get("wayland_timing", {})
+    wayland_selection_timing = config.get("wayland_selection_timing", {})
+
+    state_manager.double_click_timeout = config.get(
+        "double_click_timeout",
+        state_manager.double_click_timeout,
+    )
+    if conversion_engine is not None:
+        conversion_engine.timing = timing
+
+    return RuntimeConfigSnapshot(
+        timing=timing,
+        x11_selection_timing=x11_selection_timing,
+        wayland_timing=wayland_timing,
+        wayland_selection_timing=wayland_selection_timing,
+    )
 
 
 def create_conversion_runtime(

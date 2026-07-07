@@ -21,9 +21,11 @@ from lswitch.runtime import (
     PidLock,
     PlatformRuntimeComponents,
     QtRuntimeBootstrap,
+    RuntimeConfigSnapshot,
     RuntimeCoreComponents,
     SelectionPollerThread,
     StartedRuntimeResources,
+    apply_runtime_timing_config,
     create_conversion_runtime,
     create_core_components,
     create_input_device_runtime,
@@ -287,6 +289,58 @@ def test_sync_user_dictionary_components_falls_back_to_default_min_weight():
 
     assert auto_detector.user_dict is None
     assert auto_detector.user_dict_min_weight == 2
+
+
+def test_apply_runtime_timing_config_updates_state_and_conversion_engine():
+    config = MagicMock()
+    timing = {"retype": 0.1}
+    x11_selection_timing = {"poll_interval": 0.2}
+    wayland_timing = {"wl_clipboard_timeout": 1.5}
+    wayland_selection_timing = {"copy_wait_timeout": 0.7}
+    values = {
+        "timing": timing,
+        "x11_selection_timing": x11_selection_timing,
+        "wayland_timing": wayland_timing,
+        "wayland_selection_timing": wayland_selection_timing,
+        "double_click_timeout": 0.45,
+    }
+    config.get.side_effect = lambda key, default=None: values.get(key, default)
+    state_manager = MagicMock()
+    state_manager.double_click_timeout = 0.3
+    conversion_engine = MagicMock()
+
+    snapshot = apply_runtime_timing_config(
+        config=config,
+        state_manager=state_manager,
+        conversion_engine=conversion_engine,
+    )
+
+    assert isinstance(snapshot, RuntimeConfigSnapshot)
+    assert snapshot.timing is timing
+    assert snapshot.x11_selection_timing is x11_selection_timing
+    assert snapshot.wayland_timing is wayland_timing
+    assert snapshot.wayland_selection_timing is wayland_selection_timing
+    assert state_manager.double_click_timeout == 0.45
+    assert conversion_engine.timing is timing
+
+
+def test_apply_runtime_timing_config_tolerates_missing_conversion_engine():
+    config = MagicMock()
+    config.get.side_effect = lambda key, default=None: default
+    state_manager = MagicMock()
+    state_manager.double_click_timeout = 0.3
+
+    snapshot = apply_runtime_timing_config(
+        config=config,
+        state_manager=state_manager,
+        conversion_engine=None,
+    )
+
+    assert snapshot.timing == {}
+    assert snapshot.x11_selection_timing == {}
+    assert snapshot.wayland_timing == {}
+    assert snapshot.wayland_selection_timing == {}
+    assert state_manager.double_click_timeout == 0.3
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():

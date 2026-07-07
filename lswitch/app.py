@@ -11,6 +11,7 @@ from lswitch.core.learning_service import LearningService
 from lswitch.runtime import (
     PidLock,
     SelectionPollerThread,
+    apply_runtime_timing_config,
     create_core_components,
     create_input_router,
     create_platform_runtime_components,
@@ -202,19 +203,15 @@ class LSwitchApp:
 
     def _apply_runtime_config(self) -> None:
         """Apply config values that affect already-created runtime objects."""
-        self.timing = self.config.get('timing', {})
-        self.x11_selection_timing = self.config.get('x11_selection_timing', {})
-        self.wayland_timing = self.config.get('wayland_timing', {})
-        self.wayland_selection_timing = self.config.get(
-            'wayland_selection_timing',
-            {},
+        timing_config = apply_runtime_timing_config(
+            config=self.config,
+            state_manager=self.state_manager,
+            conversion_engine=self.conversion_engine,
         )
-        self.state_manager.double_click_timeout = self.config.get(
-            'double_click_timeout',
-            self.state_manager.double_click_timeout,
-        )
-        if self.conversion_engine is not None:
-            self.conversion_engine.timing = self.timing
+        self.timing = timing_config.timing
+        self.x11_selection_timing = timing_config.x11_selection_timing
+        self.wayland_timing = timing_config.wayland_timing
+        self.wayland_selection_timing = timing_config.wayland_selection_timing
 
         if self.config.get('user_dict_enabled'):
             try:
