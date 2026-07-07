@@ -18,6 +18,7 @@ from lswitch.core.typed_buffer import TypedBufferService
 from lswitch.runtime import (
     ConversionRuntimeComponents,
     InputDeviceRuntimeComponents,
+    PidLock,
     QtRuntimeBootstrap,
     RuntimeCoreComponents,
     SelectionPollerThread,
@@ -32,6 +33,10 @@ from lswitch.runtime import (
     run_evdev_event_loop,
     run_qt_runtime_loop,
     run_selected_runtime_loop,
+    is_process_alive,
+    kill_existing_instance,
+    pid_lock_path,
+    read_existing_pid,
     start_runtime_resources,
     stop_runtime_resources,
 )
@@ -54,6 +59,94 @@ def test_create_core_components_builds_core_runtime_services():
     assert components.learning_service.debug is True
     assert components.learning_service.manual_weight_step == 3
     assert components.learning_service.user_dict is None
+
+
+def test_pid_lock_path_uses_xdg_runtime_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+    assert pid_lock_path() == str(tmp_path / "lswitch.pid")
+
+
+def test_read_existing_pid_handles_missing_invalid_and_valid_values(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    path = tmp_path / "lswitch.pid"
+
+    assert read_existing_pid() is None
+
+    path.write_text("not-a-pid")
+    assert read_existing_pid() is None
+
+    path.write_text("123\n")
+    assert read_existing_pid() == 123
+
+
+def test_is_process_alive_uses_signal_zero(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "lswitch.runtime.os.kill",
+        lambda pid, sig: calls.append((pid, sig)),
+    )
+
+    assert is_process_alive(123) is True
+    assert calls == [(123, 0)]
+
+
+def test_is_process_alive_returns_false_on_os_error(monkeypatch):
+    def fail(pid, sig):
+        raise OSError("missing")
+
+    monkeypatch.setattr("lswitch.runtime.os.kill", fail)
+
+    assert is_process_alive(123) is False
+
+
+def test_kill_existing_instance_returns_true_when_process_exits(monkeypatch):
+    kill_calls = []
+    alive_results = iter([True, False])
+    monkeypatch.setattr(
+        "lswitch.runtime.os.kill",
+        lambda pid, sig: kill_calls.append((pid, sig)),
+    )
+    monkeypatch.setattr(
+        "lswitch.runtime.is_process_alive",
+        lambda pid: next(alive_results),
+    )
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
+
+    assert kill_existing_instance(123) is True
+    assert kill_calls == [(123, __import__("signal").SIGTERM)]
+
+
+def test_pid_lock_acquire_writes_pid_and_release_removes_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+    lock = PidLock()
+    lock.acquire()
+
+    path = tmp_path / "lswitch.pid"
+    assert path.read_text() == f"{__import__('os').getpid()}\n"
+
+    lock.release()
+
+    assert not path.exists()
+    assert lock._fd is None
+
+
+def test_pid_lock_acquire_raises_when_lock_is_held(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    first_lock = PidLock()
+    first_lock.acquire()
+
+    try:
+        second_lock = PidLock()
+        try:
+            second_lock.acquire()
+        except SystemExit as exc:
+            assert "LSwitch уже запущен" in str(exc)
+        else:
+            raise AssertionError("expected lock contention to raise SystemExit")
+    finally:
+        first_lock.release()
 
 
 def test_create_qt_runtime_bootstrap_is_noop_when_qt_is_not_required():

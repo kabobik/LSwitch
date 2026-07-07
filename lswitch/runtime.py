@@ -1,8 +1,8 @@
 """Runtime component factories."""
 
-from __future__ import annotations
-
+import fcntl
 import logging
+import os
 import signal
 import threading
 from dataclasses import dataclass
@@ -20,6 +20,104 @@ from lswitch.intelligence.dictionary_service import DictionaryService
 from lswitch.intelligence.ngram_analyzer import NgramAnalyzer
 
 logger = logging.getLogger(__name__)
+
+
+def pid_lock_path() -> str:
+    """Return path for PID lock file: /run/user/<uid>/lswitch.pid."""
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    return os.path.join(runtime_dir, "lswitch.pid")
+
+
+def read_existing_pid() -> int | None:
+    """Read PID from lock file. Returns None if file doesn't exist or is invalid."""
+    path = pid_lock_path()
+    try:
+        with open(path) as f:
+            return int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def is_process_alive(pid: int) -> bool:
+    """Check if a process with given PID is alive."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def kill_existing_instance(pid: int) -> bool:
+    """Send SIGTERM to existing instance and wait for it to exit."""
+    import time
+
+    logger.info("Останавливаю предыдущий экземпляр (PID %d)...", pid)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return True
+
+    for _ in range(50):
+        if not is_process_alive(pid):
+            return True
+        time.sleep(0.1)
+
+    logger.warning("PID %d не завершился за 5 сек, отправляю SIGKILL", pid)
+    try:
+        os.kill(pid, signal.SIGKILL)
+        time.sleep(0.2)
+    except OSError:
+        pass
+    return not is_process_alive(pid)
+
+
+class PidLock:
+    """Exclusive PID lock using fcntl.flock."""
+
+    def __init__(self, replace: bool = False):
+        self._path = pid_lock_path()
+        self._fd: int | None = None
+        self._replace = replace
+
+    def acquire(self) -> None:
+        """Acquire the lock or raise SystemExit if another instance is running."""
+        if self._replace:
+            existing_pid = read_existing_pid()
+            if existing_pid and is_process_alive(existing_pid) and existing_pid != os.getpid():
+                if not kill_existing_instance(existing_pid):
+                    raise SystemExit(
+                        f"Не удалось остановить предыдущий экземпляр (PID {existing_pid}). "
+                        f"Остановите его вручную: kill {existing_pid}"
+                    )
+
+        self._fd = os.open(self._path, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(self._fd)
+            self._fd = None
+            existing_pid = read_existing_pid()
+            msg = (
+                f"LSwitch уже запущен (PID {existing_pid}). "
+                f"Для замены: lswitch --replace\n"
+                f"Для остановки: kill {existing_pid}"
+            )
+            raise SystemExit(msg)
+
+        os.ftruncate(self._fd, 0)
+        os.lseek(self._fd, 0, os.SEEK_SET)
+        os.write(self._fd, f"{os.getpid()}\n".encode())
+
+    def release(self) -> None:
+        """Release the lock and remove the PID file."""
+        if self._fd is not None:
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_UN)
+                os.close(self._fd)
+                os.unlink(self._path)
+            except OSError:
+                pass
+            self._fd = None
 
 
 class SelectionPollerThread(threading.Thread):

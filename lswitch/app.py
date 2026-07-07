@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import fcntl
 import logging
-import os
-import signal
 import sys
 
 import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.config import ConfigManager
+from lswitch.core.learning_service import LearningService
 from lswitch.runtime import (
+    PidLock,
     SelectionPollerThread,
     create_conversion_runtime,
     create_core_components,
@@ -27,115 +26,6 @@ from lswitch.runtime import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ──────────────────────────────────────────────────────────────
-# PID lock — защита от двойного запуска
-# ──────────────────────────────────────────────────────────────
-
-def _pid_lock_path() -> str:
-    """Return path for PID lock file: /run/user/<uid>/lswitch.pid"""
-    runtime_dir = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
-    return os.path.join(runtime_dir, 'lswitch.pid')
-
-
-def _read_existing_pid() -> int | None:
-    """Read PID from lock file. Returns None if file doesn't exist or is invalid."""
-    path = _pid_lock_path()
-    try:
-        with open(path, 'r') as f:
-            return int(f.read().strip())
-    except (FileNotFoundError, ValueError):
-        return None
-
-
-def _is_process_alive(pid: int) -> bool:
-    """Check if a process with given PID is alive."""
-    try:
-        os.kill(pid, 0)  # signal 0 = just check existence
-        return True
-    except OSError:
-        return False
-
-
-def _kill_existing(pid: int) -> bool:
-    """Send SIGTERM to existing instance and wait for it to exit."""
-    import time
-    logger.info("Останавливаю предыдущий экземпляр (PID %d)...", pid)
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError:
-        return True  # already dead
-    # Wait up to 5 seconds
-    for _ in range(50):
-        if not _is_process_alive(pid):
-            return True
-        time.sleep(0.1)
-    logger.warning("PID %d не завершился за 5 сек, отправляю SIGKILL", pid)
-    try:
-        os.kill(pid, signal.SIGKILL)
-        time.sleep(0.2)
-    except OSError:
-        pass
-    return not _is_process_alive(pid)
-
-
-class _PidLock:
-    """Exclusive PID lock using fcntl.flock.
-
-    The lock is automatically released when the process exits (even on crash)
-    because the OS closes all file descriptors.
-    """
-
-    def __init__(self, replace: bool = False):
-        self._path = _pid_lock_path()
-        self._fd: int | None = None
-        self._replace = replace
-
-    def acquire(self) -> None:
-        """Acquire the lock or raise SystemExit if another instance is running."""
-        # If --replace, kill existing instance first
-        if self._replace:
-            existing_pid = _read_existing_pid()
-            if existing_pid and _is_process_alive(existing_pid) and existing_pid != os.getpid():
-                if not _kill_existing(existing_pid):
-                    raise SystemExit(
-                        f"Не удалось остановить предыдущий экземпляр (PID {existing_pid}). "
-                        f"Остановите его вручную: kill {existing_pid}"
-                    )
-
-        # Open (create if needed) the lock file
-        self._fd = os.open(self._path, os.O_RDWR | os.O_CREAT, 0o644)
-        try:
-            fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            os.close(self._fd)
-            self._fd = None
-            existing_pid = _read_existing_pid()
-            msg = (
-                f"LSwitch уже запущен (PID {existing_pid}). "
-                f"Для замены: lswitch --replace\n"
-                f"Для остановки: kill {existing_pid}"
-            )
-            raise SystemExit(msg)
-
-        # Write our PID
-        os.ftruncate(self._fd, 0)
-        os.lseek(self._fd, 0, os.SEEK_SET)
-        os.write(self._fd, f"{os.getpid()}\n".encode())
-        # Keep fd open — the flock lives as long as the fd is open
-
-    def release(self) -> None:
-        """Release the lock and remove the PID file."""
-        if self._fd is not None:
-            try:
-                fcntl.flock(self._fd, fcntl.LOCK_UN)
-                os.close(self._fd)
-                os.unlink(self._path)
-            except OSError:
-                pass
-            self._fd = None
-from lswitch.core.learning_service import LearningService
 
 
 class LSwitchApp:
@@ -162,7 +52,7 @@ class LSwitchApp:
         self.debug = debug
         self._running = False
         self._replace = replace
-        self._pid_lock: _PidLock | None = None
+        self._pid_lock: PidLock | None = None
 
         # Configuration
         self.config = ConfigManager(config_path=config_path, debug=debug)
@@ -742,7 +632,7 @@ class LSwitchApp:
         runtime_plan = create_runtime_plan(headless=self.headless)
 
         # Защита от двойного запуска
-        self._pid_lock = _PidLock(replace=self._replace)
+        self._pid_lock = PidLock(replace=self._replace)
         self._pid_lock.acquire()
 
         try:
