@@ -834,6 +834,8 @@ class LSwitchApp:
             layout_info = self.xkb.get_current_layout() if self.xkb else None
         except Exception:
             layout_info = None
+        from lswitch.core.layout_service import LayoutService
+
         pending_manual_learning = self._learning().prepare_pending_manual_learning(
             chars_in_buffer=chars_in_buffer,
             selection_valid=selection_valid_for_convert,
@@ -841,7 +843,7 @@ class LSwitchApp:
             layout_info=layout_info,
             extract_last_word=self._extract_last_word_events,
             selection=self.selection,
-            layout_to_lang=self._layout_to_lang,
+            layout_to_lang=LayoutService.layout_to_lang,
         )
 
         # --- Case A: undo of recent auto-conversion → penalise ---
@@ -988,15 +990,6 @@ class LSwitchApp:
             xkb=self.xkb,
         )
         return token.text, token.events
-
-    def _layout_to_lang(self, layout_info) -> str:
-        """Map LayoutInfo to a 2-letter language code ('en' or 'ru')."""
-        if layout_info is None:
-            return "en"
-        name = layout_info.name.lower()
-        if name.startswith("ru") or name in ("russian", "россия"):
-            return "ru"
-        return "en"
 
     def _do_auto_conversion_at_space(
         self, word_len: int, word_events: list, direction: str,

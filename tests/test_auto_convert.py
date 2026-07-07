@@ -10,6 +10,7 @@ import pytest
 from lswitch.app import LSwitchApp
 from lswitch.core.auto_marker import AutoConversionMarker
 from lswitch.core.events import Event, EventType, KeyEventData
+from lswitch.core.layout_service import LayoutService
 from lswitch.core.states import State
 from lswitch.platform.xkb_adapter import LayoutInfo
 
@@ -194,28 +195,24 @@ class TestExtractLastWordEvents:
 
 
 # ---------------------------------------------------------------------------
-# _layout_to_lang
+# LayoutService.layout_to_lang
 # ---------------------------------------------------------------------------
 
 class TestLayoutToLang:
     def test_none_returns_en(self):
-        app = _make_app()
-        assert app._layout_to_lang(None) == "en"
+        assert LayoutService.layout_to_lang(None) == "en"
 
     def test_en_layout(self):
-        app = _make_app()
         layout = LayoutInfo(name="en", index=0, xkb_name="us")
-        assert app._layout_to_lang(layout) == "en"
+        assert LayoutService.layout_to_lang(layout) == "en"
 
     def test_ru_layout(self):
-        app = _make_app()
         layout = LayoutInfo(name="ru", index=1, xkb_name="ru")
-        assert app._layout_to_lang(layout) == "ru"
+        assert LayoutService.layout_to_lang(layout) == "ru"
 
     def test_unknown_layout_defaults_to_en(self):
-        app = _make_app()
         layout = LayoutInfo(name="de", index=2, xkb_name="de")
-        assert app._layout_to_lang(layout) == "en"
+        assert LayoutService.layout_to_lang(layout) == "en"
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lswitch.core.auto_marker import AutoConversionMarker
+from lswitch.core.layout_service import LayoutService
 
 if TYPE_CHECKING:
     from lswitch.core.conversion_engine import ConversionEngine
@@ -59,6 +60,7 @@ class UndoAutoConversionUseCase:
 
             learning_service = LearningService(user_dict, debug=debug)
         self.learning_service = learning_service
+        self.layout_service = LayoutService(xkb)
         self.timing = timing or {}
         self.debug = debug
 
@@ -70,7 +72,9 @@ class UndoAutoConversionUseCase:
                 KEY_BACKSPACE,
                 n_times=marker.converted_len + (1 if marker.had_space else 0),
             )
-            target = self._find_layout_for_lang(marker.original_lang)
+            target = self.layout_service.find_available_layout_for_lang(
+                marker.original_lang
+            )
             if target is not None:
                 self.xkb.switch_layout(target=target)
             time.sleep(self.timing.get("undo_before_replay_delay", 0.03))
@@ -81,22 +85,6 @@ class UndoAutoConversionUseCase:
         except Exception as exc:
             logger.error("Undo auto-conversion failed: %s", exc)
             return False
-
-    def _find_layout_for_lang(self, lang: str):
-        if self.xkb is None:
-            return None
-        try:
-            return next(
-                (
-                    layout
-                    for layout in self.xkb.get_layouts()
-                    if layout.name.lower().startswith(lang)
-                ),
-                None,
-            )
-        except Exception:
-            return None
-
 
 class PostConversionStateUpdater:
     """Update repeat-selection and sticky-retype state after conversion."""
@@ -195,6 +183,7 @@ class SpaceAutoConversionUseCase:
         self.xkb = xkb
         self.retype_service = retype_service
         self.learning_service = learning_service
+        self.layout_service = LayoutService(xkb)
         self.timing = timing or {}
         self.debug = debug
 
@@ -228,7 +217,7 @@ class SpaceAutoConversionUseCase:
         except Exception:
             return SpaceAutoConversionResult(space_consumed=False)
 
-        current_lang = self._layout_to_lang(current_layout_info)
+        current_lang = self.layout_service.layout_to_lang(current_layout_info)
         token = self.typed_buffer.last_word(
             context,
             current_layout=current_layout_info,
@@ -312,7 +301,7 @@ class SpaceAutoConversionUseCase:
 
         try:
             target_lang = "ru" if direction == "en_to_ru" else "en"
-            target = self._find_layout_for_lang(target_lang)
+            target = self.layout_service.find_available_layout_for_lang(target_lang)
             conversion_ok = self.retype_service.retype_events(
                 word_events,
                 delete_count=word_len + 1,
@@ -347,27 +336,3 @@ class SpaceAutoConversionUseCase:
             marker=marker,
             marker_changed=marker is not None,
         )
-
-    def _find_layout_for_lang(self, lang: str):
-        if self.xkb is None:
-            return None
-        try:
-            return next(
-                (
-                    layout
-                    for layout in self.xkb.get_layouts()
-                    if layout.name.lower().startswith(lang)
-                ),
-                None,
-            )
-        except Exception:
-            return None
-
-    @staticmethod
-    def _layout_to_lang(layout_info) -> str:
-        if layout_info is None:
-            return "en"
-        name = layout_info.name.lower()
-        if name.startswith("ru") or name in ("russian", "россия"):
-            return "ru"
-        return "en"

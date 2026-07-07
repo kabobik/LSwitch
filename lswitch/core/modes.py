@@ -191,17 +191,6 @@ class SelectionMode(BaseMode):
 
     @staticmethod
     def _find_layout_for_lang(layouts, lang: str | None):
-        if not lang:
-            return None
+        from lswitch.core.layout_service import LayoutService
 
-        wanted = lang.lower()
-        for layout in layouts:
-            name = getattr(layout, "name", "").lower()
-            xkb_name = getattr(layout, "xkb_name", "").lower()
-            if wanted == "en" and (name in {"en", "us"} or xkb_name == "us"):
-                return layout
-            if wanted == "ru" and (name == "ru" or xkb_name.startswith("ru")):
-                return layout
-            if name == wanted or xkb_name == wanted:
-                return layout
-        return None
+        return LayoutService.find_layout_for_lang(layouts, lang)
