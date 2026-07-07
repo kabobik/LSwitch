@@ -409,6 +409,28 @@ def _read_and_merge(path: str, target_config: dict, debug: bool = False) -> bool
         return False
 
 
+def _config_file_missing_defaults(path: str, debug: bool = False) -> bool:
+    """Return True when an existing TOML file lacks known default keys."""
+    try:
+        cfg = _load_toml(path)
+    except Exception as exc:
+        if debug:
+            logger.warning("TOML parse error in %s: %s", path, exc)
+        return False
+
+    for key, default_value in DEFAULT_CONFIG.items():
+        if key not in cfg:
+            return True
+        if isinstance(default_value, dict):
+            section = cfg.get(key)
+            if not isinstance(section, dict):
+                return True
+            for child_key in default_value:
+                if child_key not in section:
+                    return True
+    return False
+
+
 # ------------------------------------------------------------------
 # Top-level loader
 # ------------------------------------------------------------------
@@ -445,7 +467,16 @@ class ConfigManager:
         """Reset to defaults, then overlay from TOML file if it exists."""
         self._config = copy.deepcopy(DEFAULT_CONFIG)
         if self._config_path and os.path.exists(self._config_path):
-            _read_and_merge(self._config_path, self._config, debug=self._debug)
+            loaded = _read_and_merge(
+                self._config_path,
+                self._config,
+                debug=self._debug,
+            )
+            if loaded and _config_file_missing_defaults(
+                self._config_path,
+                debug=self._debug,
+            ):
+                self.save()
 
     # -- public ---------------------------------------------------------
 

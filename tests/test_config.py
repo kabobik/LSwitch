@@ -253,6 +253,26 @@ class TestConfigManager:
         assert mgr2.get('debug') is True
         assert mgr2.get('double_click_timeout') == 0.7
 
+    def test_existing_config_is_migrated_with_missing_defaults(self, tmp_path):
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            """
+            debug = true
+            auto_switch = true
+            user_dict_enabled = true
+            user_dict_min_weight = 2
+            """,
+            encoding="utf-8",
+        )
+
+        mgr = ConfigManager(config_path=str(cfg_path))
+
+        assert mgr.get("debug") is True
+        assert mgr.get("user_dict_auto_confirm") is False
+        saved = cfg_path.read_text(encoding="utf-8")
+        assert "user_dict_auto_confirm = false" in saved
+        assert "auto_switch = true" in saved
+
     def test_saved_config_documents_every_setting(self, tmp_path):
         cfg_path = str(tmp_path / "cfg.toml")
         mgr = ConfigManager(config_path=cfg_path)
