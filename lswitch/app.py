@@ -14,6 +14,7 @@ from lswitch.config import ConfigManager
 from lswitch.runtime import (
     create_conversion_runtime,
     create_core_components,
+    create_input_device_runtime,
     create_input_router,
 )
 
@@ -126,7 +127,6 @@ class _PidLock:
             except OSError:
                 pass
             self._fd = None
-from lswitch.core.event_manager import EventManager
 from lswitch.core.learning_service import LearningService
 
 
@@ -305,23 +305,14 @@ class LSwitchApp:
         self.conversion_engine = conversion_runtime.conversion_engine
         self._sync_learning_components()
 
-        self.event_manager = EventManager(self.event_bus, debug=self.debug)
-
-        # Input devices
-        from lswitch.input.device_manager import DeviceManager
-        from lswitch.input.virtual_keyboard import VirtualKeyboard as _VK
-
-        self.device_manager = DeviceManager(debug=self.debug)
-        if self.virtual_kb:
-            self.device_manager.set_virtual_kb_name(_VK.DEVICE_NAME)
-
-        # Udev hot-plug monitor
-        from lswitch.input.udev_monitor import UdevMonitor
-
-        self._udev_monitor = UdevMonitor(
-            on_added=self.device_manager._try_add_device,
-            on_removed=lambda path: self.device_manager.remove_device(path),
+        input_runtime = create_input_device_runtime(
+            event_bus=self.event_bus,
+            virtual_kb=self.virtual_kb,
+            debug=self.debug,
         )
+        self.event_manager = input_runtime.event_manager
+        self.device_manager = input_runtime.device_manager
+        self._udev_monitor = input_runtime.udev_monitor
 
     # ------------------------------------------------------------------
     # Event bus wiring

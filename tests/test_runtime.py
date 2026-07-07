@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import sys
+import types
 from unittest.mock import MagicMock
 
 from lswitch.core.event_bus import EventBus
+from lswitch.core.event_manager import EventManager
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.input_router import InputEventRouter
@@ -14,9 +17,11 @@ from lswitch.core.state_manager import StateManager
 from lswitch.core.typed_buffer import TypedBufferService
 from lswitch.runtime import (
     ConversionRuntimeComponents,
+    InputDeviceRuntimeComponents,
     RuntimeCoreComponents,
     create_conversion_runtime,
     create_core_components,
+    create_input_device_runtime,
     create_input_router,
 )
 
@@ -111,3 +116,59 @@ def test_create_conversion_runtime_wires_detector_and_engine():
     assert components.conversion_engine.user_dict is user_dict
     assert components.conversion_engine.debug is True
     assert components.conversion_engine.timing is timing
+
+
+def test_create_input_device_runtime_wires_device_services():
+    fake_evdev = types.ModuleType("evdev")
+    fake_ecodes = types.ModuleType("evdev.ecodes")
+    fake_ecodes.EV_KEY = 1
+    fake_ecodes.KEY_A = 30
+    fake_ecodes.BTN_LEFT = 0x110
+    fake_ecodes.BTN_RIGHT = 0x111
+    fake_evdev.ecodes = fake_ecodes
+    fake_evdev.InputDevice = MagicMock
+    fake_evdev.list_devices = MagicMock(return_value=[])
+    sys.modules.setdefault("evdev", fake_evdev)
+    sys.modules.setdefault("evdev.ecodes", fake_ecodes)
+
+    fake_pyudev = types.ModuleType("pyudev")
+    fake_pyudev.Context = MagicMock
+    fake_pyudev.Monitor = MagicMock()
+    sys.modules.setdefault("pyudev", fake_pyudev)
+
+    from lswitch.input.device_manager import DeviceManager
+    from lswitch.input.udev_monitor import UdevMonitor
+    from lswitch.input.virtual_keyboard import VirtualKeyboard
+
+    event_bus = EventBus()
+    virtual_kb = object()
+
+    components = create_input_device_runtime(
+        event_bus=event_bus,
+        virtual_kb=virtual_kb,
+        debug=True,
+    )
+
+    assert isinstance(components, InputDeviceRuntimeComponents)
+    assert isinstance(components.event_manager, EventManager)
+    assert isinstance(components.device_manager, DeviceManager)
+    assert isinstance(components.udev_monitor, UdevMonitor)
+    assert components.event_manager.bus is event_bus
+    assert components.event_manager.debug is True
+    assert components.device_manager.debug is True
+    assert components.device_manager._virtual_kb_name == VirtualKeyboard.DEVICE_NAME
+    assert components.udev_monitor.on_added.__self__ is components.device_manager
+    assert (
+        components.udev_monitor.on_added.__func__
+        is components.device_manager._try_add_device.__func__
+    )
+
+
+def test_create_input_device_runtime_leaves_virtual_keyboard_name_unset_without_keyboard():
+    components = create_input_device_runtime(
+        event_bus=EventBus(),
+        virtual_kb=None,
+        debug=False,
+    )
+
+    assert components.device_manager._virtual_kb_name is None

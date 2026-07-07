@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.event_bus import EventBus
+from lswitch.core.event_manager import EventManager
 from lswitch.core.input_router import InputEventRouter
 from lswitch.core.learning_service import LearningService
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
@@ -31,6 +32,13 @@ class ConversionRuntimeComponents:
     ngrams: NgramAnalyzer
     auto_detector: AutoDetector
     conversion_engine: ConversionEngine
+
+
+@dataclass(frozen=True)
+class InputDeviceRuntimeComponents:
+    event_manager: EventManager
+    device_manager: object
+    udev_monitor: object
 
 
 def create_core_components(
@@ -123,4 +131,30 @@ def create_conversion_runtime(
             debug=debug,
             timing=timing,
         ),
+    )
+
+
+def create_input_device_runtime(
+    *,
+    event_bus: EventBus,
+    virtual_kb,
+    debug: bool,
+) -> InputDeviceRuntimeComponents:
+    """Create raw input event and hot-plug runtime services."""
+    from lswitch.input.device_manager import DeviceManager
+    from lswitch.input.udev_monitor import UdevMonitor
+    from lswitch.input.virtual_keyboard import VirtualKeyboard
+
+    event_manager = EventManager(event_bus, debug=debug)
+    device_manager = DeviceManager(debug=debug)
+    if virtual_kb:
+        device_manager.set_virtual_kb_name(VirtualKeyboard.DEVICE_NAME)
+    udev_monitor = UdevMonitor(
+        on_added=device_manager._try_add_device,
+        on_removed=lambda path: device_manager.remove_device(path),
+    )
+    return InputDeviceRuntimeComponents(
+        event_manager=event_manager,
+        device_manager=device_manager,
+        udev_monitor=udev_monitor,
     )
