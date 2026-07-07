@@ -205,3 +205,41 @@ def create_input_device_runtime(
         device_manager=device_manager,
         udev_monitor=udev_monitor,
     )
+
+
+def stop_runtime_resources(
+    *,
+    selection_poller,
+    udev_monitor,
+    device_manager,
+    virtual_kb,
+    xkb,
+    pid_lock,
+):
+    """Stop runtime-owned resources and return the remaining PID lock state."""
+    if selection_poller:
+        selection_poller.stop()
+    if udev_monitor:
+        try:
+            udev_monitor.stop()
+        except Exception:
+            pass
+    if device_manager:
+        try:
+            device_manager.close()
+        except Exception:
+            pass
+    if virtual_kb:
+        try:
+            virtual_kb.close()
+        except Exception:
+            pass
+    if xkb and hasattr(xkb, "close"):
+        try:
+            xkb.close()
+        except Exception:
+            pass
+    if pid_lock:
+        pid_lock.release()
+        return None
+    return pid_lock

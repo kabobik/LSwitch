@@ -24,6 +24,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    stop_runtime_resources,
 )
 
 
@@ -195,3 +196,74 @@ def test_selection_poller_thread_initializes_and_stops():
     poller.stop()
 
     assert poller._running is False
+
+
+def test_stop_runtime_resources_stops_owned_resources_and_releases_pid_lock():
+    selection_poller = MagicMock()
+    udev_monitor = MagicMock()
+    device_manager = MagicMock()
+    virtual_kb = MagicMock()
+    xkb = MagicMock()
+    pid_lock = MagicMock()
+
+    next_pid_lock = stop_runtime_resources(
+        selection_poller=selection_poller,
+        udev_monitor=udev_monitor,
+        device_manager=device_manager,
+        virtual_kb=virtual_kb,
+        xkb=xkb,
+        pid_lock=pid_lock,
+    )
+
+    assert next_pid_lock is None
+    selection_poller.stop.assert_called_once_with()
+    udev_monitor.stop.assert_called_once_with()
+    device_manager.close.assert_called_once_with()
+    virtual_kb.close.assert_called_once_with()
+    xkb.close.assert_called_once_with()
+    pid_lock.release.assert_called_once_with()
+
+
+def test_stop_runtime_resources_preserves_shutdown_error_tolerance():
+    selection_poller = MagicMock()
+    udev_monitor = MagicMock()
+    device_manager = MagicMock()
+    virtual_kb = MagicMock()
+    xkb = MagicMock()
+    pid_lock = MagicMock()
+    udev_monitor.stop.side_effect = RuntimeError("udev")
+    device_manager.close.side_effect = RuntimeError("devices")
+    virtual_kb.close.side_effect = RuntimeError("keyboard")
+    xkb.close.side_effect = RuntimeError("xkb")
+
+    next_pid_lock = stop_runtime_resources(
+        selection_poller=selection_poller,
+        udev_monitor=udev_monitor,
+        device_manager=device_manager,
+        virtual_kb=virtual_kb,
+        xkb=xkb,
+        pid_lock=pid_lock,
+    )
+
+    assert next_pid_lock is None
+    selection_poller.stop.assert_called_once_with()
+    udev_monitor.stop.assert_called_once_with()
+    device_manager.close.assert_called_once_with()
+    virtual_kb.close.assert_called_once_with()
+    xkb.close.assert_called_once_with()
+    pid_lock.release.assert_called_once_with()
+
+
+def test_stop_runtime_resources_handles_missing_optional_resources():
+    xkb_without_close = object()
+
+    next_pid_lock = stop_runtime_resources(
+        selection_poller=None,
+        udev_monitor=None,
+        device_manager=None,
+        virtual_kb=None,
+        xkb=xkb_without_close,
+        pid_lock=None,
+    )
+
+    assert next_pid_lock is None

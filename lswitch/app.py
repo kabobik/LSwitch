@@ -17,6 +17,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    stop_runtime_resources,
 )
 
 logger = logging.getLogger(__name__)
@@ -880,28 +881,11 @@ class LSwitchApp:
     def stop(self):
         """Graceful shutdown — safe to call multiple times."""
         self._running = False
-        if self._selection_poller:
-            self._selection_poller.stop()
-        if self._udev_monitor:
-            try:
-                self._udev_monitor.stop()
-            except Exception:
-                pass
-        if self.device_manager:
-            try:
-                self.device_manager.close()
-            except Exception:
-                pass
-        if self.virtual_kb:
-            try:
-                self.virtual_kb.close()
-            except Exception:
-                pass
-        if self.xkb and hasattr(self.xkb, 'close'):
-            try:
-                self.xkb.close()
-            except Exception:
-                pass
-        if self._pid_lock:
-            self._pid_lock.release()
-            self._pid_lock = None
+        self._pid_lock = stop_runtime_resources(
+            selection_poller=self._selection_poller,
+            udev_monitor=self._udev_monitor,
+            device_manager=self.device_manager,
+            virtual_kb=self.virtual_kb,
+            xkb=self.xkb,
+            pid_lock=self._pid_lock,
+        )
