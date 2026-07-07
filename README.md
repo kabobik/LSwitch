@@ -160,6 +160,8 @@ auto_switch = false
 auto_switch_threshold = 40
 # Enable the self-learning user dictionary.
 user_dict_enabled = true
+# Automatically confirm accepted auto-conversions in the user dictionary.
+user_dict_auto_confirm = false
 # Minimum user dictionary score required to affect detection.
 user_dict_min_weight = 2
 # Wayland selection conversion mode.
@@ -222,6 +224,7 @@ expand_selection_delay = 0.2
 - `auto_switch` — автоматически определять и конвертировать раскладку
 - `auto_switch_threshold` — порог уверенности авто-детектора (%)
 - `user_dict_enabled` — самообучающийся словарь
+- `user_dict_auto_confirm` — записывать в словарь молчаливое принятие авто-конвертации на следующем пробеле; по умолчанию выключено
 - `wayland_selection_strategy` — стратегия selection-конвертации на Wayland:
   `"auto"` сначала читает PRIMARY без `Ctrl+C`, затем использует clipboard fallback;
   `"clipboard_copy"` всегда использует copy/paste flow;

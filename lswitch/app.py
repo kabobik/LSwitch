@@ -1074,10 +1074,17 @@ class LSwitchApp:
             logger.warning("AutoDetector error: %s", exc)
             return False
 
-        # Previous auto-conversion was accepted (user kept typing → next space)
-        if self._last_auto_marker is not None and self.user_dict:
+        # Previous auto-conversion was accepted (user kept typing → next space).
+        # Learning from that implicit acceptance is optional; the marker is
+        # consumed either way so stale auto-conversions do not linger.
+        if self._last_auto_marker is not None:
             old = self._last_auto_marker
-            self.user_dict.add_confirmation(old['word'], old['lang'], debug=self.debug)
+            if self.user_dict and self.config.get('user_dict_auto_confirm', False):
+                self.user_dict.add_confirmation(
+                    old['word'],
+                    old['lang'],
+                    debug=self.debug,
+                )
             self._last_auto_marker = None
 
         if not should:

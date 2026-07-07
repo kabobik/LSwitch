@@ -275,10 +275,34 @@ class TestNegativeWeightBlocksConversion:
 
 
 class TestContinuedTypingConfirmsPrevious:
-    """Typing another word (space) without double-Shift confirms previous conversion."""
+    """Typing another word can optionally confirm the previous auto-conversion."""
 
-    def test_confirmation_called_on_next_space(self):
+    def test_confirmation_skipped_by_default_on_next_space(self):
         app = _make_app(auto_switch=True)
+        ud = _make_user_dict_in_memory()
+        app.user_dict = ud
+        app.auto_detector = _MockAutoDetector(should=True)
+        app._wire_event_bus()
+
+        # First word: triggers auto-conversion, sets marker
+        _fill_buffer(app, WORD_GHBDTN)
+        app._on_key_press(_event(KEY_SPACE))
+        assert app._last_auto_marker is not None
+        old_marker = app._last_auto_marker.copy()
+
+        # Second word: another auto-conversion → previous should be confirmed
+        _fill_buffer(app, [KEY_A, KEY_B, KEY_D])
+        app._on_key_press(_event(KEY_SPACE))
+
+        # Auto-confirmation is disabled by default; the old marker is consumed
+        # without writing an implicit confirmation.
+        assert ud.get_weight(old_marker['word'], old_marker['lang']) == 0
+        assert app._last_auto_marker is not None
+        assert app._last_auto_marker['word'] != old_marker['word']
+
+    def test_confirmation_called_on_next_space_when_enabled(self):
+        app = _make_app(auto_switch=True)
+        app.config._config['user_dict_auto_confirm'] = True
         ud = _make_user_dict_in_memory()
         app.user_dict = ud
         app.auto_detector = _MockAutoDetector(should=True)
