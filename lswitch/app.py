@@ -221,10 +221,19 @@ class LSwitchApp:
             debug=debug,
         )
         self.typed_buffer = TypedBufferService()
+        self.selection_tracker = SelectionFreshnessTracker()
         from lswitch.core.input_router import InputEventRouter
 
         self.input_router = InputEventRouter(
-            on_key_press=self._on_key_press,
+            state_manager=self.state_manager,
+            typed_buffer=self.typed_buffer,
+            selection_tracker=self.selection_tracker,
+            decode_buffer=self._decode_buffer,
+            auto_conversion_enabled=self._auto_conversion_enabled,
+            try_auto_conversion_at_space=lambda: self._try_auto_conversion_at_space(),
+            get_pending_auto_space=self._get_pending_auto_space,
+            set_pending_auto_space=self._set_pending_auto_space,
+            clear_last_retype_events=self._clear_last_retype_events,
             on_key_release=self._on_key_release,
             on_key_repeat=self._on_key_repeat,
             on_mouse_click=self._on_mouse_click,
@@ -248,7 +257,6 @@ class LSwitchApp:
             manual_weight_step=self.MANUAL_WEIGHT_STEP,
         )
         self._last_auto_marker = None
-        self.selection_tracker = SelectionFreshnessTracker()
         self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
         self._platform = None
         self._selection_poller: _SelectionPollerThread | None = None
@@ -503,84 +511,20 @@ class LSwitchApp:
     def _clear_selection_repeat(self) -> None:
         self.selection_tracker.clear_repeat()
 
+    def _auto_conversion_enabled(self) -> bool:
+        return bool(self.auto_detector and self.config.get('auto_switch'))
+
+    def _get_pending_auto_space(self) -> bool:
+        return bool(getattr(self, '_pending_auto_space', False))
+
+    def _set_pending_auto_space(self, value: bool) -> None:
+        self._pending_auto_space = bool(value)
+
+    def _clear_last_retype_events(self) -> None:
+        self._last_retype_events = []
+
     def _on_key_press(self, event):
-        from lswitch.core.event_manager import SHIFT_KEYS, KEY_BACKSPACE, KEY_SPACE, MODIFIER_KEYS
-        from lswitch.input.key_mapper import keycode_to_char
-
-        data = event.data
-        logger.trace(  # type: ignore[attr-defined]
-            "KeyPress: code=%d dev=%s | state=%s buf=%d",
-            data.code, data.device_name,
-            self.state_manager.state.name,
-            self.state_manager.context.chars_in_buffer,
-        )
-
-        # If user rolls over by typing another non-modifier key before releasing space,
-        # we flush/cancel the pending space so it doesn't get inserted *after* the new letter.
-        if getattr(self, '_pending_auto_space', False):
-            if data.code not in MODIFIER_KEYS and data.code != KEY_SPACE:
-                self._pending_auto_space = False
-                logger.debug("Canceled pending auto-space due to rollover of key %d", data.code)
-
-        if data.code in SHIFT_KEYS:
-            self.state_manager.on_shift_down()
-        elif data.code in MODIFIER_KEYS:
-            pass  # modifiers don't produce text — ignore entirely
-        elif data.code == KEY_BACKSPACE:
-            # Backspace removes last event from buffer (don't append it)
-            ctx = self.state_manager.context
-            self.typed_buffer.pop_event(ctx)
-            logger.trace(  # type: ignore[attr-defined]
-                "Buffer -[BS] → %r (%d chars)",
-                self._decode_buffer(),
-                self.state_manager.context.chars_in_buffer,
-            )
-            ctx.backspace_repeats = 0
-            self._selection_valid = False
-            self._clear_selection_repeat()
-            self._last_retype_events = []
-        elif data.code == KEY_SPACE:
-            # Word boundary — try auto-conversion if enabled
-            if self.auto_detector and self.config.get('auto_switch'):
-                if self._try_auto_conversion_at_space():
-                    self._clear_selection_repeat()
-                    return  # space was consumed by auto-conversion
-            # Normal space: add to buffer
-            self.state_manager.on_key_press(data.code)
-            self.typed_buffer.append_event(
-                self.state_manager.context,
-                data,
-                shifted=self.state_manager.context.shift_pressed,
-            )
-            logger.trace(  # type: ignore[attr-defined]
-                "Buffer +[%d:%s] → %r (%d chars)",
-                data.code,
-                keycode_to_char(data.code, shift=data.shifted) or '?',
-                self._decode_buffer(),
-                self.state_manager.context.chars_in_buffer,
-            )
-            self.state_manager.context.backspace_repeats = 0
-            self._selection_valid = False
-            self._clear_selection_repeat()
-            self._last_retype_events = []
-        else:
-            self.state_manager.on_key_press(data.code)
-            self.typed_buffer.append_event(
-                self.state_manager.context,
-                data,
-                shifted=self.state_manager.context.shift_pressed,
-            )
-            logger.trace(  # type: ignore[attr-defined]
-                "Buffer +[%d:%s] → %r (%d chars)",
-                data.code,
-                keycode_to_char(data.code, shift=data.shifted) or '?',
-                self._decode_buffer(),
-                self.state_manager.context.chars_in_buffer,
-            )
-            self.state_manager.context.backspace_repeats = 0
-            self._selection_valid = False
-            self._clear_selection_repeat()
-            self._last_retype_events = []
+        self.input_router.on_key_press(event)
 
     def _on_key_release(self, event):
         from lswitch.core.event_manager import (

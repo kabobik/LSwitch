@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from lswitch.core.events import Event
+from lswitch.core.event_manager import (
+    KEY_BACKSPACE,
+    KEY_SPACE,
+    MODIFIER_KEYS,
+    SHIFT_KEYS,
+)
+from lswitch.input.key_mapper import keycode_to_char
+
+if TYPE_CHECKING:
+    from lswitch.core.selection_tracker import SelectionFreshnessTracker
+    from lswitch.core.state_manager import StateManager
+    from lswitch.core.typed_buffer import TypedBufferService
+
+logger = logging.getLogger(__name__)
 
 
 class InputEventRouter:
@@ -18,20 +34,74 @@ class InputEventRouter:
     def __init__(
         self,
         *,
-        on_key_press: Callable[[Event], None],
+        state_manager: "StateManager",
+        typed_buffer: "TypedBufferService",
+        selection_tracker: "SelectionFreshnessTracker",
+        decode_buffer: Callable[[], str],
+        auto_conversion_enabled: Callable[[], bool],
+        try_auto_conversion_at_space: Callable[[], bool],
+        get_pending_auto_space: Callable[[], bool],
+        set_pending_auto_space: Callable[[bool], None],
+        clear_last_retype_events: Callable[[], None],
         on_key_release: Callable[[Event], None],
         on_key_repeat: Callable[[Event], None],
         on_mouse_click: Callable[[Event], None],
         on_mouse_release: Callable[[Event], None],
     ):
-        self._on_key_press = on_key_press
+        self.state_manager = state_manager
+        self.typed_buffer = typed_buffer
+        self.selection_tracker = selection_tracker
+        self.decode_buffer = decode_buffer
+        self.auto_conversion_enabled = auto_conversion_enabled
+        self.try_auto_conversion_at_space = try_auto_conversion_at_space
+        self.get_pending_auto_space = get_pending_auto_space
+        self.set_pending_auto_space = set_pending_auto_space
+        self.clear_last_retype_events = clear_last_retype_events
         self._on_key_release = on_key_release
         self._on_key_repeat = on_key_repeat
         self._on_mouse_click = on_mouse_click
         self._on_mouse_release = on_mouse_release
 
     def on_key_press(self, event: Event) -> None:
-        self._on_key_press(event)
+        data = event.data
+        logger.trace(  # type: ignore[attr-defined]
+            "KeyPress: code=%d dev=%s | state=%s buf=%d",
+            data.code,
+            data.device_name,
+            self.state_manager.state.name,
+            self.state_manager.context.chars_in_buffer,
+        )
+
+        if self.get_pending_auto_space():
+            if data.code not in MODIFIER_KEYS and data.code != KEY_SPACE:
+                self.set_pending_auto_space(False)
+                logger.debug(
+                    "Canceled pending auto-space due to rollover of key %d",
+                    data.code,
+                )
+
+        if data.code in SHIFT_KEYS:
+            self.state_manager.on_shift_down()
+        elif data.code in MODIFIER_KEYS:
+            pass
+        elif data.code == KEY_BACKSPACE:
+            ctx = self.state_manager.context
+            self.typed_buffer.pop_event(ctx)
+            logger.trace(  # type: ignore[attr-defined]
+                "Buffer -[BS] → %r (%d chars)",
+                self.decode_buffer(),
+                self.state_manager.context.chars_in_buffer,
+            )
+            ctx.backspace_repeats = 0
+            self._clear_selection_state()
+        elif data.code == KEY_SPACE:
+            if self.auto_conversion_enabled():
+                if self.try_auto_conversion_at_space():
+                    self.selection_tracker.clear_repeat()
+                    return
+            self._append_text_event(data)
+        else:
+            self._append_text_event(data)
 
     def on_key_release(self, event: Event) -> None:
         self._on_key_release(event)
@@ -44,3 +114,25 @@ class InputEventRouter:
 
     def on_mouse_release(self, event: Event) -> None:
         self._on_mouse_release(event)
+
+    def _append_text_event(self, data) -> None:
+        self.state_manager.on_key_press(data.code)
+        self.typed_buffer.append_event(
+            self.state_manager.context,
+            data,
+            shifted=self.state_manager.context.shift_pressed,
+        )
+        logger.trace(  # type: ignore[attr-defined]
+            "Buffer +[%d:%s] → %r (%d chars)",
+            data.code,
+            keycode_to_char(data.code, shift=data.shifted) or "?",
+            self.decode_buffer(),
+            self.state_manager.context.chars_in_buffer,
+        )
+        self.state_manager.context.backspace_repeats = 0
+        self._clear_selection_state()
+
+    def _clear_selection_state(self) -> None:
+        self.selection_tracker.set_valid(False)
+        self.selection_tracker.clear_repeat()
+        self.clear_last_retype_events()
