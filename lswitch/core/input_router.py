@@ -48,7 +48,7 @@ class InputEventRouter:
         clear_last_auto_marker: Callable[[], None],
         inject_deferred_space: Callable[[], None],
         request_conversion: Callable[[], None],
-        on_mouse_click: Callable[[Event], None],
+        prime_selection_baseline_on_click: Callable[[], None],
         on_mouse_release: Callable[[Event], None],
     ):
         self.state_manager = state_manager
@@ -63,7 +63,7 @@ class InputEventRouter:
         self.clear_last_auto_marker = clear_last_auto_marker
         self.inject_deferred_space = inject_deferred_space
         self.request_conversion = request_conversion
-        self._on_mouse_click = on_mouse_click
+        self.prime_selection_baseline_on_click = prime_selection_baseline_on_click
         self._on_mouse_release = on_mouse_release
 
     def on_key_press(self, event: Event) -> None:
@@ -151,7 +151,10 @@ class InputEventRouter:
                 self.state_manager.on_backspace_hold()
 
     def on_mouse_click(self, event: Event) -> None:
-        self._on_mouse_click(event)
+        self.clear_last_auto_marker()
+        self._clear_selection_state()
+        self.prime_selection_baseline_on_click()
+        self.state_manager.on_mouse_click()
 
     def on_mouse_release(self, event: Event) -> None:
         self._on_mouse_release(event)

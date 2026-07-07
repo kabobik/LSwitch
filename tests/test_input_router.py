@@ -33,6 +33,7 @@ def _router(
     clear_last_auto_marker=None,
     inject_deferred_space=None,
     request_conversion=None,
+    prime_selection_baseline_on_click=None,
 ):
     state_manager = StateManager()
     typed_buffer = TypedBufferService()
@@ -50,7 +51,9 @@ def _router(
         clear_last_auto_marker=clear_last_auto_marker or (lambda: None),
         inject_deferred_space=inject_deferred_space or (lambda: None),
         request_conversion=request_conversion or (lambda: None),
-        on_mouse_click=MagicMock(),
+        prime_selection_baseline_on_click=(
+            prime_selection_baseline_on_click or (lambda: None)
+        ),
         on_mouse_release=MagicMock(),
     )
     return router, state_manager, selection_tracker
@@ -230,8 +233,29 @@ def test_input_router_handles_backspace_release():
     assert state_manager.context.backspace_repeats == 0
 
 
+def test_input_router_handles_mouse_click():
+    clear_last_auto_marker = MagicMock()
+    clear_last_retype_events = MagicMock()
+    prime_selection_baseline_on_click = MagicMock()
+    router, state_manager, selection_tracker = _router(
+        clear_last_auto_marker=clear_last_auto_marker,
+        clear_last_retype_events=clear_last_retype_events,
+        prime_selection_baseline_on_click=prime_selection_baseline_on_click,
+    )
+    state_manager.on_mouse_click = MagicMock()
+    mouse_click = _event(EventType.MOUSE_CLICK)
+
+    router.on_mouse_click(mouse_click)
+
+    clear_last_auto_marker.assert_called_once()
+    clear_last_retype_events.assert_called_once()
+    prime_selection_baseline_on_click.assert_called_once()
+    assert selection_tracker.valid is False
+    assert selection_tracker.repeat_valid is False
+    state_manager.on_mouse_click.assert_called_once()
+
+
 def test_input_router_delegates_remaining_input_events():
-    on_mouse_click = MagicMock()
     on_mouse_release = MagicMock()
     router = InputEventRouter(
         state_manager=StateManager(),
@@ -246,15 +270,12 @@ def test_input_router_delegates_remaining_input_events():
         clear_last_auto_marker=lambda: None,
         inject_deferred_space=lambda: None,
         request_conversion=lambda: None,
-        on_mouse_click=on_mouse_click,
+        prime_selection_baseline_on_click=lambda: None,
         on_mouse_release=on_mouse_release,
     )
 
-    mouse_click = _event(EventType.MOUSE_CLICK)
     mouse_release = _event(EventType.MOUSE_RELEASE)
 
-    router.on_mouse_click(mouse_click)
     router.on_mouse_release(mouse_release)
 
-    on_mouse_click.assert_called_once_with(mouse_click)
     on_mouse_release.assert_called_once_with(mouse_release)

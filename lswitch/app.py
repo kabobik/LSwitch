@@ -237,7 +237,9 @@ class LSwitchApp:
             clear_last_auto_marker=self._clear_last_auto_marker,
             inject_deferred_space=self._inject_deferred_space,
             request_conversion=lambda: self._do_conversion(),
-            on_mouse_click=self._on_mouse_click,
+            prime_selection_baseline_on_click=(
+                lambda: self._update_passive_selection_baseline_on_click()
+            ),
             on_mouse_release=self._on_mouse_release,
         )
 
@@ -543,16 +545,7 @@ class LSwitchApp:
         self.input_router.on_key_repeat(event)
 
     def _on_mouse_click(self, event):
-        self._last_auto_marker = None
-        self._selection_valid = False
-        self._clear_selection_repeat()
-        self._last_retype_events = []
-        # Do NOT actively request selection here. Some adapters must ask the
-        # owner app (for example via Ctrl+C), and doing that during click
-        # handling can race with deselection. Adapters with a passive reader
-        # may safely prime the baseline before _on_mouse_release compares it.
-        self._update_passive_selection_baseline_on_click()
-        self.state_manager.on_mouse_click()
+        self.input_router.on_mouse_click(event)
 
     def _on_mouse_release(self, event):
         """Mouse button release — potential end of drag-select.
