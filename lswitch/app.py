@@ -22,6 +22,7 @@ from lswitch.runtime import (
     run_selected_runtime_loop,
     start_runtime_resources,
     stop_runtime_resources,
+    wire_runtime_event_bus,
 )
 
 logger = logging.getLogger(__name__)
@@ -158,29 +159,11 @@ class LSwitchApp:
 
     def _wire_event_bus(self):
         """Subscribe event handlers to the EventBus."""
-        from lswitch.core.events import EventType
-
-        self.event_bus.subscribe(
-            EventType.KEY_PRESS,
-            self.input_router.on_key_press,
+        wire_runtime_event_bus(
+            event_bus=self.event_bus,
+            input_router=self.input_router,
+            on_config_changed=self._on_config_changed,
         )
-        self.event_bus.subscribe(
-            EventType.KEY_RELEASE,
-            self.input_router.on_key_release,
-        )
-        self.event_bus.subscribe(
-            EventType.KEY_REPEAT,
-            self.input_router.on_key_repeat,
-        )
-        self.event_bus.subscribe(
-            EventType.MOUSE_CLICK,
-            self.input_router.on_mouse_click,
-        )
-        self.event_bus.subscribe(
-            EventType.MOUSE_RELEASE,
-            self.input_router.on_mouse_release,
-        )
-        self.event_bus.subscribe(EventType.CONFIG_CHANGED, self._on_config_changed)
 
     def _enable_user_dictionary(self) -> None:
         """Create the user dictionary object when runtime config enables it."""

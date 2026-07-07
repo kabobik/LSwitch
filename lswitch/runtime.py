@@ -277,6 +277,18 @@ def create_input_router(
     )
 
 
+def wire_runtime_event_bus(*, event_bus: EventBus, input_router, on_config_changed) -> None:
+    """Subscribe runtime input and config handlers to the event bus."""
+    from lswitch.core.events import EventType
+
+    event_bus.subscribe(EventType.KEY_PRESS, input_router.on_key_press)
+    event_bus.subscribe(EventType.KEY_RELEASE, input_router.on_key_release)
+    event_bus.subscribe(EventType.KEY_REPEAT, input_router.on_key_repeat)
+    event_bus.subscribe(EventType.MOUSE_CLICK, input_router.on_mouse_click)
+    event_bus.subscribe(EventType.MOUSE_RELEASE, input_router.on_mouse_release)
+    event_bus.subscribe(EventType.CONFIG_CHANGED, on_config_changed)
+
+
 def create_conversion_runtime(
     *,
     xkb,

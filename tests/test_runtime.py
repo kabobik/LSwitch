@@ -41,6 +41,7 @@ from lswitch.runtime import (
     read_existing_pid,
     start_runtime_resources,
     stop_runtime_resources,
+    wire_runtime_event_bus,
 )
 
 
@@ -225,6 +226,25 @@ def test_create_input_router_wires_core_components_and_callbacks():
     assert core.typed_buffer.decode(core.state_manager.context.event_buffer) == "a"
     set_pending_auto_space.assert_called_once_with(False)
     clear_last_retype_events.assert_called_once()
+
+
+def test_wire_runtime_event_bus_subscribes_input_router_and_config_handlers():
+    event_bus = EventBus()
+    input_router = MagicMock()
+    on_config_changed = MagicMock()
+
+    wire_runtime_event_bus(
+        event_bus=event_bus,
+        input_router=input_router,
+        on_config_changed=on_config_changed,
+    )
+
+    assert input_router.on_key_press in event_bus._handlers[EventType.KEY_PRESS]
+    assert input_router.on_key_release in event_bus._handlers[EventType.KEY_RELEASE]
+    assert input_router.on_key_repeat in event_bus._handlers[EventType.KEY_REPEAT]
+    assert input_router.on_mouse_click in event_bus._handlers[EventType.MOUSE_CLICK]
+    assert input_router.on_mouse_release in event_bus._handlers[EventType.MOUSE_RELEASE]
+    assert on_config_changed in event_bus._handlers[EventType.CONFIG_CHANGED]
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():
