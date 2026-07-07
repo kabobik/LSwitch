@@ -6,13 +6,16 @@ from unittest.mock import MagicMock
 
 from lswitch.core.event_bus import EventBus
 from lswitch.core.events import Event, EventType, KeyEventData
+from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.input_router import InputEventRouter
 from lswitch.core.learning_service import LearningService
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
 from lswitch.core.typed_buffer import TypedBufferService
 from lswitch.runtime import (
+    ConversionRuntimeComponents,
     RuntimeCoreComponents,
+    create_conversion_runtime,
     create_core_components,
     create_input_router,
 )
@@ -73,3 +76,38 @@ def test_create_input_router_wires_core_components_and_callbacks():
     assert core.typed_buffer.decode(core.state_manager.context.event_buffer) == "a"
     set_pending_auto_space.assert_called_once_with(False)
     clear_last_retype_events.assert_called_once()
+
+
+def test_create_conversion_runtime_wires_detector_and_engine():
+    user_dict = MagicMock()
+    xkb = MagicMock()
+    selection = MagicMock()
+    virtual_kb = MagicMock()
+    system = MagicMock()
+    timing = {"retype_before_replay_delay": 0.01}
+
+    components = create_conversion_runtime(
+        xkb=xkb,
+        selection=selection,
+        virtual_kb=virtual_kb,
+        system=system,
+        user_dict=user_dict,
+        user_dict_min_weight=4,
+        debug=True,
+        timing=timing,
+    )
+
+    assert isinstance(components, ConversionRuntimeComponents)
+    assert isinstance(components.conversion_engine, ConversionEngine)
+    assert components.auto_detector.dictionary is components.dictionary
+    assert components.auto_detector.ngrams is components.ngrams
+    assert components.auto_detector.user_dict is user_dict
+    assert components.auto_detector.user_dict_min_weight == 4
+    assert components.conversion_engine.dictionary is components.dictionary
+    assert components.conversion_engine.xkb is xkb
+    assert components.conversion_engine.selection is selection
+    assert components.conversion_engine.virtual_kb is virtual_kb
+    assert components.conversion_engine.system is system
+    assert components.conversion_engine.user_dict is user_dict
+    assert components.conversion_engine.debug is True
+    assert components.conversion_engine.timing is timing

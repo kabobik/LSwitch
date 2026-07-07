@@ -11,7 +11,11 @@ import threading
 
 import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.config import ConfigManager
-from lswitch.runtime import create_core_components, create_input_router
+from lswitch.runtime import (
+    create_conversion_runtime,
+    create_core_components,
+    create_input_router,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +126,6 @@ class _PidLock:
             except OSError:
                 pass
             self._fd = None
-from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.event_manager import EventManager
 from lswitch.core.learning_service import LearningService
 
@@ -284,34 +287,22 @@ class LSwitchApp:
         self.selection = self._platform.selection
         self.virtual_kb = self._platform.virtual_kb
 
-        from lswitch.intelligence.dictionary_service import DictionaryService
-        from lswitch.intelligence.ngram_analyzer import NgramAnalyzer
-        from lswitch.intelligence.auto_detector import AutoDetector
-
-        dictionary = DictionaryService()
-        ngrams = NgramAnalyzer()
-
         # UserDictionary: self-learning word weights
         if self.config.get('user_dict_enabled'):
             self._enable_user_dictionary()
 
-        self.auto_detector = AutoDetector(
-            dictionary=dictionary, 
-            ngrams=ngrams, 
-            user_dict=self.user_dict,
-            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
-        )
-
-        self.conversion_engine = ConversionEngine(
+        conversion_runtime = create_conversion_runtime(
             xkb=self.xkb,
             selection=self.selection,
             virtual_kb=self.virtual_kb,
-            dictionary=dictionary,
             system=self.system,
             user_dict=self.user_dict,
+            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
             debug=self.debug,
             timing=self.timing,
         )
+        self.auto_detector = conversion_runtime.auto_detector
+        self.conversion_engine = conversion_runtime.conversion_engine
         self._sync_learning_components()
 
         self.event_manager = EventManager(self.event_bus, debug=self.debug)
