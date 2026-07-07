@@ -26,6 +26,7 @@ from lswitch.runtime import (
     SelectionPollerThread,
     StartedRuntimeResources,
     apply_runtime_timing_config,
+    apply_user_dictionary_config,
     create_conversion_runtime,
     create_core_components,
     create_input_device_runtime,
@@ -341,6 +342,60 @@ def test_apply_runtime_timing_config_tolerates_missing_conversion_engine():
     assert snapshot.wayland_timing == {}
     assert snapshot.wayland_selection_timing == {}
     assert state_manager.double_click_timeout == 0.3
+
+
+def test_apply_user_dictionary_config_enables_dictionary():
+    config = MagicMock()
+    config.get.return_value = True
+    user_dict = object()
+    enable_user_dictionary = MagicMock(return_value=user_dict)
+    log = MagicMock()
+
+    result = apply_user_dictionary_config(
+        config=config,
+        user_dict=None,
+        enable_user_dictionary=enable_user_dictionary,
+        log=log,
+    )
+
+    assert result is user_dict
+    enable_user_dictionary.assert_called_once_with()
+    log.error.assert_not_called()
+
+
+def test_apply_user_dictionary_config_returns_none_when_enable_fails():
+    config = MagicMock()
+    config.get.return_value = True
+    enable_user_dictionary = MagicMock(side_effect=RuntimeError("boom"))
+    log = MagicMock()
+
+    result = apply_user_dictionary_config(
+        config=config,
+        user_dict=object(),
+        enable_user_dictionary=enable_user_dictionary,
+        log=log,
+    )
+
+    assert result is None
+    log.error.assert_called_once()
+
+
+def test_apply_user_dictionary_config_disables_existing_dictionary():
+    config = MagicMock()
+    config.get.return_value = False
+    enable_user_dictionary = MagicMock()
+    log = MagicMock()
+
+    result = apply_user_dictionary_config(
+        config=config,
+        user_dict=object(),
+        enable_user_dictionary=enable_user_dictionary,
+        log=log,
+    )
+
+    assert result is None
+    enable_user_dictionary.assert_not_called()
+    log.info.assert_called_once_with("User dictionary disabled")
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():

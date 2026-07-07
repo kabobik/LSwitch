@@ -11,6 +11,7 @@ from lswitch.runtime import (
     PidLock,
     SelectionPollerThread,
     apply_runtime_timing_config,
+    apply_user_dictionary_config,
     create_core_components,
     create_input_router,
     create_platform_runtime_components,
@@ -166,14 +167,15 @@ class LSwitchApp:
             on_config_changed=self._on_config_changed,
         )
 
-    def _enable_user_dictionary(self) -> None:
+    def _enable_user_dictionary(self):
         """Create the user dictionary object when runtime config enables it."""
         if self.user_dict is not None:
-            return
+            return self.user_dict
         from lswitch.intelligence.user_dictionary import UserDictionary
 
         self.user_dict = UserDictionary()
         logger.info("User dictionary enabled: %s", self.user_dict.path)
+        return self.user_dict
 
     def _sync_learning_components(self) -> None:
         """Propagate current UserDictionary settings into runtime components."""
@@ -212,15 +214,12 @@ class LSwitchApp:
         self.wayland_timing = timing_config.wayland_timing
         self.wayland_selection_timing = timing_config.wayland_selection_timing
 
-        if self.config.get('user_dict_enabled'):
-            try:
-                self._enable_user_dictionary()
-            except Exception as exc:
-                logger.error("User dictionary initialization failed: %s", exc)
-                self.user_dict = None
-        elif self.user_dict is not None:
-            logger.info("User dictionary disabled")
-            self.user_dict = None
+        self.user_dict = apply_user_dictionary_config(
+            config=self.config,
+            user_dict=self.user_dict,
+            enable_user_dictionary=self._enable_user_dictionary,
+            log=logger,
+        )
         self._sync_learning_components()
 
     def _on_config_changed(self, event) -> None:

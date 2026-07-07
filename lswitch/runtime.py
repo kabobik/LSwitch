@@ -351,6 +351,26 @@ def apply_runtime_timing_config(
     )
 
 
+def apply_user_dictionary_config(
+    *,
+    config,
+    user_dict,
+    enable_user_dictionary,
+    log,
+):
+    """Apply runtime user dictionary enable/disable config."""
+    if config.get("user_dict_enabled"):
+        try:
+            return enable_user_dictionary()
+        except Exception as exc:
+            log.error("User dictionary initialization failed: %s", exc)
+            return None
+
+    if user_dict is not None:
+        log.info("User dictionary disabled")
+    return None
+
+
 def create_conversion_runtime(
     *,
     xkb,
