@@ -681,86 +681,30 @@ class LSwitchApp:
              Weight accumulates across sessions; once |weight| >= min_weight
              AutoDetector will handle this word automatically.
         """
-        from lswitch.core.states import State
+        from lswitch.core.manual_conversion_controller import (
+            ManualConversionController,
+        )
 
-        if self.state_manager.state != State.CONVERTING:
-            return
-
-        selection_valid_for_convert = self.selection_tracker.effective_valid()
-        chars_in_buffer = self.state_manager.context.chars_in_buffer
-        had_auto_marker = self._last_auto_marker is not None
-
-        # --- Case A: undo of recent auto-conversion → penalise ---
-        if self._last_auto_marker is not None:
-            from lswitch.core.conversion_use_cases import (
-                RecentAutoConversionUseCase,
-                UndoAutoConversionUseCase,
-            )
-
-            recent_auto = RecentAutoConversionUseCase(
-                undo_use_case=UndoAutoConversionUseCase(
-                    virtual_kb=self.virtual_kb,
-                    xkb=self.xkb,
-                    learning_service=self._learning(),
-                    timing=self.timing,
-                    debug=self.debug,
-                )
-            )
-            result = recent_auto.execute(
-                marker=self._last_auto_marker,
-                chars_in_buffer=chars_in_buffer,
-            )
-            self._last_auto_marker = None
-            if result.handled:
-                self.state_manager.on_conversion_complete()
-                return
-
-        try:
-            from lswitch.core.conversion_use_cases import (
-                ManualConversionPreparer,
-                ManualConversionUseCase,
-                PostConversionStateUpdater,
-            )
-            from lswitch.core.layout_service import LayoutService
-
-            preparation = ManualConversionPreparer(
-                typed_buffer=self.typed_buffer,
-                learning_service=self._learning(),
-                layout_service=LayoutService(self.xkb),
-                selection=self.selection,
-                xkb=self.xkb,
-                decode_events=self._decode_buffer,
-            ).prepare(
-                context=self.state_manager.context,
-                selection_valid_for_convert=selection_valid_for_convert,
-                raw_selection_valid=self._selection_valid,
-                raw_selection_repeat_valid=self._selection_repeat_valid,
-                has_auto_marker=had_auto_marker,
-                sticky_events=self._last_retype_events,
-                extract_last_word=self._extract_last_word_events,
-            )
-
-            updater = PostConversionStateUpdater(self.selection_tracker)
-            manual_conversion = ManualConversionUseCase(
-                conversion_engine=self.conversion_engine,
-                learning_service=self._learning(),
-                post_conversion_updater=updater,
-            )
-            result = manual_conversion.execute(
-                context=self.state_manager.context,
-                selection_valid_for_convert=(
-                    preparation.selection_valid_for_convert
-                ),
-                saved_events=preparation.saved_events,
-                saved_count=preparation.saved_count,
-                pending_manual_learning=preparation.pending_manual_learning,
-            )
-            self._last_retype_events = result.sticky_events
-        finally:
-            # Update baseline to prevent re-conversion of same text
-            self._update_selection_baseline()
-            self._selection_valid = False  # consumed
-            self.state_manager.on_conversion_complete()
+        result = ManualConversionController(
+            state_manager=self.state_manager,
+            selection_tracker=self.selection_tracker,
+            typed_buffer=self.typed_buffer,
+            learning_service=self._learning(),
+            conversion_engine=self.conversion_engine,
+            virtual_kb=self.virtual_kb,
+            xkb=self.xkb,
+            selection=self.selection,
+            timing=self.timing,
+            debug=self.debug,
+            decode_events=self._decode_buffer,
+            extract_last_word=self._extract_last_word_events,
+            update_selection_baseline=self._update_selection_baseline,
+        ).execute(
+            last_auto_marker=self._last_auto_marker,
+            sticky_events=self._last_retype_events,
+        )
+        self._last_auto_marker = result.last_auto_marker
+        self._last_retype_events = result.sticky_events
 
     @staticmethod
     def _is_single_word_for_learning(text: str) -> bool:
