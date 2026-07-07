@@ -436,6 +436,22 @@ def create_manual_conversion_controller(
     )
 
 
+def extract_last_word_events(
+    *,
+    typed_buffer,
+    context,
+    current_layout=None,
+    xkb=None,
+) -> tuple[str, list]:
+    """Extract the last typed word text and its source events from a buffer."""
+    token = typed_buffer.last_word(
+        context,
+        current_layout=current_layout,
+        xkb=xkb,
+    )
+    return token.text, token.events
+
+
 def create_conversion_runtime(
     *,
     xkb,

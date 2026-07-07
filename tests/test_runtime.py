@@ -36,6 +36,7 @@ from lswitch.runtime import (
     create_qt_runtime_bootstrap,
     create_space_auto_conversion_use_case,
     create_tray_indicator,
+    extract_last_word_events,
     install_reload_signal_handler,
     run_evdev_event_loop,
     run_qt_runtime_loop,
@@ -505,6 +506,31 @@ def test_create_manual_conversion_controller_wires_dependencies(monkeypatch):
 
     assert controller is created["controller"]
     assert controller.kwargs == dependencies
+
+
+def test_extract_last_word_events_returns_token_text_and_events():
+    events = [object()]
+    token = types.SimpleNamespace(text="hello", events=events)
+    typed_buffer = MagicMock()
+    typed_buffer.last_word.return_value = token
+    context = object()
+    current_layout = object()
+    xkb = object()
+
+    text, word_events = extract_last_word_events(
+        typed_buffer=typed_buffer,
+        context=context,
+        current_layout=current_layout,
+        xkb=xkb,
+    )
+
+    assert text == "hello"
+    assert word_events is events
+    typed_buffer.last_word.assert_called_once_with(
+        context,
+        current_layout=current_layout,
+        xkb=xkb,
+    )
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():

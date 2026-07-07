@@ -19,6 +19,7 @@ from lswitch.runtime import (
     create_qt_runtime_bootstrap,
     create_space_auto_conversion_use_case,
     create_tray_indicator,
+    extract_last_word_events,
     install_reload_signal_handler,
     run_evdev_event_loop,
     run_qt_runtime_loop,
@@ -520,12 +521,12 @@ class LSwitchApp:
         EN physical-key equivalents, where б→, and ю→. are non-alpha and would
         truncate the word prematurely).
         """
-        token = self.typed_buffer.last_word(
-            self.state_manager.context,
+        return extract_last_word_events(
+            typed_buffer=self.typed_buffer,
+            context=self.state_manager.context,
             current_layout=current_layout,
             xkb=self.xkb,
         )
-        return token.text, token.events
 
     def _do_auto_conversion_at_space(
         self, word_len: int, word_events: list, direction: str,
