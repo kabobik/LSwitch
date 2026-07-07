@@ -221,6 +221,15 @@ class LSwitchApp:
             debug=debug,
         )
         self.typed_buffer = TypedBufferService()
+        from lswitch.core.input_router import InputEventRouter
+
+        self.input_router = InputEventRouter(
+            on_key_press=self._on_key_press,
+            on_key_release=self._on_key_release,
+            on_key_repeat=self._on_key_repeat,
+            on_mouse_click=self._on_mouse_click,
+            on_mouse_release=self._on_mouse_release,
+        )
 
         # Platform adapters — created by _init_platform()
         self.xkb = None
@@ -329,11 +338,26 @@ class LSwitchApp:
         """Subscribe event handlers to the EventBus."""
         from lswitch.core.events import EventType
 
-        self.event_bus.subscribe(EventType.KEY_PRESS, self._on_key_press)
-        self.event_bus.subscribe(EventType.KEY_RELEASE, self._on_key_release)
-        self.event_bus.subscribe(EventType.KEY_REPEAT, self._on_key_repeat)
-        self.event_bus.subscribe(EventType.MOUSE_CLICK, self._on_mouse_click)
-        self.event_bus.subscribe(EventType.MOUSE_RELEASE, self._on_mouse_release)
+        self.event_bus.subscribe(
+            EventType.KEY_PRESS,
+            self.input_router.on_key_press,
+        )
+        self.event_bus.subscribe(
+            EventType.KEY_RELEASE,
+            self.input_router.on_key_release,
+        )
+        self.event_bus.subscribe(
+            EventType.KEY_REPEAT,
+            self.input_router.on_key_repeat,
+        )
+        self.event_bus.subscribe(
+            EventType.MOUSE_CLICK,
+            self.input_router.on_mouse_click,
+        )
+        self.event_bus.subscribe(
+            EventType.MOUSE_RELEASE,
+            self.input_router.on_mouse_release,
+        )
         self.event_bus.subscribe(EventType.CONFIG_CHANGED, self._on_config_changed)
 
     def _enable_user_dictionary(self) -> None:
