@@ -81,44 +81,19 @@ class RetypeMode(BaseMode):
                 [getattr(e, 'code', '?') for e in saved_events],
             )
 
-        # 1. Delete typed characters
-        logger.debug("RetypeMode: sending %d backspaces", n_chars)
-        self.virtual_kb.tap_key(KEY_BACKSPACE, n_chars)
+        from lswitch.core.retype_service import RetypeService
 
-        # 2. Switch layout BEFORE replay so events land in the correct layout.
-        # We switch here (not after) so the XKB group is set when UInput events
-        # are processed. The system Shift+Shift shortcut may fire afterwards
-        # (after replay) and switch back — that's a separate desktop keyboard
-        # shortcut users should disable in keyboard preferences.
-        try:
-            new_layout = self.xkb.switch_layout()
-            logger.debug("RetypeMode: switched layout → %s", getattr(new_layout, 'name', new_layout))
-        except Exception as exc:
-            logger.error("RetypeMode: switch_layout failed: %s", exc)
-            return False
-
-        # 3. Brief pause so the application finishes processing the backspaces
-        # before receiving the replayed characters.
-        time.sleep(self.before_replay_delay)
-
-        # 4. Replay saved events.
-        # event_buffer contains KEY_PRESS events only (value=1).
-        # replay_events() automatically appends synthetic releases so that
-        # the kernel does not trigger infinite auto-repeat (value=2).
-        if self.debug:
-            logger.debug(
-                "RetypeMode: replaying %d events (codes=%s)",
-                len(saved_events),
-                [getattr(e, 'code', '?') for e in saved_events],
-            )
-        self.virtual_kb.replay_events(saved_events)
-
-        logger.debug(
-            "RetypeMode: done — deleted=%d, replayed=%d",
-            n_chars,
-            len(saved_events),
+        service = RetypeService(
+            self.virtual_kb,
+            self.xkb,
+            debug=self.debug,
         )
-        return True
+        return service.retype_events(
+            saved_events,
+            delete_count=n_chars,
+            switch_to_next=True,
+            before_replay_delay=self.before_replay_delay,
+        )
 
 
 class SelectionMode(BaseMode):

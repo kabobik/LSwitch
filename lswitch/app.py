@@ -125,6 +125,7 @@ from lswitch.core.event_bus import EventBus
 from lswitch.core.state_manager import StateManager
 from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.event_manager import EventManager
+from lswitch.core.typed_buffer import TypedBufferService
 
 
 class _SelectionPollerThread(threading.Thread):
@@ -217,6 +218,7 @@ class LSwitchApp:
             double_click_timeout=self.config.get('double_click_timeout', 0.3),
             debug=debug,
         )
+        self.typed_buffer = TypedBufferService()
 
         # Platform adapters — created by _init_platform()
         self.xkb = None
@@ -443,8 +445,7 @@ class LSwitchApp:
         elif data.code == KEY_BACKSPACE:
             # Backspace removes last event from buffer (don't append it)
             ctx = self.state_manager.context
-            if ctx.event_buffer:
-                ctx.event_buffer.pop()
+            self.typed_buffer.pop_event(ctx)
             logger.trace(  # type: ignore[attr-defined]
                 "Buffer -[BS] → %r (%d chars)",
                 self._decode_buffer(),
@@ -462,9 +463,11 @@ class LSwitchApp:
                     return  # space was consumed by auto-conversion
             # Normal space: add to buffer
             self.state_manager.on_key_press(data.code)
-            self.state_manager.context.chars_in_buffer += 1
-            data.shifted = self.state_manager.context.shift_pressed
-            self.state_manager.context.event_buffer.append(data)
+            self.typed_buffer.append_event(
+                self.state_manager.context,
+                data,
+                shifted=self.state_manager.context.shift_pressed,
+            )
             logger.trace(  # type: ignore[attr-defined]
                 "Buffer +[%d:%s] → %r (%d chars)",
                 data.code,
@@ -478,9 +481,11 @@ class LSwitchApp:
             self._last_retype_events = []
         else:
             self.state_manager.on_key_press(data.code)
-            self.state_manager.context.chars_in_buffer += 1
-            data.shifted = self.state_manager.context.shift_pressed
-            self.state_manager.context.event_buffer.append(data)
+            self.typed_buffer.append_event(
+                self.state_manager.context,
+                data,
+                shifted=self.state_manager.context.shift_pressed,
+            )
             logger.trace(  # type: ignore[attr-defined]
                 "Buffer +[%d:%s] → %r (%d chars)",
                 data.code,
@@ -532,8 +537,7 @@ class LSwitchApp:
             self.state_manager.on_navigation()
         elif data.code == KEY_BACKSPACE:
             self.state_manager.context.backspace_repeats = 0
-            if self.state_manager.context.chars_in_buffer > 0:
-                self.state_manager.context.chars_in_buffer -= 1
+            self.typed_buffer.decrement_count(self.state_manager.context)
 
     def _on_key_repeat(self, event):
         from lswitch.core.event_manager import KEY_BACKSPACE
@@ -543,15 +547,13 @@ class LSwitchApp:
             ctx = self.state_manager.context
             ctx.backspace_repeats += 1
             # Each auto-repeat removes one more char from the event buffer
-            if ctx.event_buffer:
-                ctx.event_buffer.pop()
+            self.typed_buffer.pop_event(ctx)
             logger.trace(  # type: ignore[attr-defined]
                 "Buffer -[BS repeat] → %r (%d chars)",
                 self._decode_buffer(),
                 len(self.state_manager.context.event_buffer),
             )
-            if ctx.chars_in_buffer > 0:
-                ctx.chars_in_buffer -= 1
+            self.typed_buffer.decrement_count(ctx)
             if ctx.backspace_repeats >= 3:
                 self.state_manager.on_backspace_hold()
 
@@ -683,14 +685,9 @@ class LSwitchApp:
 
     def _decode_buffer(self, events: list | None = None) -> str:
         """Decode event buffer to human-readable string of characters."""
-        from lswitch.input.key_mapper import keycode_to_char
         if events is None:
             events = self.state_manager.context.event_buffer
-        chars = []
-        for e in events:
-            ch = keycode_to_char(e.code, shift=getattr(e, 'shifted', False))
-            chars.append(ch if ch else '?')
-        return "".join(chars)
+        return self.typed_buffer.decode(events)
 
     # ------------------------------------------------------------------
     # Selection validity tracking
@@ -1110,38 +1107,12 @@ class LSwitchApp:
         EN physical-key equivalents, where б→, and ю→. are non-alpha and would
         truncate the word prematurely).
         """
-        from lswitch.core.event_manager import KEY_SPACE
-        from lswitch.input.key_mapper import keycode_to_char as _kc_en
-
-        # Chars in EN layout that map to Cyrillic letters (e.g. ',' → 'б').
-        # These keys must NOT break word scanning when the user is typing
-        # Russian on the wrong EN keyboard.
-        from lswitch.intelligence.maps import EN_TO_RU as _EN_TO_RU
-        _is_cyrillic_key = lambda c: bool(c and not c.isalpha() and _EN_TO_RU.get(c.lower(), '').isalpha())
-
-        word_events: list = []
-        chars: list[str] = []
-        skipping_trailing_spaces = True
-        from lswitch.core.event_manager import KEY_SPACE, KEY_ENTER, KEY_TAB, KEY_ESC, KEY_BACKSPACE
-        for ev in reversed(self.state_manager.context.event_buffer):
-            if ev.code in (KEY_SPACE, KEY_ENTER, KEY_TAB, KEY_ESC, KEY_BACKSPACE):
-                if skipping_trailing_spaces:
-                    continue
-                break
-            skipping_trailing_spaces = False
-            # Prefer actual XKB mapping for the current layout
-            if current_layout is not None and self.xkb is not None:
-                ch = self.xkb.keycode_to_char(ev.code, current_layout)
-            else:
-                ch = _kc_en(ev.code)
-
-            if ch:
-                chars.append(ch)
-            word_events.append(ev)
-
-        word_events.reverse()
-        chars.reverse()
-        return "".join(chars), word_events
+        token = self.typed_buffer.last_word(
+            self.state_manager.context,
+            current_layout=current_layout,
+            xkb=self.xkb,
+        )
+        return token.text, token.events
 
     def _layout_to_lang(self, layout_info) -> str:
         """Map LayoutInfo to a 2-letter language code ('en' or 'ru')."""
@@ -1162,9 +1133,6 @@ class LSwitchApp:
         it (passive monitoring), so we must also delete that extra space character via backspace.
         """
         import time as _time_mod
-        t_start = _time_mod.perf_counter()
-        
-        from lswitch.core.event_manager import KEY_BACKSPACE, KEY_SPACE
         from lswitch.core.states import State
 
         ctx = self.state_manager.context
@@ -1182,26 +1150,28 @@ class LSwitchApp:
             except Exception:
                 target = None
 
-            # Delete: word_len chars + 1 for the space that already landed in the app
-            self.virtual_kb.tap_key(KEY_BACKSPACE, n_times=word_len + 1)
+            from lswitch.core.retype_service import RetypeService
 
-            # Switch to target layout
-            if target and self.xkb:
-                self.xkb.switch_layout(target=target)
+            retype = RetypeService(
+                self.virtual_kb,
+                self.xkb,
+                debug=self.debug,
+            )
+            conversion_ok = retype.retype_events(
+                word_events,
+                delete_count=word_len + 1,
+                target_layout=target,
+                before_replay_delay=self.timing.get('auto_before_replay_delay', 0.03),
+                backspace_n_times_keyword=True,
+            )
 
-            _time_mod.sleep(self.timing.get('auto_before_replay_delay', 0.03))
-
-            # Replay original keycodes in the new layout (produces converted text)
-            self.virtual_kb.replay_events(word_events)
-            
-            # Дать приложению переварить введенный текст перед финальным пробелом
-            _time_mod.sleep(self.timing.get('auto_before_space_delay', 0.01))
-
-            # We DO NOT tap_key(KEY_SPACE) here, because the physical Space key
-            # is almost certainly still held down by the user, and desktop
-            # input merging can eat the virtual press event. Instead, we
-            # defer sending it until the physical release event arrives.
-            conversion_ok = True
+            if conversion_ok:
+                # Дать приложению переварить введенный текст перед финальным пробелом.
+                _time_mod.sleep(self.timing.get('auto_before_space_delay', 0.01))
+                # We DO NOT tap_key(KEY_SPACE) here, because the physical Space key
+                # is almost certainly still held down by the user, and desktop
+                # input merging can eat the virtual press event. Instead, we
+                # defer sending it until the physical release event arrives.
 
         except Exception as exc:
             logger.error("Auto-conversion at space failed: %s", exc)
