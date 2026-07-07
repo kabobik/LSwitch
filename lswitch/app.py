@@ -11,6 +11,7 @@ import threading
 
 import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.config import ConfigManager
+from lswitch.runtime import create_core_components
 
 logger = logging.getLogger(__name__)
 
@@ -121,13 +122,9 @@ class _PidLock:
             except OSError:
                 pass
             self._fd = None
-from lswitch.core.event_bus import EventBus
-from lswitch.core.state_manager import StateManager
 from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.event_manager import EventManager
 from lswitch.core.learning_service import LearningService
-from lswitch.core.selection_tracker import SelectionFreshnessTracker
-from lswitch.core.typed_buffer import TypedBufferService
 
 
 class _SelectionPollerThread(threading.Thread):
@@ -214,14 +211,16 @@ class LSwitchApp:
             {},
         )
 
-        # Core components
-        self.event_bus = EventBus()
-        self.state_manager = StateManager(
+        core = create_core_components(
             double_click_timeout=self.config.get('double_click_timeout', 0.3),
             debug=debug,
+            manual_weight_step=self.MANUAL_WEIGHT_STEP,
         )
-        self.typed_buffer = TypedBufferService()
-        self.selection_tracker = SelectionFreshnessTracker()
+        self.event_bus = core.event_bus
+        self.state_manager = core.state_manager
+        self.typed_buffer = core.typed_buffer
+        self.selection_tracker = core.selection_tracker
+        self.learning_service = core.learning_service
         from lswitch.core.input_router import InputEventRouter
 
         self.input_router = InputEventRouter(
@@ -254,11 +253,6 @@ class LSwitchApp:
         self._udev_monitor = None
         self.auto_detector = None
         self.user_dict = None
-        self.learning_service = LearningService(
-            None,
-            debug=debug,
-            manual_weight_step=self.MANUAL_WEIGHT_STEP,
-        )
         self._last_auto_marker = None
         self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
         self._platform = None
