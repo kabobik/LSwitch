@@ -11,6 +11,7 @@ from lswitch.runtime import (
     PidLock,
     SelectionPollerThread,
     apply_runtime_timing_config,
+    apply_space_auto_conversion_result,
     apply_user_dictionary_config,
     create_core_components,
     create_input_router,
@@ -502,10 +503,13 @@ class LSwitchApp:
             auto_confirm_enabled=self.config.get('user_dict_auto_confirm', False),
         )
 
-        if result.marker_changed:
-            self._last_auto_marker = result.marker
-        if result.pending_space:
-            self._pending_auto_space = True
+        state = apply_space_auto_conversion_result(
+            result=result,
+            last_auto_marker=self._last_auto_marker,
+            pending_auto_space=self._get_pending_auto_space(),
+        )
+        self._last_auto_marker = state.last_auto_marker
+        self._pending_auto_space = state.pending_auto_space
 
         return result.space_consumed
 
@@ -545,10 +549,13 @@ class LSwitchApp:
             original_word=orig_word,
             original_lang=orig_lang,
         )
-        if result.pending_space:
-            self._pending_auto_space = True
-        if result.marker_changed:
-            self._last_auto_marker = result.marker
+        state = apply_space_auto_conversion_result(
+            result=result,
+            last_auto_marker=self._last_auto_marker,
+            pending_auto_space=self._get_pending_auto_space(),
+        )
+        self._last_auto_marker = state.last_auto_marker
+        self._pending_auto_space = state.pending_auto_space
 
     def _space_auto_conversion(self):
         return create_space_auto_conversion_use_case(

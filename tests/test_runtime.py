@@ -24,8 +24,10 @@ from lswitch.runtime import (
     RuntimeConfigSnapshot,
     RuntimeCoreComponents,
     SelectionPollerThread,
+    SpaceAutoConversionState,
     StartedRuntimeResources,
     apply_runtime_timing_config,
+    apply_space_auto_conversion_result,
     apply_user_dictionary_config,
     create_conversion_runtime,
     create_core_components,
@@ -531,6 +533,43 @@ def test_extract_last_word_events_returns_token_text_and_events():
         current_layout=current_layout,
         xkb=xkb,
     )
+
+
+def test_apply_space_auto_conversion_result_updates_marker_and_pending_space():
+    marker = object()
+    result = types.SimpleNamespace(
+        marker_changed=True,
+        marker=marker,
+        pending_space=True,
+    )
+
+    state = apply_space_auto_conversion_result(
+        result=result,
+        last_auto_marker=object(),
+        pending_auto_space=False,
+    )
+
+    assert isinstance(state, SpaceAutoConversionState)
+    assert state.last_auto_marker is marker
+    assert state.pending_auto_space is True
+
+
+def test_apply_space_auto_conversion_result_preserves_state_when_result_is_noop():
+    marker = object()
+    result = types.SimpleNamespace(
+        marker_changed=False,
+        marker=object(),
+        pending_space=False,
+    )
+
+    state = apply_space_auto_conversion_result(
+        result=result,
+        last_auto_marker=marker,
+        pending_auto_space=True,
+    )
+
+    assert state.last_auto_marker is marker
+    assert state.pending_auto_space is True
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():

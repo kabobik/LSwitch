@@ -214,6 +214,12 @@ class RuntimeConfigSnapshot:
     wayland_selection_timing: dict
 
 
+@dataclass(frozen=True)
+class SpaceAutoConversionState:
+    last_auto_marker: object | None
+    pending_auto_space: bool
+
+
 def create_core_components(
     *,
     double_click_timeout: float,
@@ -450,6 +456,23 @@ def extract_last_word_events(
         xkb=xkb,
     )
     return token.text, token.events
+
+
+def apply_space_auto_conversion_result(
+    *,
+    result,
+    last_auto_marker,
+    pending_auto_space: bool,
+) -> SpaceAutoConversionState:
+    """Apply a space auto-conversion result to app-level marker state."""
+    if result.marker_changed:
+        last_auto_marker = result.marker
+    if result.pending_space:
+        pending_auto_space = True
+    return SpaceAutoConversionState(
+        last_auto_marker=last_auto_marker,
+        pending_auto_space=pending_auto_space,
+    )
 
 
 def create_conversion_runtime(
