@@ -125,6 +125,7 @@ from lswitch.core.event_bus import EventBus
 from lswitch.core.state_manager import StateManager
 from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.event_manager import EventManager
+from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.typed_buffer import TypedBufferService
 
 
@@ -232,13 +233,7 @@ class LSwitchApp:
         self.auto_detector = None
         self.user_dict = None
         self._last_auto_marker = None
-        self.__selection_valid: bool = False
-        self._selection_generation: int = 0
-        self._selection_repeat_valid: bool = False
-        self._selection_repeat_generation: int = 0
-        self._prev_sel_text: str = ""
-        self._prev_sel_owner_id: int = 0
-        self._selection_baseline_initialized: bool = False
+        self.selection_tracker = SelectionFreshnessTracker()
         self._last_retype_events: list = []   # sticky buffer for repeat Shift+Shift
         self._platform = None
         self._selection_poller: _SelectionPollerThread | None = None
@@ -394,30 +389,78 @@ class LSwitchApp:
 
     @property
     def _selection_valid(self) -> bool:
-        return self.__selection_valid
+        return self.selection_tracker.valid
 
     @_selection_valid.setter
     def _selection_valid(self, value: bool) -> None:
-        if value != self.__selection_valid:
+        old_value = self.selection_tracker.valid
+        if value != old_value:
             logger.debug(
                 "fresh=%s → %s",
-                self.__selection_valid, value,
+                old_value, value,
             )
-            if value:
-                self._selection_generation += 1
-            self.__selection_valid = value
+            self.selection_tracker.set_valid(value)
+        else:
+            self.selection_tracker.set_valid(value)
         # Log at TRACE every assignment and its source (guarded to avoid extract_stack overhead)
         if logger.isEnabledFor(5):  # TRACE = 5
             import traceback as _tb
             caller = _tb.extract_stack(limit=3)[-2]
             logger.trace(  # type: ignore[attr-defined]
                 "fresh=%s (set by %s:%d)",
-                self.__selection_valid, caller.name, caller.lineno,
+                self.selection_tracker.valid, caller.name, caller.lineno,
             )
 
+    @property
+    def _selection_generation(self) -> int:
+        return self.selection_tracker.generation
+
+    @_selection_generation.setter
+    def _selection_generation(self, value: int) -> None:
+        self.selection_tracker.generation = int(value)
+
+    @property
+    def _selection_repeat_valid(self) -> bool:
+        return self.selection_tracker.repeat_valid
+
+    @_selection_repeat_valid.setter
+    def _selection_repeat_valid(self, value: bool) -> None:
+        self.selection_tracker.repeat_valid = bool(value)
+
+    @property
+    def _selection_repeat_generation(self) -> int:
+        return self.selection_tracker.repeat_generation
+
+    @_selection_repeat_generation.setter
+    def _selection_repeat_generation(self, value: int) -> None:
+        self.selection_tracker.repeat_generation = int(value)
+
+    @property
+    def _prev_sel_text(self) -> str:
+        return self.selection_tracker.prev_text
+
+    @_prev_sel_text.setter
+    def _prev_sel_text(self, value: str) -> None:
+        self.selection_tracker.prev_text = value or ""
+
+    @property
+    def _prev_sel_owner_id(self) -> int:
+        return self.selection_tracker.prev_owner_id
+
+    @_prev_sel_owner_id.setter
+    def _prev_sel_owner_id(self, value: int) -> None:
+        self.selection_tracker.prev_owner_id = int(value)
+
+    @property
+    def _selection_baseline_initialized(self) -> bool:
+        return self.selection_tracker.baseline_initialized
+
+    @_selection_baseline_initialized.setter
+    def _selection_baseline_initialized(self, value: bool) -> None:
+        self.selection_tracker.baseline_initialized = bool(value)
+
     def _clear_selection_repeat(self) -> None:
-        self._selection_repeat_valid = False
-        self._selection_repeat_generation = 0
+        self.selection_tracker.clear_repeat()
 
     def _on_key_press(self, event):
         from lswitch.core.event_manager import SHIFT_KEYS, KEY_BACKSPACE, KEY_SPACE, MODIFIER_KEYS
@@ -592,31 +635,23 @@ class LSwitchApp:
         try:
             reader = self._passive_selection_reader()
             info = reader() if reader is not None else self.selection.get_selection()
-            old_text = self._prev_sel_text
-            old_owner = self._prev_sel_owner_id
-            had_baseline = self._selection_baseline_initialized
-            # Always update baseline on release
-            self._prev_sel_text = info.text or ""
-            self._prev_sel_owner_id = info.owner_id
-            self._selection_baseline_initialized = True
-            if not info.text:
-                self._selection_valid = False
-                self._clear_selection_repeat()
+            result = self.selection_tracker.on_release_selection(
+                info.text or "",
+                info.owner_id,
+            )
+            if result == "empty":
                 logger.trace(  # type: ignore[attr-defined]
                     "MouseRelease: selection empty"
                 )
                 return
-            if not had_baseline:
+            if result == "initial":
                 logger.trace(  # type: ignore[attr-defined]
                     "MouseRelease: initial selection baseline — text=%r",
                     info.text[:50] if info.text else "",
                 )
                 return
             # If selection changed → fresh selection (drag-select happened)
-            if info.text != old_text or (
-                info.owner_id != old_owner and info.owner_id != 0
-            ):
-                self._selection_valid = True
+            if result == "fresh":
                 logger.debug(
                     "MouseRelease: fresh selection — text=%r owner=0x%x",
                     info.text[:50] if info.text else "", info.owner_id,
@@ -649,24 +684,18 @@ class LSwitchApp:
         if reader is None:
             return
         try:
-            old_text = self._prev_sel_text
-            old_owner = self._prev_sel_owner_id
             info = reader()
-            had_baseline = self._selection_baseline_initialized
-            self._prev_sel_text = info.text or ""
-            self._prev_sel_owner_id = info.owner_id
-            self._selection_baseline_initialized = True
-            if not had_baseline:
+            result = self.selection_tracker.on_click_passive_selection(
+                info.text or "",
+                info.owner_id,
+            )
+            if result == "initial":
                 logger.trace(  # type: ignore[attr-defined]
                     "MouseClick: initial passive selection baseline — text=%r",
                     info.text[:50] if info.text else "",
                 )
                 return
-            if info.text and (
-                info.text != old_text
-                or (info.owner_id != old_owner and info.owner_id != 0)
-            ):
-                self._selection_valid = True
+            if result == "fresh":
                 logger.debug(
                     "MouseClick: fresh passive selection — text=%r owner=0x%x",
                     info.text[:50] if info.text else "", info.owner_id,
@@ -700,7 +729,7 @@ class LSwitchApp:
         Does NOT update baseline (_prev_sel_text / _prev_sel_owner_id) —
         baseline is maintained by _on_mouse_release and tracked conversions.
         """
-        self._selection_valid = True
+        self.selection_tracker.on_poller_changed()
         logger.debug(
             "Poller: selection changed, fresh=True — text=%r owner=0x%x",
             text[:50] if text else "", owner_id,
@@ -728,9 +757,10 @@ class LSwitchApp:
         try:
             reader = self._passive_selection_reader()
             info = reader() if reader is not None else self.selection.get_selection()
-            self._prev_sel_text = info.text or ""
-            self._prev_sel_owner_id = info.owner_id
-            self._selection_baseline_initialized = True
+            self.selection_tracker.update_baseline(
+                info.text or "",
+                info.owner_id,
+            )
         except Exception:
             pass
 
@@ -763,13 +793,7 @@ class LSwitchApp:
         is_selection_conversion = False
         pending_manual_learning: tuple[str, str, bool] | None = None
         chars_in_buffer = self.state_manager.context.chars_in_buffer
-        selection_valid_for_convert = (
-            self._selection_valid
-            or (
-                self._selection_repeat_valid
-                and self._selection_repeat_generation == self._selection_generation
-            )
-        )
+        selection_valid_for_convert = self.selection_tracker.effective_valid()
         if self.user_dict and chars_in_buffer > 0:
             try:
                 layout_info = self.xkb.get_current_layout() if self.xkb else None
@@ -895,8 +919,7 @@ class LSwitchApp:
 
             # Remember events for potential repeat retype
             if success and saved_count == 0 and selection_valid_for_convert:
-                self._selection_repeat_valid = True
-                self._selection_repeat_generation = self._selection_generation
+                self.selection_tracker.mark_repeat_for_current_generation()
             elif not success:
                 self._clear_selection_repeat()
 
