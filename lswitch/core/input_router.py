@@ -49,7 +49,7 @@ class InputEventRouter:
         inject_deferred_space: Callable[[], None],
         request_conversion: Callable[[], None],
         prime_selection_baseline_on_click: Callable[[], None],
-        on_mouse_release: Callable[[Event], None],
+        read_mouse_release_selection: Callable[[], object | None],
     ):
         self.state_manager = state_manager
         self.typed_buffer = typed_buffer
@@ -64,7 +64,7 @@ class InputEventRouter:
         self.inject_deferred_space = inject_deferred_space
         self.request_conversion = request_conversion
         self.prime_selection_baseline_on_click = prime_selection_baseline_on_click
-        self._on_mouse_release = on_mouse_release
+        self.read_mouse_release_selection = read_mouse_release_selection
 
     def on_key_press(self, event: Event) -> None:
         data = event.data
@@ -157,7 +157,37 @@ class InputEventRouter:
         self.state_manager.on_mouse_click()
 
     def on_mouse_release(self, event: Event) -> None:
-        self._on_mouse_release(event)
+        try:
+            info = self.read_mouse_release_selection()
+            if info is None:
+                return
+            text = getattr(info, "text", "") or ""
+            owner_id = getattr(info, "owner_id", 0)
+            result = self.selection_tracker.on_release_selection(text, owner_id)
+            if result == "empty":
+                logger.trace(  # type: ignore[attr-defined]
+                    "MouseRelease: selection empty"
+                )
+                return
+            if result == "initial":
+                logger.trace(  # type: ignore[attr-defined]
+                    "MouseRelease: initial selection baseline — text=%r",
+                    text[:50],
+                )
+                return
+            if result == "fresh":
+                logger.debug(
+                    "MouseRelease: fresh selection — text=%r owner=0x%x",
+                    text[:50],
+                    owner_id,
+                )
+            else:
+                logger.trace(  # type: ignore[attr-defined]
+                    "MouseRelease: selection unchanged — text=%r",
+                    text[:50],
+                )
+        except Exception:
+            pass
 
     def _append_text_event(self, data) -> None:
         self.state_manager.on_key_press(data.code)

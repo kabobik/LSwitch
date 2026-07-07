@@ -10,6 +10,7 @@ from lswitch.core.input_router import InputEventRouter
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
 from lswitch.core.typed_buffer import TypedBufferService
+from lswitch.platform.selection_adapter import SelectionInfo
 
 KEY_A = 30
 KEY_LEFTSHIFT = 42
@@ -34,6 +35,7 @@ def _router(
     inject_deferred_space=None,
     request_conversion=None,
     prime_selection_baseline_on_click=None,
+    read_mouse_release_selection=None,
 ):
     state_manager = StateManager()
     typed_buffer = TypedBufferService()
@@ -54,7 +56,7 @@ def _router(
         prime_selection_baseline_on_click=(
             prime_selection_baseline_on_click or (lambda: None)
         ),
-        on_mouse_release=MagicMock(),
+        read_mouse_release_selection=read_mouse_release_selection or (lambda: None),
     )
     return router, state_manager, selection_tracker
 
@@ -255,27 +257,47 @@ def test_input_router_handles_mouse_click():
     state_manager.on_mouse_click.assert_called_once()
 
 
-def test_input_router_delegates_remaining_input_events():
-    on_mouse_release = MagicMock()
-    router = InputEventRouter(
-        state_manager=StateManager(),
-        typed_buffer=TypedBufferService(),
-        selection_tracker=SelectionFreshnessTracker(),
-        decode_buffer=lambda: "",
-        auto_conversion_enabled=lambda: False,
-        try_auto_conversion_at_space=lambda: False,
-        get_pending_auto_space=lambda: False,
-        set_pending_auto_space=lambda value: None,
-        clear_last_retype_events=lambda: None,
-        clear_last_auto_marker=lambda: None,
-        inject_deferred_space=lambda: None,
-        request_conversion=lambda: None,
-        prime_selection_baseline_on_click=lambda: None,
-        on_mouse_release=on_mouse_release,
+def test_input_router_ignores_mouse_release_without_selection_info():
+    router, _state_manager, selection_tracker = _router(
+        read_mouse_release_selection=lambda: None
     )
-
     mouse_release = _event(EventType.MOUSE_RELEASE)
 
     router.on_mouse_release(mouse_release)
 
-    on_mouse_release.assert_called_once_with(mouse_release)
+    assert selection_tracker.valid is True
+
+
+def test_input_router_initializes_mouse_release_selection_baseline():
+    router, _state_manager, selection_tracker = _router(
+        read_mouse_release_selection=lambda: SelectionInfo(
+            text="word",
+            owner_id=42,
+            timestamp=0.0,
+        )
+    )
+    selection_tracker.baseline_initialized = False
+    selection_tracker.set_valid(False)
+
+    router.on_mouse_release(_event(EventType.MOUSE_RELEASE))
+
+    assert selection_tracker.prev_text == "word"
+    assert selection_tracker.prev_owner_id == 42
+    assert selection_tracker.valid is False
+
+
+def test_input_router_marks_fresh_mouse_release_selection():
+    router, _state_manager, selection_tracker = _router(
+        read_mouse_release_selection=lambda: SelectionInfo(
+            text="new",
+            owner_id=2,
+            timestamp=0.0,
+        )
+    )
+    selection_tracker.update_baseline("old", 1)
+
+    router.on_mouse_release(_event(EventType.MOUSE_RELEASE))
+
+    assert selection_tracker.valid is True
+    assert selection_tracker.prev_text == "new"
+    assert selection_tracker.prev_owner_id == 2

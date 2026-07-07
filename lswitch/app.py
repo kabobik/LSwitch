@@ -240,7 +240,7 @@ class LSwitchApp:
             prime_selection_baseline_on_click=(
                 lambda: self._update_passive_selection_baseline_on_click()
             ),
-            on_mouse_release=self._on_mouse_release,
+            read_mouse_release_selection=self._read_mouse_release_selection,
         )
 
         # Platform adapters — created by _init_platform()
@@ -548,56 +548,21 @@ class LSwitchApp:
         self.input_router.on_mouse_click(event)
 
     def _on_mouse_release(self, event):
-        """Mouse button release — potential end of drag-select.
+        self.input_router.on_mouse_release(event)
 
-        Read platform selection and compare with baseline. If content changed,
-        a drag-select just happened — mark selection as fresh.
-        Always update baseline so the next click/release cycle has
-        an accurate reference.
-
-        Reading at release time is safer because the target application has
-        already processed the button-release event and committed selection
-        state for the current platform.
-        """
+    def _read_mouse_release_selection(self):
         if self.selection is None:
-            return
+            return None
         if not getattr(
             self._platform,
             "selection_mouse_release_tracking_enabled",
             True,
         ):
-            return
-        try:
-            reader = self._passive_selection_reader()
-            info = reader() if reader is not None else self.selection.get_selection()
-            result = self.selection_tracker.on_release_selection(
-                info.text or "",
-                info.owner_id,
-            )
-            if result == "empty":
-                logger.trace(  # type: ignore[attr-defined]
-                    "MouseRelease: selection empty"
-                )
-                return
-            if result == "initial":
-                logger.trace(  # type: ignore[attr-defined]
-                    "MouseRelease: initial selection baseline — text=%r",
-                    info.text[:50] if info.text else "",
-                )
-                return
-            # If selection changed → fresh selection (drag-select happened)
-            if result == "fresh":
-                logger.debug(
-                    "MouseRelease: fresh selection — text=%r owner=0x%x",
-                    info.text[:50] if info.text else "", info.owner_id,
-                )
-            else:
-                logger.trace(  # type: ignore[attr-defined]
-                    "MouseRelease: selection unchanged — text=%r",
-                    info.text[:50] if info.text else "",
-                )
-        except Exception:
-            pass
+            return None
+        reader = self._passive_selection_reader()
+        if reader is not None:
+            return reader()
+        return self.selection.get_selection()
 
     def _passive_selection_reader(self):
         """Return a no-shortcut selection reader when the adapter provides one."""
