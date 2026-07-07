@@ -44,6 +44,7 @@ from lswitch.runtime import (
     run_evdev_event_loop,
     run_qt_runtime_loop,
     run_selected_runtime_loop,
+    selection_baseline_tracking_enabled,
     is_process_alive,
     kill_existing_instance,
     pid_lock_path,
@@ -615,6 +616,35 @@ def test_read_mouse_release_selection_falls_back_to_active_selection():
 
     assert read_mouse_release_selection(selection=selection, platform=object()) is info
     selection.get_selection.assert_called_once_with()
+
+
+def test_selection_baseline_tracking_enabled_defaults_to_true_without_platform():
+    assert selection_baseline_tracking_enabled(platform=None) is True
+
+
+def test_selection_baseline_tracking_enabled_defaults_to_true_without_flags():
+    assert selection_baseline_tracking_enabled(platform=object()) is True
+
+
+def test_selection_baseline_tracking_enabled_uses_polling_or_mouse_release_flags():
+    assert selection_baseline_tracking_enabled(
+        platform=types.SimpleNamespace(
+            selection_polling_enabled=False,
+            selection_mouse_release_tracking_enabled=False,
+        )
+    ) is False
+    assert selection_baseline_tracking_enabled(
+        platform=types.SimpleNamespace(
+            selection_polling_enabled=True,
+            selection_mouse_release_tracking_enabled=False,
+        )
+    ) is True
+    assert selection_baseline_tracking_enabled(
+        platform=types.SimpleNamespace(
+            selection_polling_enabled=False,
+            selection_mouse_release_tracking_enabled=True,
+        )
+    ) is True
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():

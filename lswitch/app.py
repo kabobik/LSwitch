@@ -26,6 +26,7 @@ from lswitch.runtime import (
     run_evdev_event_loop,
     run_qt_runtime_loop,
     run_selected_runtime_loop,
+    selection_baseline_tracking_enabled,
     start_runtime_resources,
     stop_runtime_resources,
     sync_user_dictionary_components,
@@ -409,18 +410,9 @@ class LSwitchApp:
 
     def _selection_baseline_tracking_enabled(self) -> bool:
         """Return whether passive selection baseline reads are safe/useful."""
-        if self._platform is None:
-            return True
-
-        polling = getattr(self._platform, "selection_polling_enabled", None)
-        mouse_release = getattr(
-            self._platform,
-            "selection_mouse_release_tracking_enabled",
-            None,
+        return selection_baseline_tracking_enabled(
+            platform=self._platform,
         )
-        if polling is None and mouse_release is None:
-            return True
-        return bool(polling or mouse_release)
 
     def _update_selection_baseline(self) -> None:
         """Update passive selection baseline when the platform supports it."""

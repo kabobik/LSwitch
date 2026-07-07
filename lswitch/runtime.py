@@ -494,6 +494,22 @@ def read_mouse_release_selection(*, selection, platform):
     return selection.get_selection()
 
 
+def selection_baseline_tracking_enabled(*, platform) -> bool:
+    """Return whether passive selection baseline reads are safe/useful."""
+    if platform is None:
+        return True
+
+    polling = getattr(platform, "selection_polling_enabled", None)
+    mouse_release = getattr(
+        platform,
+        "selection_mouse_release_tracking_enabled",
+        None,
+    )
+    if polling is None and mouse_release is None:
+        return True
+    return bool(polling or mouse_release)
+
+
 def create_conversion_runtime(
     *,
     xkb,
