@@ -31,6 +31,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    create_manual_conversion_controller,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
     create_space_auto_conversion_use_case,
@@ -467,6 +468,43 @@ def test_create_space_auto_conversion_use_case_wires_retype_service(monkeypatch)
     assert use_case.retype_service.virtual_kb is virtual_kb
     assert use_case.retype_service.xkb is xkb
     assert use_case.retype_service.debug is True
+
+
+def test_create_manual_conversion_controller_wires_dependencies(monkeypatch):
+    created = {}
+
+    class FakeManualConversionController:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            created["controller"] = self
+
+    controller_module = types.ModuleType("lswitch.core.manual_conversion_controller")
+    controller_module.ManualConversionController = FakeManualConversionController
+    monkeypatch.setitem(
+        sys.modules,
+        "lswitch.core.manual_conversion_controller",
+        controller_module,
+    )
+    dependencies = {
+        "state_manager": object(),
+        "selection_tracker": object(),
+        "typed_buffer": object(),
+        "learning_service": object(),
+        "conversion_engine": object(),
+        "virtual_kb": object(),
+        "xkb": object(),
+        "selection": object(),
+        "timing": {"manual": 0.1},
+        "debug": True,
+        "decode_events": object(),
+        "extract_last_word": object(),
+        "update_selection_baseline": object(),
+    }
+
+    controller = create_manual_conversion_controller(**dependencies)
+
+    assert controller is created["controller"]
+    assert controller.kwargs == dependencies
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():

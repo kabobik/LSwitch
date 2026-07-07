@@ -14,6 +14,7 @@ from lswitch.runtime import (
     apply_user_dictionary_config,
     create_core_components,
     create_input_router,
+    create_manual_conversion_controller,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
     create_space_auto_conversion_use_case,
@@ -457,11 +458,7 @@ class LSwitchApp:
              Weight accumulates across sessions; once |weight| >= min_weight
              AutoDetector will handle this word automatically.
         """
-        from lswitch.core.manual_conversion_controller import (
-            ManualConversionController,
-        )
-
-        result = ManualConversionController(
+        result = create_manual_conversion_controller(
             state_manager=self.state_manager,
             selection_tracker=self.selection_tracker,
             typed_buffer=self.typed_buffer,

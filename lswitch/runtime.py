@@ -400,6 +400,42 @@ def create_space_auto_conversion_use_case(
     )
 
 
+def create_manual_conversion_controller(
+    *,
+    state_manager,
+    selection_tracker,
+    typed_buffer,
+    learning_service,
+    conversion_engine,
+    virtual_kb,
+    xkb,
+    selection,
+    timing: dict,
+    debug: bool,
+    decode_events,
+    extract_last_word,
+    update_selection_baseline,
+):
+    """Create the manual conversion orchestration controller."""
+    from lswitch.core.manual_conversion_controller import ManualConversionController
+
+    return ManualConversionController(
+        state_manager=state_manager,
+        selection_tracker=selection_tracker,
+        typed_buffer=typed_buffer,
+        learning_service=learning_service,
+        conversion_engine=conversion_engine,
+        virtual_kb=virtual_kb,
+        xkb=xkb,
+        selection=selection,
+        timing=timing,
+        debug=debug,
+        decode_events=decode_events,
+        extract_last_word=extract_last_word,
+        update_selection_baseline=update_selection_baseline,
+    )
+
+
 def create_conversion_runtime(
     *,
     xkb,
