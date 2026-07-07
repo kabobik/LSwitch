@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import signal
 import threading
 from dataclasses import dataclass
 
@@ -246,6 +247,61 @@ def create_tray_indicator(
 
     tray.show()
     return tray
+
+
+def run_qt_runtime_loop(
+    *,
+    qt_app,
+    event_bus,
+    show_tray: bool,
+    create_tray,
+    run_evdev_loop,
+    stop_runtime,
+    worker_name: str = "evdev-loop",
+    join_timeout: float = 2.0,
+) -> None:
+    """Run Qt event loop while processing evdev events in a worker thread."""
+    from lswitch.core.events import EventType
+    from PyQt6.QtCore import QTimer
+
+    qt_app.setQuitOnLastWindowClosed(False)
+
+    tray = create_tray() if show_tray else None
+
+    def _on_quit(event):
+        qt_app.quit()
+
+    event_bus.subscribe(EventType.APP_QUIT, _on_quit)
+
+    def _evdev_thread():
+        try:
+            run_evdev_loop()
+        except Exception as exc:
+            logger.error("Evdev thread error: %s", exc)
+        finally:
+            qt_app.quit()
+
+    thread = threading.Thread(target=_evdev_thread, daemon=True, name=worker_name)
+    thread.start()
+
+    try:
+        def sigint_handler(signum, frame):
+            logger.info("Получен SIGINT (Ctrl+C). Завершение...")
+            qt_app.quit()
+
+        signal.signal(signal.SIGINT, sigint_handler)
+
+        # Keep Python signal handling responsive while Qt owns the main loop.
+        timer = QTimer()
+        timer.timeout.connect(lambda: None)
+        timer.start(500)
+
+        qt_app.exec()
+    finally:
+        if tray is not None:
+            tray.cleanup()
+        stop_runtime()
+        thread.join(timeout=join_timeout)
 
 
 def stop_runtime_resources(

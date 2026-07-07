@@ -7,7 +7,6 @@ import logging
 import os
 import signal
 import sys
-import threading
 
 import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.config import ConfigManager
@@ -19,6 +18,7 @@ from lswitch.runtime import (
     create_input_router,
     create_tray_indicator,
     run_evdev_event_loop,
+    run_qt_runtime_loop,
     stop_runtime_resources,
 )
 
@@ -813,13 +813,8 @@ class LSwitchApp:
 
     def _run_with_qt_loop(self, qt_app, show_tray: bool):
         """Run evdev in a worker thread while the main thread runs Qt."""
-        from lswitch.core.events import EventType
-
-        qt_app.setQuitOnLastWindowClosed(False)
-
-        tray = None
-        if show_tray:
-            tray = create_tray_indicator(
+        def _create_tray():
+            return create_tray_indicator(
                 event_bus=self.event_bus,
                 config=self.config,
                 qt_app=qt_app,
@@ -827,49 +822,21 @@ class LSwitchApp:
                 xkb=self.xkb,
             )
 
-        # APP_QUIT → exit Qt event loop
-        def _on_quit(event):
-            qt_app.quit()
-        self.event_bus.subscribe(EventType.APP_QUIT, _on_quit)
+        def _run_evdev_loop():
+            run_evdev_event_loop(
+                is_running=lambda: self._running,
+                device_manager=self.device_manager,
+                event_manager=self.event_manager,
+            )
 
-        # Evdev loop in background thread
-        def _evdev_thread():
-            try:
-                run_evdev_event_loop(
-                    is_running=lambda: self._running,
-                    device_manager=self.device_manager,
-                    event_manager=self.event_manager,
-                )
-            except Exception as exc:
-                logger.error("Evdev thread error: %s", exc)
-            finally:
-                qt_app.quit()
-
-        t = threading.Thread(target=_evdev_thread, daemon=True, name="evdev-loop")
-        t.start()
-
-        try:
-            from PyQt6.QtCore import QTimer
-            import signal
-            
-            # Позволяем Python-обработчику сигналов ловить Ctrl+C
-            def sigint_handler(signum, frame):
-                logger.info("Получен SIGINT (Ctrl+C). Завершение...")
-                qt_app.quit()
-            
-            signal.signal(signal.SIGINT, sigint_handler)
-            
-            # Устанавливаем таймер для периодической передачи управления Python (иначе Qt глушит сигналы)
-            timer = QTimer()
-            timer.timeout.connect(lambda: None)
-            timer.start(500)
-            
-            qt_app.exec()
-        finally:
-            if tray is not None:
-                tray.cleanup()
-            self.stop()
-            t.join(timeout=2.0)
+        run_qt_runtime_loop(
+            qt_app=qt_app,
+            event_bus=self.event_bus,
+            show_tray=show_tray,
+            create_tray=_create_tray,
+            run_evdev_loop=_run_evdev_loop,
+            stop_runtime=self.stop,
+        )
 
     # ------------------------------------------------------------------
     # Shutdown

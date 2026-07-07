@@ -26,6 +26,7 @@ from lswitch.runtime import (
     create_input_router,
     create_tray_indicator,
     run_evdev_event_loop,
+    run_qt_runtime_loop,
     stop_runtime_resources,
 )
 
@@ -348,6 +349,131 @@ def test_create_tray_indicator_tolerates_layout_lookup_errors(monkeypatch):
 
     assert tray.layout_name is None
     assert tray.shown is True
+
+
+def test_run_qt_runtime_loop_wires_worker_signal_timer_cleanup_and_stop(monkeypatch):
+    created_timers = []
+
+    class FakeSignal:
+        def __init__(self):
+            self.callback = None
+
+        def connect(self, callback):
+            self.callback = callback
+
+    class FakeQTimer:
+        def __init__(self):
+            self.timeout = FakeSignal()
+            self.started_with = None
+            created_timers.append(self)
+
+        def start(self, interval):
+            self.started_with = interval
+
+    qtcore_module = types.ModuleType("PyQt6.QtCore")
+    qtcore_module.QTimer = FakeQTimer
+    pyqt_module = types.ModuleType("PyQt6")
+    pyqt_module.QtCore = qtcore_module
+    monkeypatch.setitem(sys.modules, "PyQt6", pyqt_module)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtCore", qtcore_module)
+
+    signal_calls = []
+    monkeypatch.setattr(
+        "lswitch.runtime.signal.signal",
+        lambda signum, handler: signal_calls.append((signum, handler)),
+    )
+
+    class FakeQtApp:
+        def __init__(self):
+            self.quit_on_last_window_closed = None
+            self.quit_calls = 0
+            self.exec_calls = 0
+
+        def setQuitOnLastWindowClosed(self, value):
+            self.quit_on_last_window_closed = value
+
+        def quit(self):
+            self.quit_calls += 1
+
+        def exec(self):
+            self.exec_calls += 1
+
+    class FakeEventBus:
+        def __init__(self):
+            self.subscriptions = []
+
+        def subscribe(self, event_type, callback):
+            self.subscriptions.append((event_type, callback))
+
+    class FakeTray:
+        def __init__(self):
+            self.cleaned = False
+
+        def cleanup(self):
+            self.cleaned = True
+
+    qt_app = FakeQtApp()
+    event_bus = FakeEventBus()
+    tray = FakeTray()
+    calls = []
+
+    run_qt_runtime_loop(
+        qt_app=qt_app,
+        event_bus=event_bus,
+        show_tray=True,
+        create_tray=lambda: tray,
+        run_evdev_loop=lambda: calls.append("evdev"),
+        stop_runtime=lambda: calls.append("stop"),
+        join_timeout=1.0,
+    )
+
+    assert qt_app.quit_on_last_window_closed is False
+    assert qt_app.exec_calls == 1
+    assert qt_app.quit_calls == 1
+    assert event_bus.subscriptions[0][0] is EventType.APP_QUIT
+    assert signal_calls[0][0] == __import__("signal").SIGINT
+    assert created_timers[0].timeout.callback is not None
+    assert created_timers[0].started_with == 500
+    assert tray.cleaned is True
+    assert calls == ["evdev", "stop"]
+
+
+def test_run_qt_runtime_loop_skips_tray_when_disabled(monkeypatch):
+    class FakeQTimer:
+        class Timeout:
+            def connect(self, callback):
+                pass
+
+        def __init__(self):
+            self.timeout = self.Timeout()
+
+        def start(self, interval):
+            pass
+
+    qtcore_module = types.ModuleType("PyQt6.QtCore")
+    qtcore_module.QTimer = FakeQTimer
+    pyqt_module = types.ModuleType("PyQt6")
+    pyqt_module.QtCore = qtcore_module
+    monkeypatch.setitem(sys.modules, "PyQt6", pyqt_module)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtCore", qtcore_module)
+    monkeypatch.setattr("lswitch.runtime.signal.signal", lambda signum, handler: None)
+
+    qt_app = MagicMock()
+    event_bus = MagicMock()
+    create_tray = MagicMock()
+
+    run_qt_runtime_loop(
+        qt_app=qt_app,
+        event_bus=event_bus,
+        show_tray=False,
+        create_tray=create_tray,
+        run_evdev_loop=lambda: None,
+        stop_runtime=lambda: None,
+    )
+
+    create_tray.assert_not_called()
+    qt_app.setQuitOnLastWindowClosed.assert_called_once_with(False)
+    qt_app.exec.assert_called_once_with()
 
 
 def test_stop_runtime_resources_stops_owned_resources_and_releases_pid_lock():
