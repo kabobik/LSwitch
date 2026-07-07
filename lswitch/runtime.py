@@ -510,6 +510,24 @@ def selection_baseline_tracking_enabled(*, platform) -> bool:
     return bool(polling or mouse_release)
 
 
+def update_selection_baseline(*, selection_tracker, selection, platform) -> None:
+    """Update passive selection baseline when platform tracking allows it."""
+    if selection is None or not selection_baseline_tracking_enabled(platform=platform):
+        return
+
+    try:
+        from lswitch.platform.selection_adapter import get_passive_selection_reader
+
+        reader = get_passive_selection_reader(selection)
+        info = reader() if reader is not None else selection.get_selection()
+        selection_tracker.update_baseline(
+            info.text or "",
+            info.owner_id,
+        )
+    except Exception:
+        pass
+
+
 def create_conversion_runtime(
     *,
     xkb,

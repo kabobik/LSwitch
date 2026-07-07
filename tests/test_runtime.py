@@ -52,6 +52,7 @@ from lswitch.runtime import (
     start_runtime_resources,
     stop_runtime_resources,
     sync_user_dictionary_components,
+    update_selection_baseline,
     wire_runtime_event_bus,
 )
 
@@ -645,6 +646,84 @@ def test_selection_baseline_tracking_enabled_uses_polling_or_mouse_release_flags
             selection_mouse_release_tracking_enabled=True,
         )
     ) is True
+
+
+def test_update_selection_baseline_updates_from_active_selection():
+    tracker = MagicMock()
+    selection = MagicMock()
+    selection.get_selection.return_value = types.SimpleNamespace(
+        text="word",
+        owner_id=5,
+    )
+
+    update_selection_baseline(
+        selection_tracker=tracker,
+        selection=selection,
+        platform=object(),
+    )
+
+    tracker.update_baseline.assert_called_once_with("word", 5)
+
+
+def test_update_selection_baseline_uses_passive_reader_when_available():
+    tracker = MagicMock()
+
+    class PassiveSelection:
+        def __init__(self):
+            self.passive_calls = 0
+            self.active_calls = 0
+
+        def get_passive_selection(self):
+            self.passive_calls += 1
+            return types.SimpleNamespace(text="passive", owner_id=9)
+
+        def get_selection(self):
+            self.active_calls += 1
+            return types.SimpleNamespace(text="active", owner_id=1)
+
+    selection = PassiveSelection()
+
+    update_selection_baseline(
+        selection_tracker=tracker,
+        selection=selection,
+        platform=object(),
+    )
+
+    tracker.update_baseline.assert_called_once_with("passive", 9)
+    assert selection.passive_calls == 1
+    assert selection.active_calls == 0
+
+
+def test_update_selection_baseline_skips_when_tracking_is_disabled():
+    tracker = MagicMock()
+    selection = MagicMock()
+    platform = types.SimpleNamespace(
+        selection_polling_enabled=False,
+        selection_mouse_release_tracking_enabled=False,
+    )
+
+    update_selection_baseline(
+        selection_tracker=tracker,
+        selection=selection,
+        platform=platform,
+    )
+
+    tracker.update_baseline.assert_not_called()
+    selection.get_selection.assert_not_called()
+
+
+def test_update_selection_baseline_tolerates_read_errors():
+    tracker = MagicMock()
+    selection = MagicMock()
+    selection.get_selection.side_effect = RuntimeError("selection unavailable")
+
+    update_selection_baseline(
+        selection_tracker=tracker,
+        selection=selection,
+        platform=object(),
+    )
+
+    tracker.update_baseline.assert_not_called()
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():

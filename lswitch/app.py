@@ -30,6 +30,7 @@ from lswitch.runtime import (
     start_runtime_resources,
     stop_runtime_resources,
     sync_user_dictionary_components,
+    update_selection_baseline,
     wire_runtime_event_bus,
 )
 
@@ -416,17 +417,11 @@ class LSwitchApp:
 
     def _update_selection_baseline(self) -> None:
         """Update passive selection baseline when the platform supports it."""
-        if self.selection is None or not self._selection_baseline_tracking_enabled():
-            return
-        try:
-            reader = self._passive_selection_reader()
-            info = reader() if reader is not None else self.selection.get_selection()
-            self.selection_tracker.update_baseline(
-                info.text or "",
-                info.owner_id,
-            )
-        except Exception:
-            pass
+        update_selection_baseline(
+            selection_tracker=self.selection_tracker,
+            selection=self.selection,
+            platform=self._platform,
+        )
 
     # ------------------------------------------------------------------
     # Conversion
