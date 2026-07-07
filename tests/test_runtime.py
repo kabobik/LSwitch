@@ -20,6 +20,7 @@ from lswitch.runtime import (
     InputDeviceRuntimeComponents,
     RuntimeCoreComponents,
     SelectionPollerThread,
+    StartedRuntimeResources,
     create_conversion_runtime,
     create_core_components,
     create_input_device_runtime,
@@ -27,6 +28,7 @@ from lswitch.runtime import (
     create_tray_indicator,
     run_evdev_event_loop,
     run_qt_runtime_loop,
+    start_runtime_resources,
     stop_runtime_resources,
 )
 
@@ -199,6 +201,68 @@ def test_selection_poller_thread_initializes_and_stops():
     poller.stop()
 
     assert poller._running is False
+
+
+def test_start_runtime_resources_starts_poller_scans_devices_and_starts_udev():
+    created_pollers = []
+
+    class FakePoller:
+        def __init__(self, selection, on_selection_changed, poll_interval):
+            self.selection = selection
+            self.on_selection_changed = on_selection_changed
+            self.poll_interval = poll_interval
+            self.started = False
+            created_pollers.append(self)
+
+        def start(self):
+            self.started = True
+
+    device_manager = MagicMock()
+    device_manager.scan_devices.return_value = 3
+    udev_monitor = MagicMock()
+    callback = MagicMock()
+    selection = object()
+
+    result = start_runtime_resources(
+        selection=selection,
+        platform=types.SimpleNamespace(selection_polling_enabled=True),
+        x11_selection_timing={"poll_interval": 0.25},
+        on_selection_changed=callback,
+        device_manager=device_manager,
+        udev_monitor=udev_monitor,
+        poller_factory=FakePoller,
+    )
+
+    assert isinstance(result, StartedRuntimeResources)
+    assert result.selection_poller is created_pollers[0]
+    assert result.device_count == 3
+    assert created_pollers[0].selection is selection
+    assert created_pollers[0].on_selection_changed is callback
+    assert created_pollers[0].poll_interval == 0.25
+    assert created_pollers[0].started is True
+    device_manager.scan_devices.assert_called_once_with()
+    udev_monitor.start.assert_called_once_with()
+
+
+def test_start_runtime_resources_skips_poller_and_udev_when_disabled_or_missing():
+    device_manager = MagicMock()
+    device_manager.scan_devices.return_value = 0
+    poller_factory = MagicMock()
+
+    result = start_runtime_resources(
+        selection=object(),
+        platform=types.SimpleNamespace(selection_polling_enabled=False),
+        x11_selection_timing={},
+        on_selection_changed=MagicMock(),
+        device_manager=device_manager,
+        udev_monitor=None,
+        poller_factory=poller_factory,
+    )
+
+    assert result.selection_poller is None
+    assert result.device_count == 0
+    poller_factory.assert_not_called()
+    device_manager.scan_devices.assert_called_once_with()
 
 
 def test_run_evdev_event_loop_dispatches_events_until_stopped():

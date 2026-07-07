@@ -19,6 +19,7 @@ from lswitch.runtime import (
     create_tray_indicator,
     run_evdev_event_loop,
     run_qt_runtime_loop,
+    start_runtime_resources,
     stop_runtime_resources,
 )
 
@@ -756,22 +757,23 @@ class LSwitchApp:
             self.stop()
             raise
 
-        if self.selection and getattr(self._platform, "selection_polling_enabled", False):
-            self._selection_poller = SelectionPollerThread(
-                self.selection,
-                on_selection_changed=self._on_poller_selection_changed,
-                poll_interval=self.x11_selection_timing.get('poll_interval', 0.5),
-            )
-            self._selection_poller.start()
-
-        count = self.device_manager.scan_devices()
-
-        if self._udev_monitor:
-            self._udev_monitor.start()
+        started_runtime = start_runtime_resources(
+            selection=self.selection,
+            platform=self._platform,
+            x11_selection_timing=self.x11_selection_timing,
+            on_selection_changed=self._on_poller_selection_changed,
+            device_manager=self.device_manager,
+            udev_monitor=self._udev_monitor,
+        )
+        self._selection_poller = started_runtime.selection_poller
 
         self._running = True
 
-        logger.info("LSwitch 2.0 запущен (headless=%s, %d устройств)", self.headless, count)
+        logger.info(
+            "LSwitch 2.0 запущен (headless=%s, %d устройств)",
+            self.headless,
+            started_runtime.device_count,
+        )
 
         def _reload_handler(signum, frame):
             if self.config.reload():

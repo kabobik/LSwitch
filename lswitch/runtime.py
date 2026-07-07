@@ -89,6 +89,12 @@ class InputDeviceRuntimeComponents:
     udev_monitor: object
 
 
+@dataclass(frozen=True)
+class StartedRuntimeResources:
+    selection_poller: object | None
+    device_count: int
+
+
 def create_core_components(
     *,
     double_click_timeout: float,
@@ -247,6 +253,37 @@ def create_tray_indicator(
 
     tray.show()
     return tray
+
+
+def start_runtime_resources(
+    *,
+    selection,
+    platform,
+    x11_selection_timing: dict,
+    on_selection_changed,
+    device_manager,
+    udev_monitor,
+    poller_factory=SelectionPollerThread,
+) -> StartedRuntimeResources:
+    """Start runtime background resources after platform initialization."""
+    selection_poller = None
+    if selection and getattr(platform, "selection_polling_enabled", False):
+        selection_poller = poller_factory(
+            selection,
+            on_selection_changed=on_selection_changed,
+            poll_interval=x11_selection_timing.get("poll_interval", 0.5),
+        )
+        selection_poller.start()
+
+    device_count = device_manager.scan_devices()
+
+    if udev_monitor:
+        udev_monitor.start()
+
+    return StartedRuntimeResources(
+        selection_poller=selection_poller,
+        device_count=device_count,
+    )
 
 
 def run_qt_runtime_loop(
