@@ -325,21 +325,6 @@ class LSwitchApp:
         if self.virtual_kb:
             self.virtual_kb.tap_key(KEY_SPACE)
 
-    def _on_key_press(self, event):
-        self.input_router.on_key_press(event)
-
-    def _on_key_release(self, event):
-        self.input_router.on_key_release(event)
-
-    def _on_key_repeat(self, event):
-        self.input_router.on_key_repeat(event)
-
-    def _on_mouse_click(self, event):
-        self.input_router.on_mouse_click(event)
-
-    def _on_mouse_release(self, event):
-        self.input_router.on_mouse_release(event)
-
     def _read_mouse_release_selection(self):
         if self.selection is None:
             return None

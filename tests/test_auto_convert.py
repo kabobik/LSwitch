@@ -368,7 +368,7 @@ class TestSpaceKeyHandling:
         app = _make_app(auto_switch=False, threshold=0)
         app._wire_event_bus()
         event = _event(KEY_SPACE)
-        app._on_key_press(event)
+        app.input_router.on_key_press(event)
         assert app.state_manager.context.chars_in_buffer == 1
         assert app.state_manager.context.event_buffer[0].code == KEY_SPACE
 
@@ -378,7 +378,7 @@ class TestSpaceKeyHandling:
         app.auto_detector = _MockAutoDetector(should=False)
         app._wire_event_bus()
         event = _event(KEY_SPACE)
-        app._on_key_press(event)
+        app.input_router.on_key_press(event)
         assert app.state_manager.context.chars_in_buffer == 1
 
     def test_space_triggers_auto_conversion(self):
@@ -389,7 +389,7 @@ class TestSpaceKeyHandling:
         _fill_buffer(app, [KEY_G, KEY_H, KEY_B, KEY_D, KEY_T, KEY_N])
         with patch.object(app, '_try_auto_conversion_at_space', return_value=True) as mock_try:
             event = _event(KEY_SPACE)
-            app._on_key_press(event)
+            app.input_router.on_key_press(event)
             mock_try.assert_called_once()
 
     def test_space_not_in_buffer_after_successful_auto_conversion(self):
@@ -401,7 +401,7 @@ class TestSpaceKeyHandling:
         with patch.object(app, '_do_auto_conversion_at_space'):
             # _try_auto_conversion_at_space will return True (detector says yes)
             event = _event(KEY_SPACE)
-            app._on_key_press(event)
+            app.input_router.on_key_press(event)
         # Buffer was reset by _do_auto_conversion_at_space (mocked here, so still 6)
         # The key assertion: no SPACE key in event_buffer
         space_in_buf = any(ev.code == KEY_SPACE for ev in app.state_manager.context.event_buffer)
@@ -413,7 +413,7 @@ class TestSpaceKeyHandling:
         app.auto_detector = None
         app._wire_event_bus()
         event = _event(KEY_SPACE)
-        app._on_key_press(event)
+        app.input_router.on_key_press(event)
         assert app.state_manager.context.chars_in_buffer == 1
 
     def test_auto_detector_initialized_to_none_at_construction(self):
@@ -435,9 +435,9 @@ class TestAutoConvertEndToEnd:
         app._wire_event_bus()
         # Type "ghbdtn"
         for code in [KEY_G, KEY_H, KEY_B, KEY_D, KEY_T, KEY_N]:
-            app._on_key_press(_event(code))
+            app.input_router.on_key_press(_event(code))
         # Press Space → triggers auto-conversion
-        app._on_key_press(_event(KEY_SPACE))
+        app.input_router.on_key_press(_event(KEY_SPACE))
         return app
 
     def test_backspace_sent_for_word_plus_space(self):
@@ -476,8 +476,8 @@ class TestAutoConvertEndToEnd:
         app.auto_detector = _MockAutoDetector(should=False)
         app._wire_event_bus()
         for code in [KEY_H, KEY_E, KEY_A]:  # "hea" — 3 alpha chars
-            app._on_key_press(_event(code))
-        app._on_key_press(_event(KEY_SPACE))
+            app.input_router.on_key_press(_event(code))
+        app.input_router.on_key_press(_event(KEY_SPACE))
         # Space should be in buffer (no conversion fired)
         assert any(ev.code == KEY_SPACE for ev in app.state_manager.context.event_buffer)
         app.virtual_kb.replay_events.assert_not_called()

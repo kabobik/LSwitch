@@ -167,7 +167,7 @@ class TestOnMouseClick:
         app = _make_app()
         with patch.object(app.state_manager, 'on_mouse_click') as mock_click:
             event = Event(EventType.MOUSE_CLICK, KeyEventData(code=272, value=1), 0.0)
-            app._on_mouse_click(event)
+            app.input_router.on_mouse_click(event)
             mock_click.assert_called_once()
 
 
@@ -182,7 +182,7 @@ class TestOnMouseRelease:
         )()
 
         event = Event(EventType.MOUSE_RELEASE, KeyEventData(code=272, value=0), 0.0)
-        app._on_mouse_release(event)
+        app.input_router.on_mouse_release(event)
 
         app.selection.get_selection.assert_not_called()
 
@@ -253,7 +253,7 @@ class TestOnKeyPress:
         app._pending_auto_space = True
         app.virtual_kb = MagicMock()
         event = _make_event(EventType.KEY_PRESS, KEY_A)
-        app._on_key_press(event)
+        app.input_router.on_key_press(event)
         assert app._pending_auto_space is False
         app.virtual_kb.tap_key.assert_not_called()
 
@@ -263,7 +263,7 @@ class TestOnKeyPress:
         with patch.object(app.state_manager, 'on_shift_down') as mock_sd, \
              patch.object(app.state_manager, 'on_key_press') as mock_kp:
             event = _make_event(EventType.KEY_PRESS, KEY_LEFTSHIFT)
-            app._on_key_press(event)
+            app.input_router.on_key_press(event)
             mock_sd.assert_called_once()
             mock_kp.assert_not_called()
 
@@ -272,7 +272,7 @@ class TestOnKeyPress:
         app = _wired_app()
         assert app.state_manager.context.chars_in_buffer == 0
         event = _make_event(EventType.KEY_PRESS, KEY_A)
-        app._on_key_press(event)
+        app.input_router.on_key_press(event)
         assert app.state_manager.context.chars_in_buffer == 1
         assert len(app.state_manager.context.event_buffer) == 1
         assert app.state_manager.context.event_buffer[0].code == KEY_A
@@ -282,7 +282,7 @@ class TestOnKeyPress:
         app = _wired_app()
         app.state_manager.context.backspace_repeats = 2
         event = _make_event(EventType.KEY_PRESS, KEY_A)
-        app._on_key_press(event)
+        app.input_router.on_key_press(event)
         assert app.state_manager.context.backspace_repeats == 0
 
 
@@ -297,7 +297,7 @@ class TestOnKeyRelease:
         app._pending_auto_space = True
         app.virtual_kb = MagicMock()
         event = _make_event(EventType.KEY_RELEASE, KEY_SPACE, value=0)
-        app._on_key_release(event)
+        app.input_router.on_key_release(event)
         app.virtual_kb.tap_key.assert_called_once_with(KEY_SPACE)
         assert app._pending_auto_space is False
 
@@ -307,7 +307,7 @@ class TestOnKeyRelease:
         with patch.object(app.state_manager, 'on_shift_up', return_value=True), \
              patch.object(app, '_do_conversion') as mock_conv:
             event = _make_event(EventType.KEY_RELEASE, KEY_LEFTSHIFT, value=0)
-            app._on_key_release(event)
+            app.input_router.on_key_release(event)
             mock_conv.assert_called_once()
 
     def test_navigation_resets_state(self):
@@ -316,7 +316,7 @@ class TestOnKeyRelease:
         nav_key = next(iter(NAVIGATION_KEYS))  # pick any navigation key
         with patch.object(app.state_manager, 'on_navigation') as mock_nav:
             event = _make_event(EventType.KEY_RELEASE, nav_key, value=0)
-            app._on_key_release(event)
+            app.input_router.on_key_release(event)
             mock_nav.assert_called_once()
 
     def test_backspace_decrements_buffer(self):
@@ -324,7 +324,7 @@ class TestOnKeyRelease:
         app = _wired_app()
         app.state_manager.context.chars_in_buffer = 5
         event = _make_event(EventType.KEY_RELEASE, KEY_BACKSPACE, value=0)
-        app._on_key_release(event)
+        app.input_router.on_key_release(event)
         assert app.state_manager.context.chars_in_buffer == 4
 
     def test_backspace_resets_repeats(self):
@@ -332,7 +332,7 @@ class TestOnKeyRelease:
         app = _wired_app()
         app.state_manager.context.backspace_repeats = 5
         event = _make_event(EventType.KEY_RELEASE, KEY_BACKSPACE, value=0)
-        app._on_key_release(event)
+        app.input_router.on_key_release(event)
         assert app.state_manager.context.backspace_repeats == 0
 
     def test_backspace_no_negative(self):
@@ -340,7 +340,7 @@ class TestOnKeyRelease:
         app = _wired_app()
         assert app.state_manager.context.chars_in_buffer == 0
         event = _make_event(EventType.KEY_RELEASE, KEY_BACKSPACE, value=0)
-        app._on_key_release(event)
+        app.input_router.on_key_release(event)
         assert app.state_manager.context.chars_in_buffer == 0
 
 
@@ -354,9 +354,9 @@ class TestOnKeyRepeat:
         app = _wired_app()
         assert app.state_manager.context.backspace_repeats == 0
         event = _make_event(EventType.KEY_REPEAT, KEY_BACKSPACE, value=2)
-        app._on_key_repeat(event)
+        app.input_router.on_key_repeat(event)
         assert app.state_manager.context.backspace_repeats == 1
-        app._on_key_repeat(event)
+        app.input_router.on_key_repeat(event)
         assert app.state_manager.context.backspace_repeats == 2
 
     def test_backspace_hold_detection(self):
@@ -365,11 +365,11 @@ class TestOnKeyRepeat:
         event = _make_event(EventType.KEY_REPEAT, KEY_BACKSPACE, value=2)
         with patch.object(app.state_manager, 'on_backspace_hold') as mock_hold:
             # First two repeats — no hold yet
-            app._on_key_repeat(event)
-            app._on_key_repeat(event)
+            app.input_router.on_key_repeat(event)
+            app.input_router.on_key_repeat(event)
             mock_hold.assert_not_called()
             # Third repeat — triggers hold
-            app._on_key_repeat(event)
+            app.input_router.on_key_repeat(event)
             mock_hold.assert_called_once()
 
     def test_backspace_repeats_reset_between_sessions(self):
@@ -383,20 +383,20 @@ class TestOnKeyRepeat:
         key_a = _make_event(EventType.KEY_PRESS, KEY_A, value=1)
 
         # Session 1: 2 backspace repeats
-        app._on_key_repeat(bs_repeat)
-        app._on_key_repeat(bs_repeat)
+        app.input_router.on_key_repeat(bs_repeat)
+        app.input_router.on_key_repeat(bs_repeat)
         assert app.state_manager.context.backspace_repeats == 2
 
         # Release backspace → resets
-        app._on_key_release(bs_release)
+        app.input_router.on_key_release(bs_release)
         assert app.state_manager.context.backspace_repeats == 0
 
         # Type regular key (also resets, belt-and-suspenders)
-        app._on_key_press(key_a)
+        app.input_router.on_key_press(key_a)
         assert app.state_manager.context.backspace_repeats == 0
 
         # Session 2: 1 backspace repeat → must be 1, NOT 3
-        app._on_key_repeat(bs_repeat)
+        app.input_router.on_key_repeat(bs_repeat)
         assert app.state_manager.context.backspace_repeats == 1
 
         with patch.object(app.state_manager, 'on_backspace_hold') as mock_hold:

@@ -177,7 +177,7 @@ class TestMouseRelease:
             text="hello", owner_id=42, timestamp=time.time(),
         )
 
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is True
         assert app._prev_sel_text == "hello"
@@ -193,7 +193,7 @@ class TestMouseRelease:
             text="hello", owner_id=42, timestamp=time.time(),
         )
 
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is False
 
@@ -207,7 +207,7 @@ class TestMouseRelease:
             text="old", owner_id=1, timestamp=time.time(),
         )
 
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._prev_sel_text == "old"
         assert app._prev_sel_owner_id == 1
@@ -223,7 +223,7 @@ class TestMouseRelease:
             text="", owner_id=0, timestamp=time.time(),
         )
 
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is False
         assert app._selection_repeat_valid is False
@@ -234,14 +234,14 @@ class TestMouseRelease:
         app = _make_app()
         app.selection = None
 
-        app._on_mouse_release(_mouse_release_event())  # should not crash
+        app.input_router.on_mouse_release(_mouse_release_event())  # should not crash
 
     def test_mouse_release_exception_no_crash(self):
         """Exception during get_selection → no crash, state unchanged."""
         app = _make_app()
         app.selection.get_selection.side_effect = RuntimeError("X11 error")
 
-        app._on_mouse_release(_mouse_release_event())  # should not crash
+        app.input_router.on_mouse_release(_mouse_release_event())  # should not crash
         assert app._selection_valid is False
 
     def test_drag_select_click_then_release(self):
@@ -252,14 +252,14 @@ class TestMouseRelease:
         app._selection_baseline_initialized = True
 
         # Click at start of drag → resets sel_valid
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
         assert app._selection_valid is False
 
         # Release at end of drag → new PRIMARY detected
         app.selection.get_selection.return_value = SelectionInfo(
             text="selected text", owner_id=1, timestamp=time.time(),
         )
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is True
         assert app._prev_sel_text == "selected text"
@@ -275,7 +275,7 @@ class TestMouseRelease:
             text="hello", owner_id=99, timestamp=time.time(),
         )
 
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is True
 
@@ -312,7 +312,7 @@ class TestPollerCallback:
         assert app._selection_valid is True
 
         # Click resets
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
         assert app._selection_valid is False
 
 
@@ -321,7 +321,7 @@ class TestSelectionValidOnEvents:
         app = _make_app()
         app._selection_valid = True
 
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
 
         assert app._selection_valid is False
 
@@ -330,7 +330,7 @@ class TestSelectionValidOnEvents:
         that can cause PRIMARY to be dropped in Cinnamon/GTK apps."""
         app = _make_app()
 
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
 
         app.selection.get_selection.assert_not_called()
 
@@ -341,7 +341,7 @@ class TestSelectionValidOnEvents:
         app.selection = passive
         app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
 
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
 
         assert app._prev_sel_text == ""
         assert app._selection_valid is False
@@ -356,7 +356,7 @@ class TestSelectionValidOnEvents:
         app._prev_sel_text = ""
         app._selection_baseline_initialized = True
 
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
 
         assert app._selection_valid is True
         assert app._prev_sel_text == "word"
@@ -369,7 +369,7 @@ class TestSelectionValidOnEvents:
         app.selection = passive
         app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
 
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
 
         assert app._selection_valid is False
         assert app._prev_sel_text == "stale primary"
@@ -383,11 +383,11 @@ class TestSelectionValidOnEvents:
         app.selection = passive
         app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
 
-        app._on_mouse_click(_mouse_event())
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
         assert app._selection_valid is False
 
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
 
         assert app._selection_valid is True
         assert app._prev_sel_text == "word"
@@ -401,7 +401,7 @@ class TestSelectionValidOnEvents:
         app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
         app._prev_sel_text = "word"
 
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
 
         assert app._selection_valid is False
         assert app._prev_sel_text == "word"
@@ -414,8 +414,8 @@ class TestSelectionValidOnEvents:
         app.selection = passive
         app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
 
-        app._on_mouse_click(_mouse_event())
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is True
         assert app._prev_sel_text == "new"
@@ -429,8 +429,8 @@ class TestSelectionValidOnEvents:
         app._platform = SimpleNamespace(selection_mouse_release_tracking_enabled=True)
         app._prev_sel_text = "stale"
 
-        app._on_mouse_click(_mouse_event())
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is False
         assert app._prev_sel_text == "stale"
@@ -444,15 +444,15 @@ class TestSelectionValidOnEvents:
         app._selection_valid = True
 
         # Click/release clears the old selection.
-        app._on_mouse_click(_mouse_event())
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is False
         assert app._prev_sel_text == ""
 
         # Selecting the same text again must be considered a fresh gesture.
-        app._on_mouse_click(_mouse_event())
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is True
         assert app._prev_sel_text == "word"
@@ -468,7 +468,7 @@ class TestSelectionValidOnEvents:
         assert app._selection_valid is True
 
         # Click in Window B resets fresh
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
         assert app._selection_valid is False
 
         # Shift+Shift: fresh is False → retype/skip, not selection mode
@@ -478,13 +478,13 @@ class TestSelectionValidOnEvents:
         app = _make_app()
         app._selection_baseline_initialized = True
 
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
         assert app._selection_valid is False
 
         app.selection.get_selection.return_value = SelectionInfo(
             text="new selection", owner_id=1, timestamp=time.time(),
         )
-        app._on_mouse_release(_mouse_release_event())
+        app.input_router.on_mouse_release(_mouse_release_event())
 
         assert app._selection_valid is True
         assert app._prev_sel_text == "new selection"
@@ -494,7 +494,7 @@ class TestSelectionValidOnEvents:
         app._selection_valid = True
 
         # Arrow keys are navigation keys
-        app._on_key_release(_key_release_event(KEY_UP))
+        app.input_router.on_key_release(_key_release_event(KEY_UP))
 
         assert app._selection_valid is False
 
@@ -502,7 +502,7 @@ class TestSelectionValidOnEvents:
         app = _make_app()
         app._selection_valid = True
 
-        app._on_key_release(_key_release_event(KEY_ENTER))
+        app.input_router.on_key_release(_key_release_event(KEY_ENTER))
 
         assert app._selection_valid is False
 
@@ -512,7 +512,7 @@ class TestSelectionValidOnEvents:
         app._selection_repeat_valid = True
         app._selection_repeat_generation = app._selection_generation
 
-        app._on_key_press(_key_event(KEY_Q))
+        app.input_router.on_key_press(_key_event(KEY_Q))
 
         assert app._selection_valid is False
         assert app._selection_repeat_valid is False
@@ -521,7 +521,7 @@ class TestSelectionValidOnEvents:
         app = _make_app()
         app._selection_valid = True
 
-        app._on_key_press(_key_event(KEY_SPACE))
+        app.input_router.on_key_press(_key_event(KEY_SPACE))
 
         assert app._selection_valid is False
 
@@ -529,7 +529,7 @@ class TestSelectionValidOnEvents:
         app = _make_app()
         app._selection_valid = True
 
-        app._on_key_press(_key_event(KEY_BACKSPACE))
+        app.input_router.on_key_press(_key_event(KEY_BACKSPACE))
 
         assert app._selection_valid is False
 
@@ -538,7 +538,7 @@ class TestSelectionValidOnEvents:
         app = _make_app()
         app._selection_valid = True
 
-        app._on_key_press(_key_event(KEY_LEFTSHIFT))
+        app.input_router.on_key_press(_key_event(KEY_LEFTSHIFT))
 
         assert app._selection_valid is True
 
@@ -552,7 +552,7 @@ class TestSelectionValidOnEvents:
 
         for code in (KEY_LEFTALT, KEY_LEFTCTRL, KEY_LEFTMETA, KEY_F5, KEY_DELETE):
             app = _make_app()
-            app._on_key_press(_key_event(code))
+            app.input_router.on_key_press(_key_event(code))
             assert app.state_manager.context.chars_in_buffer == 0, \
                 f"key code {code} should not be buffered"
             assert len(app.state_manager.context.event_buffer) == 0, \
@@ -562,7 +562,7 @@ class TestSelectionValidOnEvents:
         """Sanity check: regular letter keys ARE still added to the buffer."""
         app = _make_app()
 
-        app._on_key_press(_key_event(KEY_Q))
+        app.input_router.on_key_press(_key_event(KEY_Q))
 
         assert app.state_manager.context.chars_in_buffer == 1
         assert len(app.state_manager.context.event_buffer) == 1
@@ -824,7 +824,7 @@ class TestStickyRetypeBuffer:
         app = _make_app()
         app._last_retype_events = [MagicMock()]
 
-        app._on_key_press(_key_event(KEY_Q))
+        app.input_router.on_key_press(_key_event(KEY_Q))
 
         assert app._last_retype_events == []
 
@@ -832,7 +832,7 @@ class TestStickyRetypeBuffer:
         app = _make_app()
         app._last_retype_events = [MagicMock()]
 
-        app._on_key_press(_key_event(KEY_SPACE))
+        app.input_router.on_key_press(_key_event(KEY_SPACE))
 
         assert app._last_retype_events == []
 
@@ -840,7 +840,7 @@ class TestStickyRetypeBuffer:
         app = _make_app()
         app._last_retype_events = [MagicMock()]
 
-        app._on_key_press(_key_event(KEY_BACKSPACE))
+        app.input_router.on_key_press(_key_event(KEY_BACKSPACE))
 
         assert app._last_retype_events == []
 
@@ -848,7 +848,7 @@ class TestStickyRetypeBuffer:
         app = _make_app()
         app._last_retype_events = [MagicMock()]
 
-        app._on_key_release(_key_release_event(KEY_LEFT))
+        app.input_router.on_key_release(_key_release_event(KEY_LEFT))
 
         assert app._last_retype_events == []
 
@@ -856,7 +856,7 @@ class TestStickyRetypeBuffer:
         app = _make_app()
         app._last_retype_events = [MagicMock()]
 
-        app._on_key_release(_key_release_event(KEY_ENTER))
+        app.input_router.on_key_release(_key_release_event(KEY_ENTER))
 
         assert app._last_retype_events == []
 
@@ -864,7 +864,7 @@ class TestStickyRetypeBuffer:
         app = _make_app()
         app._last_retype_events = [MagicMock()]
 
-        app._on_mouse_click(_mouse_event())
+        app.input_router.on_mouse_click(_mouse_event())
 
         assert app._last_retype_events == []
 
@@ -873,7 +873,7 @@ class TestStickyRetypeBuffer:
         app = _make_app()
         app._last_retype_events = [MagicMock()]
 
-        app._on_key_press(_key_event(KEY_LEFTSHIFT))
+        app.input_router.on_key_press(_key_event(KEY_LEFTSHIFT))
 
         assert len(app._last_retype_events) == 1
 
@@ -883,7 +883,7 @@ class TestStickyRetypeBuffer:
         app = _make_app()
         app._last_retype_events = [MagicMock()]
 
-        app._on_key_press(_key_event(KEY_LEFTALT))
+        app.input_router.on_key_press(_key_event(KEY_LEFTALT))
 
         assert len(app._last_retype_events) == 1
 
