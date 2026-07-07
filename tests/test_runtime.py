@@ -24,6 +24,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    create_tray_indicator,
     run_evdev_event_loop,
     stop_runtime_resources,
 )
@@ -236,6 +237,117 @@ def test_run_evdev_event_loop_propagates_polling_errors():
         assert str(exc) == "poll failed"
     else:
         raise AssertionError("expected polling error")
+
+
+def test_create_tray_indicator_builds_context_menu_sets_layout_and_shows(monkeypatch):
+    created = {}
+    menu = object()
+
+    class FakeTrayIcon:
+        def __init__(self, *, event_bus, config, app):
+            self.event_bus = event_bus
+            self.config = config
+            self.app = app
+            self.context_menu = None
+            self.layout_name = None
+            self.shown = False
+            created["tray"] = self
+
+        def set_context_menu(self, value):
+            self.context_menu = value
+
+        def set_layout(self, value):
+            self.layout_name = value
+
+        def show(self):
+            self.shown = True
+
+    class FakeContextMenu:
+        def __init__(self, *, config, event_bus, app):
+            self.config = config
+            self.event_bus = event_bus
+            self.app = app
+            created["menu_builder"] = self
+
+        def build(self):
+            return menu
+
+    tray_module = types.ModuleType("lswitch.ui.tray_icon")
+    tray_module.TrayIcon = FakeTrayIcon
+    menu_module = types.ModuleType("lswitch.ui.context_menu")
+    menu_module.ContextMenu = FakeContextMenu
+    monkeypatch.setitem(sys.modules, "lswitch.ui.tray_icon", tray_module)
+    monkeypatch.setitem(sys.modules, "lswitch.ui.context_menu", menu_module)
+
+    event_bus = object()
+    config = object()
+    qt_app = object()
+    owner_app = object()
+    xkb = MagicMock()
+    xkb.get_current_layout.return_value = types.SimpleNamespace(name="ru")
+
+    tray = create_tray_indicator(
+        event_bus=event_bus,
+        config=config,
+        qt_app=qt_app,
+        owner_app=owner_app,
+        xkb=xkb,
+    )
+
+    assert tray is created["tray"]
+    assert tray.event_bus is event_bus
+    assert tray.config is config
+    assert tray.app is qt_app
+    assert tray.context_menu is menu
+    assert tray.layout_name == "ru"
+    assert tray.shown is True
+    assert created["menu_builder"].config is config
+    assert created["menu_builder"].event_bus is event_bus
+    assert created["menu_builder"].app is owner_app
+
+
+def test_create_tray_indicator_tolerates_layout_lookup_errors(monkeypatch):
+    class FakeTrayIcon:
+        def __init__(self, **kwargs):
+            self.layout_name = None
+            self.shown = False
+
+        def set_context_menu(self, value):
+            pass
+
+        def set_layout(self, value):
+            self.layout_name = value
+
+        def show(self):
+            self.shown = True
+
+    class FakeContextMenu:
+        def __init__(self, **kwargs):
+            pass
+
+        def build(self):
+            return object()
+
+    tray_module = types.ModuleType("lswitch.ui.tray_icon")
+    tray_module.TrayIcon = FakeTrayIcon
+    menu_module = types.ModuleType("lswitch.ui.context_menu")
+    menu_module.ContextMenu = FakeContextMenu
+    monkeypatch.setitem(sys.modules, "lswitch.ui.tray_icon", tray_module)
+    monkeypatch.setitem(sys.modules, "lswitch.ui.context_menu", menu_module)
+
+    xkb = MagicMock()
+    xkb.get_current_layout.side_effect = RuntimeError("layout unavailable")
+
+    tray = create_tray_indicator(
+        event_bus=object(),
+        config=object(),
+        qt_app=object(),
+        owner_app=object(),
+        xkb=xkb,
+    )
+
+    assert tray.layout_name is None
+    assert tray.shown is True
 
 
 def test_stop_runtime_resources_stops_owned_resources_and_releases_pid_lock():

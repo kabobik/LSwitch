@@ -220,6 +220,34 @@ def run_evdev_event_loop(
             event_manager.handle_raw_event(event, device.name)
 
 
+def create_tray_indicator(
+    *,
+    event_bus,
+    config,
+    qt_app,
+    owner_app,
+    xkb,
+):
+    """Create and show the Qt tray indicator for the running application."""
+    from lswitch.ui.context_menu import ContextMenu
+    from lswitch.ui.tray_icon import TrayIcon
+
+    tray = TrayIcon(event_bus=event_bus, config=config, app=qt_app)
+
+    menu_obj = ContextMenu(config=config, event_bus=event_bus, app=owner_app)
+    menu = menu_obj.build()
+    tray.set_context_menu(menu)
+
+    try:
+        current = xkb.get_current_layout() if xkb else None
+        tray.set_layout(current.name if current else "")
+    except Exception:
+        pass
+
+    tray.show()
+    return tray
+
+
 def stop_runtime_resources(
     *,
     selection_poller,

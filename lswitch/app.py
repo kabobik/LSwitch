@@ -17,6 +17,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    create_tray_indicator,
     run_evdev_event_loop,
     stop_runtime_resources,
 )
@@ -818,22 +819,13 @@ class LSwitchApp:
 
         tray = None
         if show_tray:
-            from lswitch.ui.tray_icon import TrayIcon
-            from lswitch.ui.context_menu import ContextMenu
-
-            tray = TrayIcon(event_bus=self.event_bus, config=self.config, app=qt_app)
-
-            menu_obj = ContextMenu(config=self.config, event_bus=self.event_bus, app=self)
-            menu = menu_obj.build()
-            tray.set_context_menu(menu)
-
-            try:
-                current = self.xkb.get_current_layout() if self.xkb else None
-                tray.set_layout(current.name if current else "")
-            except Exception:
-                pass
-
-            tray.show()
+            tray = create_tray_indicator(
+                event_bus=self.event_bus,
+                config=self.config,
+                qt_app=qt_app,
+                owner_app=self,
+                xkb=self.xkb,
+            )
 
         # APP_QUIT → exit Qt event loop
         def _on_quit(event):
