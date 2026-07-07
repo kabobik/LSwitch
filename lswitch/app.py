@@ -234,7 +234,9 @@ class LSwitchApp:
             get_pending_auto_space=self._get_pending_auto_space,
             set_pending_auto_space=self._set_pending_auto_space,
             clear_last_retype_events=self._clear_last_retype_events,
-            on_key_release=self._on_key_release,
+            clear_last_auto_marker=self._clear_last_auto_marker,
+            inject_deferred_space=self._inject_deferred_space,
+            request_conversion=lambda: self._do_conversion(),
             on_mouse_click=self._on_mouse_click,
             on_mouse_release=self._on_mouse_release,
         )
@@ -522,49 +524,20 @@ class LSwitchApp:
     def _clear_last_retype_events(self) -> None:
         self._last_retype_events = []
 
+    def _clear_last_auto_marker(self) -> None:
+        self._last_auto_marker = None
+
+    def _inject_deferred_space(self) -> None:
+        from lswitch.core.event_manager import KEY_SPACE
+
+        if self.virtual_kb:
+            self.virtual_kb.tap_key(KEY_SPACE)
+
     def _on_key_press(self, event):
         self.input_router.on_key_press(event)
 
     def _on_key_release(self, event):
-        from lswitch.core.event_manager import (
-            SHIFT_KEYS, NAVIGATION_KEYS, KEY_BACKSPACE, KEY_ENTER, KEY_SPACE,
-        )
-
-        data = event.data
-        if data.code == KEY_SPACE and getattr(self, '_pending_auto_space', False):
-            self._pending_auto_space = False
-            try:
-                if self.virtual_kb:
-                    self.virtual_kb.tap_key(KEY_SPACE)
-            except Exception as exc:
-                logger.error("Failed to inject deferred auto-space: %s", exc)
-
-        if data.code in SHIFT_KEYS:
-            is_double = self.state_manager.on_shift_up()
-            if is_double:
-                logger.debug(
-                    "DoubleShift detected → _do_conversion() "
-                    "[sel_valid=%s, sel_repeat=%s, chars=%d]",
-                    self._selection_valid,
-                    self._selection_repeat_valid,
-                    self.state_manager.context.chars_in_buffer,
-                )
-                self._do_conversion()
-        elif data.code in NAVIGATION_KEYS:
-            self._last_auto_marker = None
-            self._selection_valid = False
-            self._clear_selection_repeat()
-            self._last_retype_events = []
-            self.state_manager.on_navigation()
-        elif data.code == KEY_ENTER:
-            self._last_auto_marker = None
-            self._selection_valid = False
-            self._clear_selection_repeat()
-            self._last_retype_events = []
-            self.state_manager.on_navigation()
-        elif data.code == KEY_BACKSPACE:
-            self.state_manager.context.backspace_repeats = 0
-            self.typed_buffer.decrement_count(self.state_manager.context)
+        self.input_router.on_key_release(event)
 
     def _on_key_repeat(self, event):
         self.input_router.on_key_repeat(event)

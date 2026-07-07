@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING
 from lswitch.core.events import Event
 from lswitch.core.event_manager import (
     KEY_BACKSPACE,
+    KEY_ENTER,
     KEY_SPACE,
     MODIFIER_KEYS,
+    NAVIGATION_KEYS,
     SHIFT_KEYS,
 )
 from lswitch.input.key_mapper import keycode_to_char
@@ -43,7 +45,9 @@ class InputEventRouter:
         get_pending_auto_space: Callable[[], bool],
         set_pending_auto_space: Callable[[bool], None],
         clear_last_retype_events: Callable[[], None],
-        on_key_release: Callable[[Event], None],
+        clear_last_auto_marker: Callable[[], None],
+        inject_deferred_space: Callable[[], None],
+        request_conversion: Callable[[], None],
         on_mouse_click: Callable[[Event], None],
         on_mouse_release: Callable[[Event], None],
     ):
@@ -56,7 +60,9 @@ class InputEventRouter:
         self.get_pending_auto_space = get_pending_auto_space
         self.set_pending_auto_space = set_pending_auto_space
         self.clear_last_retype_events = clear_last_retype_events
-        self._on_key_release = on_key_release
+        self.clear_last_auto_marker = clear_last_auto_marker
+        self.inject_deferred_space = inject_deferred_space
+        self.request_conversion = request_conversion
         self._on_mouse_click = on_mouse_click
         self._on_mouse_release = on_mouse_release
 
@@ -102,7 +108,32 @@ class InputEventRouter:
             self._append_text_event(data)
 
     def on_key_release(self, event: Event) -> None:
-        self._on_key_release(event)
+        data = event.data
+        if data.code == KEY_SPACE and self.get_pending_auto_space():
+            self.set_pending_auto_space(False)
+            try:
+                self.inject_deferred_space()
+            except Exception as exc:
+                logger.error("Failed to inject deferred auto-space: %s", exc)
+
+        if data.code in SHIFT_KEYS:
+            is_double = self.state_manager.on_shift_up()
+            if is_double:
+                logger.debug(
+                    "DoubleShift detected → _do_conversion() "
+                    "[sel_valid=%s, sel_repeat=%s, chars=%d]",
+                    self.selection_tracker.valid,
+                    self.selection_tracker.repeat_valid,
+                    self.state_manager.context.chars_in_buffer,
+                )
+                self.request_conversion()
+        elif data.code in NAVIGATION_KEYS:
+            self._handle_navigation()
+        elif data.code == KEY_ENTER:
+            self._handle_navigation()
+        elif data.code == KEY_BACKSPACE:
+            self.state_manager.context.backspace_repeats = 0
+            self.typed_buffer.decrement_count(self.state_manager.context)
 
     def on_key_repeat(self, event: Event) -> None:
         data = event.data
@@ -146,3 +177,8 @@ class InputEventRouter:
         self.selection_tracker.set_valid(False)
         self.selection_tracker.clear_repeat()
         self.clear_last_retype_events()
+
+    def _handle_navigation(self) -> None:
+        self.clear_last_auto_marker()
+        self._clear_selection_state()
+        self.state_manager.on_navigation()
