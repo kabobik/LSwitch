@@ -379,6 +379,31 @@ def run_qt_runtime_loop(
         thread.join(timeout=join_timeout)
 
 
+def run_selected_runtime_loop(
+    *,
+    runtime_plan,
+    headless: bool,
+    qt_app,
+    argv,
+    run_qt_loop,
+    run_evdev_loop,
+    ensure_qt_application=None,
+) -> None:
+    """Run the event loop selected by the current platform runtime plan."""
+    if runtime_plan.uses_qt_event_loop:
+        if qt_app is None:
+            if ensure_qt_application is None:
+                from lswitch.ui.qt_bridge import ensure_qt_application
+            qt_app = ensure_qt_application(argv)
+        run_qt_loop(qt_app, show_tray=runtime_plan.show_tray)
+    elif headless:
+        run_evdev_loop()
+    else:
+        if ensure_qt_application is None:
+            from lswitch.ui.qt_bridge import ensure_qt_application
+        run_qt_loop(ensure_qt_application(argv), show_tray=True)
+
+
 def stop_runtime_resources(
     *,
     selection_poller,

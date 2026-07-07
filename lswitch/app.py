@@ -21,6 +21,7 @@ from lswitch.runtime import (
     install_reload_signal_handler,
     run_evdev_event_loop,
     run_qt_runtime_loop,
+    run_selected_runtime_loop,
     start_runtime_resources,
     stop_runtime_resources,
 )
@@ -780,17 +781,14 @@ class LSwitchApp:
             log=logger,
         )
 
-        if runtime_plan.uses_qt_event_loop:
-            qt_app = qt_bootstrap.qt_app
-            if qt_app is None:
-                from lswitch.ui.qt_bridge import ensure_qt_application
-
-                qt_app = ensure_qt_application(sys.argv)
-            self._run_with_qt_loop(qt_app, show_tray=runtime_plan.show_tray)
-        elif self.headless:
-            self._run_evdev_loop()
-        else:
-            self._run_with_gui()
+        run_selected_runtime_loop(
+            runtime_plan=runtime_plan,
+            headless=self.headless,
+            qt_app=qt_bootstrap.qt_app,
+            argv=sys.argv,
+            run_qt_loop=self._run_with_qt_loop,
+            run_evdev_loop=self._run_evdev_loop,
+        )
 
     def _run_evdev_loop(self):
         """Evdev event loop (blocking, main thread)."""
@@ -804,13 +802,6 @@ class LSwitchApp:
             pass
         finally:
             self.stop()
-
-    def _run_with_gui(self):
-        """Run evdev in background thread + Qt event loop in main thread."""
-        from lswitch.ui.qt_bridge import ensure_qt_application
-
-        qt_app = ensure_qt_application(sys.argv)
-        self._run_with_qt_loop(qt_app, show_tray=True)
 
     def _run_with_qt_loop(self, qt_app, show_tray: bool):
         """Run evdev in a worker thread while the main thread runs Qt."""

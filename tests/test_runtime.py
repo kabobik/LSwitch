@@ -31,6 +31,7 @@ from lswitch.runtime import (
     install_reload_signal_handler,
     run_evdev_event_loop,
     run_qt_runtime_loop,
+    run_selected_runtime_loop,
     start_runtime_resources,
     stop_runtime_resources,
 )
@@ -627,6 +628,101 @@ def test_run_qt_runtime_loop_skips_tray_when_disabled(monkeypatch):
     create_tray.assert_not_called()
     qt_app.setQuitOnLastWindowClosed.assert_called_once_with(False)
     qt_app.exec.assert_called_once_with()
+
+
+def test_run_selected_runtime_loop_uses_existing_qt_app_for_qt_plan():
+    qt_app = object()
+    run_qt_loop = MagicMock()
+    run_evdev_loop = MagicMock()
+    ensure_qt_application = MagicMock()
+
+    run_selected_runtime_loop(
+        runtime_plan=types.SimpleNamespace(
+            uses_qt_event_loop=True,
+            show_tray=False,
+        ),
+        headless=False,
+        qt_app=qt_app,
+        argv=["lswitch"],
+        run_qt_loop=run_qt_loop,
+        run_evdev_loop=run_evdev_loop,
+        ensure_qt_application=ensure_qt_application,
+    )
+
+    run_qt_loop.assert_called_once_with(qt_app, show_tray=False)
+    run_evdev_loop.assert_not_called()
+    ensure_qt_application.assert_not_called()
+
+
+def test_run_selected_runtime_loop_runs_headless_evdev_loop():
+    run_qt_loop = MagicMock()
+    run_evdev_loop = MagicMock()
+    ensure_qt_application = MagicMock()
+
+    run_selected_runtime_loop(
+        runtime_plan=types.SimpleNamespace(
+            uses_qt_event_loop=False,
+            show_tray=False,
+        ),
+        headless=True,
+        qt_app=None,
+        argv=["lswitch", "--headless"],
+        run_qt_loop=run_qt_loop,
+        run_evdev_loop=run_evdev_loop,
+        ensure_qt_application=ensure_qt_application,
+    )
+
+    run_evdev_loop.assert_called_once_with()
+    run_qt_loop.assert_not_called()
+    ensure_qt_application.assert_not_called()
+
+
+def test_run_selected_runtime_loop_creates_qt_app_for_gui_fallback():
+    qt_app = object()
+    run_qt_loop = MagicMock()
+    run_evdev_loop = MagicMock()
+    ensure_qt_application = MagicMock(return_value=qt_app)
+    argv = ["lswitch"]
+
+    run_selected_runtime_loop(
+        runtime_plan=types.SimpleNamespace(
+            uses_qt_event_loop=False,
+            show_tray=False,
+        ),
+        headless=False,
+        qt_app=None,
+        argv=argv,
+        run_qt_loop=run_qt_loop,
+        run_evdev_loop=run_evdev_loop,
+        ensure_qt_application=ensure_qt_application,
+    )
+
+    ensure_qt_application.assert_called_once_with(argv)
+    run_qt_loop.assert_called_once_with(qt_app, show_tray=True)
+    run_evdev_loop.assert_not_called()
+
+
+def test_run_selected_runtime_loop_creates_qt_app_when_qt_plan_has_no_bootstrap_app():
+    qt_app = object()
+    run_qt_loop = MagicMock()
+    ensure_qt_application = MagicMock(return_value=qt_app)
+    argv = ["lswitch"]
+
+    run_selected_runtime_loop(
+        runtime_plan=types.SimpleNamespace(
+            uses_qt_event_loop=True,
+            show_tray=True,
+        ),
+        headless=True,
+        qt_app=None,
+        argv=argv,
+        run_qt_loop=run_qt_loop,
+        run_evdev_loop=MagicMock(),
+        ensure_qt_application=ensure_qt_application,
+    )
+
+    ensure_qt_application.assert_called_once_with(argv)
+    run_qt_loop.assert_called_once_with(qt_app, show_tray=True)
 
 
 def test_stop_runtime_resources_stops_owned_resources_and_releases_pid_lock():
