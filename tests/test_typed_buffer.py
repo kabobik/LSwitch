@@ -74,3 +74,58 @@ def test_last_word_returns_text_after_last_space():
 
     assert token.text == "hb"
     assert [event.code for event in token.events] == [KEY_H, KEY_B]
+
+
+def test_prepare_retype_buffer_restores_sticky_when_context_empty():
+    context = StateContext()
+    service = TypedBufferService()
+    sticky = [_key(KEY_G), _key(KEY_H)]
+
+    result = service.prepare_retype_buffer(
+        context,
+        sticky_events=sticky,
+        selection_valid=False,
+    )
+
+    assert result.restored_from_sticky is True
+    assert result.events == sticky
+    assert result.count == 2
+    assert context.event_buffer == sticky
+    assert context.chars_in_buffer == 2
+
+
+def test_prepare_retype_buffer_trims_to_last_word_and_keeps_trailing_space():
+    context = StateContext()
+    service = TypedBufferService()
+    for code in [KEY_G, KEY_SPACE, KEY_H, KEY_B, KEY_SPACE]:
+        service.append_event(context, _key(code), shifted=False)
+
+    result = service.prepare_retype_buffer(
+        context,
+        sticky_events=[],
+        selection_valid=False,
+    )
+
+    assert result.trimmed_to_last_word is True
+    assert result.original_count == 5
+    assert result.count == 3
+    assert result.trailing_space_count == 1
+    assert [event.code for event in result.events] == [KEY_H, KEY_B, KEY_SPACE]
+    assert context.chars_in_buffer == 3
+
+
+def test_prepare_retype_buffer_does_not_trim_selection_mode():
+    context = StateContext()
+    service = TypedBufferService()
+    for code in [KEY_G, KEY_SPACE, KEY_H]:
+        service.append_event(context, _key(code), shifted=False)
+
+    result = service.prepare_retype_buffer(
+        context,
+        sticky_events=[],
+        selection_valid=True,
+    )
+
+    assert result.trimmed_to_last_word is False
+    assert result.count == 3
+    assert [event.code for event in result.events] == [KEY_G, KEY_SPACE, KEY_H]

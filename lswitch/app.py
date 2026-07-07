@@ -845,51 +845,36 @@ class LSwitchApp:
             self._last_auto_marker = None
 
         try:
-            # Save buffer before convert (reset() will clear it)
-            saved_events = list(self.state_manager.context.event_buffer)
-            saved_count = self.state_manager.context.chars_in_buffer
-
-            # Restore sticky buffer if context buffer is empty (repeat Shift+Shift)
-            if saved_count == 0 and self._last_retype_events:
-                saved_events = list(self._last_retype_events)
-                saved_count = len(saved_events)
-                self.state_manager.context.event_buffer = list(saved_events)
-                self.state_manager.context.chars_in_buffer = saved_count
-                logger.debug(
-                    "DoConversion: restored sticky buffer → chars=%d",
-                    saved_count,
+            try:
+                prepared_buffer = self.typed_buffer.prepare_retype_buffer(
+                    self.state_manager.context,
+                    sticky_events=self._last_retype_events,
+                    selection_valid=selection_valid_for_convert,
+                    current_layout=layout_info,
+                    xkb=self.xkb,
                 )
+            except Exception as exc:
+                logger.debug("DoConversion: trim skipped: %s", exc)
+                prepared_buffer = None
 
-            # ---- Trim to last word for retype mode ----
-            # If buffer has multiple words (contains space), trim to last word only.
-            # Selection mode uses clipboard, not buffer — so trimming applies only
-            # when retype would be chosen (chars > 0 and selection not valid).
-            if saved_count > 0 and not selection_valid_for_convert:
-                try:
-                    _, last_word_events = self._extract_last_word_events(
-                        self.xkb.get_current_layout() if self.xkb else None
+            if prepared_buffer is None:
+                saved_events = list(self.state_manager.context.event_buffer)
+                saved_count = self.state_manager.context.chars_in_buffer
+            else:
+                saved_events = prepared_buffer.events
+                saved_count = prepared_buffer.count
+                if prepared_buffer.restored_from_sticky:
+                    logger.debug(
+                        "DoConversion: restored sticky buffer → chars=%d",
+                        saved_count,
                     )
-                    if last_word_events and len(last_word_events) < saved_count:
-                        # fix-1B: include trailing spaces for correct backspace count
-                        from lswitch.core.event_manager import KEY_SPACE as _KS
-                        trailing = []
-                        for ev in reversed(saved_events):
-                            if ev.code == _KS:
-                                trailing.append(ev)
-                            else:
-                                break
-                        trailing.reverse()
-                        trimmed = last_word_events + trailing
-                        logger.debug(
-                            "DoConversion: trim buffer to last word → %d events (was %d, trailing_spaces=%d)",
-                            len(trimmed), saved_count, len(trailing),
-                        )
-                        saved_events = trimmed
-                        saved_count = len(trimmed)
-                        self.state_manager.context.event_buffer = list(trimmed)
-                        self.state_manager.context.chars_in_buffer = saved_count
-                except Exception as exc:
-                    logger.debug("DoConversion: trim skipped: %s", exc)
+                if prepared_buffer.trimmed_to_last_word:
+                    logger.debug(
+                        "DoConversion: trim buffer to last word → %d events (was %d, trailing_spaces=%d)",
+                        saved_count,
+                        prepared_buffer.original_count,
+                        prepared_buffer.trailing_space_count,
+                    )
 
             logger.debug(
                 "DoConversion: selection_valid=%s, selection_repeat=%s, "
