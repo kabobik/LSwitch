@@ -11,6 +11,7 @@ from lswitch.core.auto_marker import AutoConversionMarker
 if TYPE_CHECKING:
     from lswitch.input.virtual_keyboard import VirtualKeyboard
     from lswitch.platform.xkb_adapter import IXKBAdapter
+    from lswitch.core.learning_service import LearningService
     from lswitch.intelligence.user_dictionary import UserDictionary
 
 logger = logging.getLogger(__name__)
@@ -28,27 +29,22 @@ class UndoAutoConversionUseCase:
         virtual_kb: "VirtualKeyboard",
         xkb: "IXKBAdapter",
         user_dict: "UserDictionary | None" = None,
+        learning_service: "LearningService | None" = None,
         timing: dict | None = None,
         debug: bool = False,
     ):
         self.virtual_kb = virtual_kb
         self.xkb = xkb
-        self.user_dict = user_dict
+        if learning_service is None:
+            from lswitch.core.learning_service import LearningService
+
+            learning_service = LearningService(user_dict, debug=debug)
+        self.learning_service = learning_service
         self.timing = timing or {}
         self.debug = debug
 
     def execute(self, marker: AutoConversionMarker) -> bool:
-        if self.user_dict is not None:
-            self.user_dict.add_correction(
-                marker.original_word,
-                marker.original_lang,
-                debug=self.debug,
-            )
-            logger.info(
-                "Correction: '%s' (%s) — keep +2",
-                marker.original_word,
-                marker.original_lang,
-            )
+        self.learning_service.record_auto_undo_correction(marker)
 
         try:
             self.virtual_kb.tap_key(
