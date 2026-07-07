@@ -8,6 +8,7 @@ from lswitch.core.auto_marker import AutoConversionMarker
 from lswitch.core.conversion_use_cases import (
     KEY_BACKSPACE,
     KEY_SPACE,
+    ManualConversionPreparer,
     ManualConversionUseCase,
     PostConversionStateUpdater,
     RecentAutoConversionUseCase,
@@ -15,6 +16,7 @@ from lswitch.core.conversion_use_cases import (
     UndoAutoConversionUseCase,
 )
 from lswitch.core.events import KeyEventData
+from lswitch.core.layout_service import LayoutService
 from lswitch.core.learning_service import PendingManualLearning
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.states import State, StateContext
@@ -127,6 +129,90 @@ def test_recent_auto_conversion_undo_skips_when_user_typed_more_text():
 
     assert result.handled is False
     undo.execute.assert_not_called()
+
+
+def test_manual_conversion_preparer_prepares_learning_and_buffer():
+    context = StateContext()
+    context.event_buffer = [
+        KeyEventData(code=34, value=1, device_name="test"),
+        KeyEventData(code=35, value=1, device_name="test"),
+    ]
+    context.chars_in_buffer = 2
+    pending = PendingManualLearning("gh", "en", False)
+    learning_service = MagicMock()
+    learning_service.prepare_pending_manual_learning.return_value = pending
+    xkb = MagicMock()
+    xkb.get_current_layout.return_value = LayoutInfo("en", 0, "us")
+    xkb.keycode_to_char.side_effect = lambda code, _layout: keycode_to_char(code)
+    typed_buffer = TypedBufferService()
+
+    preparation = ManualConversionPreparer(
+        typed_buffer=typed_buffer,
+        learning_service=learning_service,
+        layout_service=LayoutService(xkb),
+        selection=None,
+        xkb=xkb,
+        decode_events=typed_buffer.decode,
+    ).prepare(
+        context=context,
+        selection_valid_for_convert=False,
+        raw_selection_valid=False,
+        raw_selection_repeat_valid=False,
+        has_auto_marker=False,
+        sticky_events=[],
+        extract_last_word=lambda _layout: ("gh", list(context.event_buffer)),
+    )
+
+    assert preparation.selection_valid_for_convert is False
+    assert preparation.saved_events == context.event_buffer
+    assert preparation.saved_count == 2
+    assert preparation.pending_manual_learning is pending
+    learning_service.prepare_pending_manual_learning.assert_called_once()
+
+
+def test_manual_conversion_preparer_trims_retype_buffer_to_last_word():
+    context = StateContext()
+    context.event_buffer = [
+        KeyEventData(code=30, value=1, device_name="test"),
+        KeyEventData(code=KEY_SPACE, value=1, device_name="test"),
+        KeyEventData(code=34, value=1, device_name="test"),
+        KeyEventData(code=35, value=1, device_name="test"),
+        KeyEventData(code=48, value=1, device_name="test"),
+        KeyEventData(code=KEY_SPACE, value=1, device_name="test"),
+    ]
+    context.chars_in_buffer = len(context.event_buffer)
+    learning_service = MagicMock()
+    xkb = MagicMock()
+    xkb.get_current_layout.return_value = LayoutInfo("en", 0, "us")
+    xkb.keycode_to_char.side_effect = lambda code, _layout: keycode_to_char(code)
+    typed_buffer = TypedBufferService()
+
+    preparation = ManualConversionPreparer(
+        typed_buffer=typed_buffer,
+        learning_service=learning_service,
+        layout_service=LayoutService(xkb),
+        selection=None,
+        xkb=xkb,
+        decode_events=typed_buffer.decode,
+    ).prepare(
+        context=context,
+        selection_valid_for_convert=False,
+        raw_selection_valid=False,
+        raw_selection_repeat_valid=False,
+        has_auto_marker=False,
+        sticky_events=[],
+        extract_last_word=lambda _layout: ("ghb", []),
+    )
+
+    assert [event.code for event in preparation.saved_events] == [
+        34,
+        35,
+        48,
+        KEY_SPACE,
+    ]
+    assert preparation.saved_count == 4
+    assert context.event_buffer == preparation.saved_events
+    assert context.chars_in_buffer == 4
 
 
 def test_post_conversion_marks_repeat_for_successful_selection_conversion():

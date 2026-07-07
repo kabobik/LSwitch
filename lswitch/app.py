@@ -686,24 +686,9 @@ class LSwitchApp:
         if self.state_manager.state != State.CONVERTING:
             return
 
-        chars_in_buffer = self.state_manager.context.chars_in_buffer
         selection_valid_for_convert = self.selection_tracker.effective_valid()
-        layout_info = None
-        try:
-            layout_info = self.xkb.get_current_layout() if self.xkb else None
-        except Exception:
-            layout_info = None
-        from lswitch.core.layout_service import LayoutService
-
-        pending_manual_learning = self._learning().prepare_pending_manual_learning(
-            chars_in_buffer=chars_in_buffer,
-            selection_valid=selection_valid_for_convert,
-            has_auto_marker=self._last_auto_marker is not None,
-            layout_info=layout_info,
-            extract_last_word=self._extract_last_word_events,
-            selection=self.selection,
-            layout_to_lang=LayoutService.layout_to_lang,
-        )
+        chars_in_buffer = self.state_manager.context.chars_in_buffer
+        had_auto_marker = self._last_auto_marker is not None
 
         # --- Case A: undo of recent auto-conversion → penalise ---
         if self._last_auto_marker is not None:
@@ -731,52 +716,28 @@ class LSwitchApp:
                 return
 
         try:
-            try:
-                prepared_buffer = self.typed_buffer.prepare_retype_buffer(
-                    self.state_manager.context,
-                    sticky_events=self._last_retype_events,
-                    selection_valid=selection_valid_for_convert,
-                    current_layout=layout_info,
-                    xkb=self.xkb,
-                )
-            except Exception as exc:
-                logger.debug("DoConversion: trim skipped: %s", exc)
-                prepared_buffer = None
-
-            if prepared_buffer is None:
-                saved_events = list(self.state_manager.context.event_buffer)
-                saved_count = self.state_manager.context.chars_in_buffer
-            else:
-                saved_events = prepared_buffer.events
-                saved_count = prepared_buffer.count
-                if prepared_buffer.restored_from_sticky:
-                    logger.debug(
-                        "DoConversion: restored sticky buffer → chars=%d",
-                        saved_count,
-                    )
-                if prepared_buffer.trimmed_to_last_word:
-                    logger.debug(
-                        "DoConversion: trim buffer to last word → %d events (was %d, trailing_spaces=%d)",
-                        saved_count,
-                        prepared_buffer.original_count,
-                        prepared_buffer.trailing_space_count,
-                    )
-
-            logger.debug(
-                "DoConversion: selection_valid=%s, selection_repeat=%s, "
-                "effective_selection=%s, chars_in_buffer=%d, "
-                "saved_events=%d, sticky=%d, buffer=%r",
-                self._selection_valid,
-                self._selection_repeat_valid,
-                selection_valid_for_convert,
-                saved_count,
-                len(saved_events), len(self._last_retype_events),
-                self._decode_buffer(saved_events),
-            )
-
             from lswitch.core.conversion_use_cases import (
+                ManualConversionPreparer,
                 ManualConversionUseCase,
                 PostConversionStateUpdater,
+            )
+            from lswitch.core.layout_service import LayoutService
+
+            preparation = ManualConversionPreparer(
+                typed_buffer=self.typed_buffer,
+                learning_service=self._learning(),
+                layout_service=LayoutService(self.xkb),
+                selection=self.selection,
+                xkb=self.xkb,
+                decode_events=self._decode_buffer,
+            ).prepare(
+                context=self.state_manager.context,
+                selection_valid_for_convert=selection_valid_for_convert,
+                raw_selection_valid=self._selection_valid,
+                raw_selection_repeat_valid=self._selection_repeat_valid,
+                has_auto_marker=had_auto_marker,
+                sticky_events=self._last_retype_events,
+                extract_last_word=self._extract_last_word_events,
             )
 
             updater = PostConversionStateUpdater(self.selection_tracker)
@@ -787,10 +748,12 @@ class LSwitchApp:
             )
             result = manual_conversion.execute(
                 context=self.state_manager.context,
-                selection_valid_for_convert=selection_valid_for_convert,
-                saved_events=saved_events,
-                saved_count=saved_count,
-                pending_manual_learning=pending_manual_learning,
+                selection_valid_for_convert=(
+                    preparation.selection_valid_for_convert
+                ),
+                saved_events=preparation.saved_events,
+                saved_count=preparation.saved_count,
+                pending_manual_learning=preparation.pending_manual_learning,
             )
             self._last_retype_events = result.sticky_events
         finally:

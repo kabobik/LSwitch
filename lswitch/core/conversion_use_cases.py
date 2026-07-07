@@ -33,6 +33,14 @@ class ManualConversionResult:
 
 
 @dataclass(frozen=True)
+class ManualConversionPreparation:
+    selection_valid_for_convert: bool
+    saved_events: list
+    saved_count: int
+    pending_manual_learning: "PendingManualLearning | None"
+
+
+@dataclass(frozen=True)
 class RecentAutoConversionResult:
     handled: bool
 
@@ -109,6 +117,108 @@ class RecentAutoConversionUseCase:
             self.undo_use_case.execute(auto_marker)
             return RecentAutoConversionResult(handled=True)
         return RecentAutoConversionResult(handled=False)
+
+
+class ManualConversionPreparer:
+    """Prepare learning and typed-buffer state for manual conversion."""
+
+    def __init__(
+        self,
+        *,
+        typed_buffer,
+        learning_service: "LearningService",
+        layout_service: LayoutService,
+        selection,
+        xkb: "IXKBAdapter",
+        decode_events,
+    ):
+        self.typed_buffer = typed_buffer
+        self.learning_service = learning_service
+        self.layout_service = layout_service
+        self.selection = selection
+        self.xkb = xkb
+        self.decode_events = decode_events
+
+    def prepare(
+        self,
+        *,
+        context: "StateContext",
+        selection_valid_for_convert: bool,
+        raw_selection_valid: bool,
+        raw_selection_repeat_valid: bool,
+        has_auto_marker: bool,
+        sticky_events: list,
+        extract_last_word,
+    ) -> ManualConversionPreparation:
+        layout_info = self._current_layout()
+        pending_manual_learning = (
+            self.learning_service.prepare_pending_manual_learning(
+                chars_in_buffer=context.chars_in_buffer,
+                selection_valid=selection_valid_for_convert,
+                has_auto_marker=has_auto_marker,
+                layout_info=layout_info,
+                extract_last_word=extract_last_word,
+                selection=self.selection,
+                layout_to_lang=self.layout_service.layout_to_lang,
+            )
+        )
+
+        try:
+            prepared_buffer = self.typed_buffer.prepare_retype_buffer(
+                context,
+                sticky_events=sticky_events,
+                selection_valid=selection_valid_for_convert,
+                current_layout=layout_info,
+                xkb=self.xkb,
+            )
+        except Exception as exc:
+            logger.debug("DoConversion: trim skipped: %s", exc)
+            prepared_buffer = None
+
+        if prepared_buffer is None:
+            saved_events = list(context.event_buffer)
+            saved_count = context.chars_in_buffer
+        else:
+            saved_events = prepared_buffer.events
+            saved_count = prepared_buffer.count
+            if prepared_buffer.restored_from_sticky:
+                logger.debug(
+                    "DoConversion: restored sticky buffer → chars=%d",
+                    saved_count,
+                )
+            if prepared_buffer.trimmed_to_last_word:
+                logger.debug(
+                    "DoConversion: trim buffer to last word → %d events (was %d, trailing_spaces=%d)",
+                    saved_count,
+                    prepared_buffer.original_count,
+                    prepared_buffer.trailing_space_count,
+                )
+
+        logger.debug(
+            "DoConversion: selection_valid=%s, selection_repeat=%s, "
+            "effective_selection=%s, chars_in_buffer=%d, "
+            "saved_events=%d, sticky=%d, buffer=%r",
+            raw_selection_valid,
+            raw_selection_repeat_valid,
+            selection_valid_for_convert,
+            saved_count,
+            len(saved_events),
+            len(sticky_events),
+            self.decode_events(saved_events),
+        )
+
+        return ManualConversionPreparation(
+            selection_valid_for_convert=selection_valid_for_convert,
+            saved_events=saved_events,
+            saved_count=saved_count,
+            pending_manual_learning=pending_manual_learning,
+        )
+
+    def _current_layout(self):
+        try:
+            return self.xkb.get_current_layout() if self.xkb else None
+        except Exception:
+            return None
 
 
 class PostConversionStateUpdater:
