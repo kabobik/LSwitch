@@ -803,34 +803,22 @@ class LSwitchApp:
         if self.state_manager.state != State.CONVERTING:
             return
 
-        # --- Extract typed word from buffer BEFORE convert() clears it ---
-        # Only relevant for Case B (manual conversion); Case A buffer is already empty.
-        manual_word: str = ""
-        manual_lang: str = ""
-        is_selection_conversion = False
-        pending_manual_learning: tuple[str, str, bool] | None = None
         chars_in_buffer = self.state_manager.context.chars_in_buffer
         selection_valid_for_convert = self.selection_tracker.effective_valid()
-        if self.user_dict and chars_in_buffer > 0:
-            try:
-                layout_info = self.xkb.get_current_layout() if self.xkb else None
-                manual_lang = self._layout_to_lang(layout_info)
-                manual_word, _ = self._extract_last_word_events(layout_info)
-            except Exception:
-                pass
-        elif self.user_dict and chars_in_buffer == 0 and selection_valid_for_convert and self._last_auto_marker is None:
-            try:
-                from lswitch.core.text_converter import detect_language
-                sel_obj = self.selection.get_selection() if self.selection else None
-                if sel_obj and sel_obj.text:
-                    sel_text = sel_obj.text.strip()
-                    # Only learn single words, ignore multi-word selections
-                    if sel_text and " " not in sel_text and "\n" not in sel_text and "\t" not in sel_text:
-                        manual_word = sel_text
-                        manual_lang = "en" if detect_language(sel_text) == "en" else "ru"
-                        is_selection_conversion = True
-            except Exception as e:
-                logger.debug("Selection word extraction failed: %s", e)
+        layout_info = None
+        try:
+            layout_info = self.xkb.get_current_layout() if self.xkb else None
+        except Exception:
+            layout_info = None
+        pending_manual_learning = self._learning().prepare_pending_manual_learning(
+            chars_in_buffer=chars_in_buffer,
+            selection_valid=selection_valid_for_convert,
+            has_auto_marker=self._last_auto_marker is not None,
+            layout_info=layout_info,
+            extract_last_word=self._extract_last_word_events,
+            selection=self.selection,
+            layout_to_lang=self._layout_to_lang,
+        )
 
         # --- Case A: undo of recent auto-conversion → penalise ---
         if self._last_auto_marker is not None:
@@ -855,14 +843,6 @@ class LSwitchApp:
                 return
 
             self._last_auto_marker = None
-
-        # --- Case B: pure manual conversion → confirm this word needs switching ---
-        elif manual_word and manual_lang and self.user_dict:
-            pending_manual_learning = (
-                manual_word,
-                manual_lang,
-                is_selection_conversion,
-            )
 
         try:
             # Save buffer before convert (reset() will clear it)
@@ -930,7 +910,11 @@ class LSwitchApp:
 
             if success and self.user_dict:
                 if pending_manual_learning is not None:
-                    self._record_manual_conversion_learning(*pending_manual_learning)
+                    self._record_manual_conversion_learning(
+                        pending_manual_learning.word,
+                        pending_manual_learning.lang,
+                        pending_manual_learning.is_selection_conversion,
+                    )
                 elif saved_count == 0:
                     self._record_last_selection_conversion_learning()
 

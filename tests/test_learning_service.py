@@ -121,3 +121,72 @@ def test_no_user_dictionary_returns_false_without_writes():
     assert service.record_auto_confirmation(marker) is False
     assert service.record_manual_conversion("ghbdtn", "en", False) is False
     assert service.record_selection_conversion({"mode": "selection"}) is False
+
+
+def test_prepare_pending_manual_learning_from_typed_buffer():
+    user_dict = MagicMock()
+    service = LearningService(user_dict)
+
+    pending = service.prepare_pending_manual_learning(
+        chars_in_buffer=3,
+        selection_valid=False,
+        has_auto_marker=False,
+        layout_info=object(),
+        extract_last_word=lambda layout: ("ghb", []),
+        selection=None,
+        layout_to_lang=lambda layout: "en",
+    )
+
+    assert pending is not None
+    assert pending.word == "ghb"
+    assert pending.lang == "en"
+    assert pending.is_selection_conversion is False
+
+
+def test_prepare_pending_manual_learning_from_selection():
+    user_dict = MagicMock()
+    service = LearningService(user_dict)
+    selection = MagicMock()
+    selection.get_selection.return_value = MagicMock(text="ghbdtn")
+
+    pending = service.prepare_pending_manual_learning(
+        chars_in_buffer=0,
+        selection_valid=True,
+        has_auto_marker=False,
+        layout_info=None,
+        extract_last_word=lambda layout: ("", []),
+        selection=selection,
+        layout_to_lang=lambda layout: "en",
+    )
+
+    assert pending is not None
+    assert pending.word == "ghbdtn"
+    assert pending.lang == "en"
+    assert pending.is_selection_conversion is True
+
+
+def test_prepare_pending_manual_learning_ignores_auto_marker_and_multiword_selection():
+    user_dict = MagicMock()
+    service = LearningService(user_dict)
+    selection = MagicMock()
+    selection.get_selection.return_value = MagicMock(text="two words")
+
+    assert service.prepare_pending_manual_learning(
+        chars_in_buffer=3,
+        selection_valid=False,
+        has_auto_marker=True,
+        layout_info=object(),
+        extract_last_word=lambda layout: ("ghb", []),
+        selection=None,
+        layout_to_lang=lambda layout: "en",
+    ) is None
+
+    assert service.prepare_pending_manual_learning(
+        chars_in_buffer=0,
+        selection_valid=True,
+        has_auto_marker=False,
+        layout_info=None,
+        extract_last_word=lambda layout: ("", []),
+        selection=selection,
+        layout_to_lang=lambda layout: "en",
+    ) is None

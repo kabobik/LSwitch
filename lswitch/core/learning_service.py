@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lswitch.core.auto_marker import AutoConversionMarker
@@ -11,6 +12,13 @@ if TYPE_CHECKING:
     from lswitch.intelligence.user_dictionary import UserDictionary
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PendingManualLearning:
+    word: str
+    lang: str
+    is_selection_conversion: bool = False
 
 
 class LearningService:
@@ -97,6 +105,52 @@ class LearningService:
             self.manual_weight_step,
         )
         return True
+
+    def prepare_pending_manual_learning(
+        self,
+        *,
+        chars_in_buffer: int,
+        selection_valid: bool,
+        has_auto_marker: bool,
+        layout_info,
+        extract_last_word,
+        selection,
+        layout_to_lang,
+    ) -> PendingManualLearning | None:
+        if self.user_dict is None or has_auto_marker:
+            return None
+
+        if chars_in_buffer > 0:
+            try:
+                manual_lang = layout_to_lang(layout_info)
+                manual_word, _ = extract_last_word(layout_info)
+                if manual_word and manual_lang:
+                    return PendingManualLearning(
+                        word=manual_word,
+                        lang=manual_lang,
+                        is_selection_conversion=False,
+                    )
+            except Exception:
+                return None
+
+        if chars_in_buffer == 0 and selection_valid:
+            try:
+                from lswitch.core.text_converter import detect_language
+
+                sel_obj = selection.get_selection() if selection else None
+                if sel_obj and sel_obj.text:
+                    sel_text = sel_obj.text.strip()
+                    if self.is_single_word_for_learning(sel_text):
+                        manual_lang = "en" if detect_language(sel_text) == "en" else "ru"
+                        return PendingManualLearning(
+                            word=sel_text,
+                            lang=manual_lang,
+                            is_selection_conversion=True,
+                        )
+            except Exception as exc:
+                logger.debug("Selection word extraction failed: %s", exc)
+
+        return None
 
     def record_selection_conversion(self, conversion: dict | None) -> bool:
         if self.user_dict is None or not isinstance(conversion, dict):
