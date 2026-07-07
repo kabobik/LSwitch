@@ -22,6 +22,7 @@ from lswitch.runtime import (
     create_tray_indicator,
     extract_last_word_events,
     install_reload_signal_handler,
+    read_mouse_release_selection,
     run_evdev_event_loop,
     run_qt_runtime_loop,
     run_selected_runtime_loop,
@@ -330,18 +331,10 @@ class LSwitchApp:
             self.virtual_kb.tap_key(KEY_SPACE)
 
     def _read_mouse_release_selection(self):
-        if self.selection is None:
-            return None
-        if not getattr(
-            self._platform,
-            "selection_mouse_release_tracking_enabled",
-            True,
-        ):
-            return None
-        reader = self._passive_selection_reader()
-        if reader is not None:
-            return reader()
-        return self.selection.get_selection()
+        return read_mouse_release_selection(
+            selection=self.selection,
+            platform=self._platform,
+        )
 
     def _passive_selection_reader(self):
         """Return a no-shortcut selection reader when the adapter provides one."""

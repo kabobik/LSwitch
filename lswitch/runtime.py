@@ -475,6 +475,25 @@ def apply_space_auto_conversion_result(
     )
 
 
+def read_mouse_release_selection(*, selection, platform):
+    """Read selection after mouse release when platform tracking allows it."""
+    if selection is None:
+        return None
+    if not getattr(
+        platform,
+        "selection_mouse_release_tracking_enabled",
+        True,
+    ):
+        return None
+
+    from lswitch.platform.selection_adapter import get_passive_selection_reader
+
+    reader = get_passive_selection_reader(selection)
+    if reader is not None:
+        return reader()
+    return selection.get_selection()
+
+
 def create_conversion_runtime(
     *,
     xkb,

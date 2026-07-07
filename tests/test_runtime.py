@@ -40,6 +40,7 @@ from lswitch.runtime import (
     create_tray_indicator,
     extract_last_word_events,
     install_reload_signal_handler,
+    read_mouse_release_selection,
     run_evdev_event_loop,
     run_qt_runtime_loop,
     run_selected_runtime_loop,
@@ -570,6 +571,50 @@ def test_apply_space_auto_conversion_result_preserves_state_when_result_is_noop(
 
     assert state.last_auto_marker is marker
     assert state.pending_auto_space is True
+
+
+def test_read_mouse_release_selection_returns_none_without_selection():
+    assert read_mouse_release_selection(selection=None, platform=object()) is None
+
+
+def test_read_mouse_release_selection_respects_platform_tracking_flag():
+    selection = MagicMock()
+    platform = types.SimpleNamespace(selection_mouse_release_tracking_enabled=False)
+
+    assert read_mouse_release_selection(selection=selection, platform=platform) is None
+    selection.get_selection.assert_not_called()
+
+
+def test_read_mouse_release_selection_uses_passive_reader_when_available():
+    info = object()
+
+    class PassiveSelection:
+        def __init__(self):
+            self.passive_calls = 0
+            self.active_calls = 0
+
+        def get_passive_selection(self):
+            self.passive_calls += 1
+            return info
+
+        def get_selection(self):
+            self.active_calls += 1
+            return object()
+
+    selection = PassiveSelection()
+
+    assert read_mouse_release_selection(selection=selection, platform=object()) is info
+    assert selection.passive_calls == 1
+    assert selection.active_calls == 0
+
+
+def test_read_mouse_release_selection_falls_back_to_active_selection():
+    info = object()
+    selection = MagicMock()
+    selection.get_selection.return_value = info
+
+    assert read_mouse_release_selection(selection=selection, platform=object()) is info
+    selection.get_selection.assert_called_once_with()
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():
