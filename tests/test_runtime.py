@@ -233,7 +233,7 @@ def test_read_existing_pid_handles_missing_invalid_and_valid_values(monkeypatch,
 def test_is_process_alive_uses_signal_zero(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "lswitch.runtime.os.kill",
+        "lswitch.runtime_lifecycle.os.kill",
         lambda pid, sig: calls.append((pid, sig)),
     )
 
@@ -245,7 +245,7 @@ def test_is_process_alive_returns_false_on_os_error(monkeypatch):
     def fail(pid, sig):
         raise OSError("missing")
 
-    monkeypatch.setattr("lswitch.runtime.os.kill", fail)
+    monkeypatch.setattr("lswitch.runtime_lifecycle.os.kill", fail)
 
     assert is_process_alive(123) is False
 
@@ -254,11 +254,11 @@ def test_kill_existing_instance_returns_true_when_process_exits(monkeypatch):
     kill_calls = []
     alive_results = iter([True, False])
     monkeypatch.setattr(
-        "lswitch.runtime.os.kill",
+        "lswitch.runtime_lifecycle.os.kill",
         lambda pid, sig: kill_calls.append((pid, sig)),
     )
     monkeypatch.setattr(
-        "lswitch.runtime.is_process_alive",
+        "lswitch.runtime_lifecycle.is_process_alive",
         lambda pid: next(alive_results),
     )
     monkeypatch.setattr("time.sleep", lambda seconds: None)
@@ -1728,7 +1728,7 @@ def test_start_runtime_resources_skips_poller_and_udev_when_disabled_or_missing(
 def test_install_reload_signal_handler_applies_runtime_config_when_reload_succeeds(monkeypatch):
     registered = {}
     monkeypatch.setattr(
-        "lswitch.runtime.signal.signal",
+        "lswitch.runtime_lifecycle.signal.signal",
         lambda signum, handler: registered.update({signum: handler}),
     )
     config = MagicMock()
@@ -1753,7 +1753,10 @@ def test_install_reload_signal_handler_applies_runtime_config_when_reload_succee
 
 
 def test_install_reload_signal_handler_skips_apply_when_reload_is_unchanged(monkeypatch):
-    monkeypatch.setattr("lswitch.runtime.signal.signal", lambda signum, handler: None)
+    monkeypatch.setattr(
+        "lswitch.runtime_lifecycle.signal.signal",
+        lambda signum, handler: None,
+    )
     config = MagicMock()
     config.reload.return_value = False
     apply_runtime_config = MagicMock()
@@ -1814,7 +1817,7 @@ def test_run_evdev_event_loop_propagates_polling_errors():
 
 def test_run_evdev_runtime_until_stopped_calls_stop(monkeypatch):
     run_loop = MagicMock()
-    monkeypatch.setattr("lswitch.runtime.run_evdev_event_loop", run_loop)
+    monkeypatch.setattr("lswitch.runtime_lifecycle.run_evdev_event_loop", run_loop)
     stop_runtime = MagicMock()
 
     run_evdev_runtime_until_stopped(
@@ -1830,7 +1833,7 @@ def test_run_evdev_runtime_until_stopped_calls_stop(monkeypatch):
 
 def test_run_evdev_runtime_until_stopped_swallows_keyboard_interrupt(monkeypatch):
     run_loop = MagicMock(side_effect=KeyboardInterrupt)
-    monkeypatch.setattr("lswitch.runtime.run_evdev_event_loop", run_loop)
+    monkeypatch.setattr("lswitch.runtime_lifecycle.run_evdev_event_loop", run_loop)
     stop_runtime = MagicMock()
 
     run_evdev_runtime_until_stopped(
@@ -1982,7 +1985,7 @@ def test_run_qt_runtime_loop_wires_worker_signal_timer_cleanup_and_stop(monkeypa
 
     signal_calls = []
     monkeypatch.setattr(
-        "lswitch.runtime.signal.signal",
+        "lswitch.runtime_lifecycle.signal.signal",
         lambda signum, handler: signal_calls.append((signum, handler)),
     )
 
@@ -2059,7 +2062,10 @@ def test_run_qt_runtime_loop_skips_tray_when_disabled(monkeypatch):
     pyqt_module.QtCore = qtcore_module
     monkeypatch.setitem(sys.modules, "PyQt6", pyqt_module)
     monkeypatch.setitem(sys.modules, "PyQt6.QtCore", qtcore_module)
-    monkeypatch.setattr("lswitch.runtime.signal.signal", lambda signum, handler: None)
+    monkeypatch.setattr(
+        "lswitch.runtime_lifecycle.signal.signal",
+        lambda signum, handler: None,
+    )
 
     qt_app = MagicMock()
     event_bus = MagicMock()
@@ -2092,13 +2098,13 @@ def test_run_qt_app_runtime_builds_tray_and_evdev_callbacks(monkeypatch):
     is_running = MagicMock(return_value=True)
 
     monkeypatch.setattr(
-        "lswitch.runtime.run_qt_runtime_loop",
+        "lswitch.runtime_lifecycle.run_qt_runtime_loop",
         lambda **kwargs: captured.update(kwargs),
     )
     create_tray = MagicMock(return_value=tray)
     run_evdev = MagicMock()
-    monkeypatch.setattr("lswitch.runtime.create_tray_indicator", create_tray)
-    monkeypatch.setattr("lswitch.runtime.run_evdev_event_loop", run_evdev)
+    monkeypatch.setattr("lswitch.runtime_lifecycle.create_tray_indicator", create_tray)
+    monkeypatch.setattr("lswitch.runtime_lifecycle.run_evdev_event_loop", run_evdev)
 
     run_qt_app_runtime(
         qt_app=qt_app,
