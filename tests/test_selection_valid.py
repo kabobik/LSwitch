@@ -571,7 +571,7 @@ class TestSelectionValidOnEvents:
 class TestDoConversionUsesSelectionValid:
     def test_do_conversion_uses_selection_valid(self):
         app = _make_app()
-        app._selection_valid = True
+        app.selection_tracker.set_valid(True)
 
         # Put state machine into CONVERTING
         app.state_manager.context.state = State.CONVERTING
@@ -587,17 +587,16 @@ class TestDoConversionUsesSelectionValid:
 
         app.conversion_engine.convert = mock_convert
 
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
         # selection_valid should have been True when convert was called
         assert len(convert_calls) == 1
         assert convert_calls[0] is True
-        # After conversion, _selection_valid should be consumed (False)
-        assert app._selection_valid is False
+        assert app.selection_tracker.valid is False
 
     def test_successful_selection_conversion_enables_repeat_selection(self):
         app = _make_app()
-        app._selection_valid = True
+        app.selection_tracker.set_valid(True)
 
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
@@ -610,41 +609,41 @@ class TestDoConversionUsesSelectionValid:
 
         app.conversion_engine.convert = mock_convert
 
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
         assert convert_calls == [True]
-        assert app._selection_valid is False
-        assert app._selection_repeat_valid is True
+        assert app.selection_tracker.valid is False
+        assert app.selection_tracker.repeat_valid is True
 
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
 
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
         assert convert_calls == [True, True]
 
     def test_failed_repeat_selection_conversion_clears_repeat(self):
         app = _make_app()
-        app._selection_valid = True
+        app.selection_tracker.set_valid(True)
 
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
 
         app.conversion_engine.convert = MagicMock(return_value=True)
-        app._do_conversion()
-        assert app._selection_repeat_valid is True
+        app.conversion_runtime.request_manual_conversion()
+        assert app.selection_tracker.repeat_valid is True
 
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
         app.conversion_engine.convert = MagicMock(return_value=False)
 
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
-        assert app._selection_repeat_valid is False
+        assert app.selection_tracker.repeat_valid is False
 
     def test_do_conversion_resets_selection_valid_even_on_failure(self):
         app = _make_app()
-        app._selection_valid = True
+        app.selection_tracker.set_valid(True)
 
         # Put state machine into CONVERTING
         app.state_manager.context.state = State.CONVERTING
@@ -658,15 +657,15 @@ class TestDoConversionUsesSelectionValid:
 
         # Exception propagates but _selection_valid is reset in finally
         with pytest.raises(RuntimeError):
-            app._do_conversion()
+            app.conversion_runtime.request_manual_conversion()
 
-        assert app._selection_valid is False
+        assert app.selection_tracker.valid is False
 
     def test_do_conversion_updates_baseline_after_convert(self):
         """After conversion, baseline is updated to current PRIMARY
         to prevent re-conversion of the same text."""
         app = _make_app()
-        app._selection_valid = True
+        app.selection_tracker.set_valid(True)
 
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
@@ -680,11 +679,11 @@ class TestDoConversionUsesSelectionValid:
             return True
 
         app.conversion_engine.convert = mock_convert
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
-        assert app._prev_sel_text == "конвертированный"
-        assert app._prev_sel_owner_id == 1
-        assert app._selection_valid is False
+        assert app.selection_tracker.prev_text == "конвертированный"
+        assert app.selection_tracker.prev_owner_id == 1
+        assert app.selection_tracker.valid is False
 
     def test_do_conversion_skips_baseline_read_when_tracking_disabled(self):
         """Wayland retype must not send an active Ctrl+C after conversion."""
@@ -698,14 +697,14 @@ class TestDoConversionUsesSelectionValid:
         app.conversion_engine.convert = MagicMock(return_value=True)
         app.selection.get_selection.reset_mock()
 
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
         app.conversion_engine.convert.assert_called_once_with(
             app.state_manager.context,
             selection_valid=False,
         )
         app.selection.get_selection.assert_not_called()
-        assert app._selection_valid is False
+        assert app.selection_tracker.valid is False
 
     def test_do_conversion_uses_passive_baseline_reader_when_available(self):
         app = _make_app()
@@ -720,17 +719,17 @@ class TestDoConversionUsesSelectionValid:
         app.state_manager.context.chars_in_buffer = 6
         app.conversion_engine.convert = MagicMock(return_value=True)
 
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
-        assert app._prev_sel_text == "passive baseline"
+        assert app.selection_tracker.prev_text == "passive baseline"
         assert passive.active_calls == 0
         assert passive.passive_calls == 1
-        assert app._selection_valid is False
+        assert app.selection_tracker.valid is False
 
     def test_do_conversion_no_selection_change_stays_false(self):
         """If PRIMARY hasn't changed, _selection_valid stays False."""
         app = _make_app()
-        assert app._selection_valid is False
+        assert app.selection_tracker.valid is False
 
         # Empty PRIMARY
         app.selection.get_selection.return_value = SelectionInfo(
@@ -749,7 +748,7 @@ class TestDoConversionUsesSelectionValid:
 
         app.conversion_engine.convert = mock_convert
 
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
         assert len(convert_calls) == 1
         assert convert_calls[0] is False
@@ -778,10 +777,16 @@ class TestStickyRetypeBuffer:
             return True
 
         app.conversion_engine.convert = mock_convert
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
-        assert len(app._last_retype_events) == 5
-        assert [e.code for e in app._last_retype_events] == [35, 18, 38, 38, 24]
+        assert len(app.auto_conversion_session.sticky_events) == 5
+        assert [e.code for e in app.auto_conversion_session.sticky_events] == [
+            35,
+            18,
+            38,
+            38,
+            24,
+        ]
 
     def test_sticky_buffer_restores_on_empty_buffer(self):
         """When buffer is empty but sticky has events, they are restored."""
@@ -794,7 +799,7 @@ class TestStickyRetypeBuffer:
             ev.code = code
             ev.shifted = False
             saved.append(ev)
-        app._last_retype_events = saved
+        app.auto_conversion_session.sticky_events = saved
 
         # Buffer is empty (reset by previous conversion)
         ctx = app.state_manager.context
@@ -812,85 +817,85 @@ class TestStickyRetypeBuffer:
             return True
 
         app.conversion_engine.convert = mock_convert
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
         # convert should have been called with 5 chars
         assert len(convert_calls) == 1
         assert convert_calls[0] == 5
         # sticky buffer should still be populated for next repeat
-        assert len(app._last_retype_events) == 5
+        assert len(app.auto_conversion_session.sticky_events) == 5
 
     def test_sticky_cleared_on_regular_key(self):
         app = _make_app()
-        app._last_retype_events = [MagicMock()]
+        app.auto_conversion_session.sticky_events = [MagicMock()]
 
         app.input_router.on_key_press(_key_event(KEY_Q))
 
-        assert app._last_retype_events == []
+        assert app.auto_conversion_session.sticky_events == []
 
     def test_sticky_cleared_on_space(self):
         app = _make_app()
-        app._last_retype_events = [MagicMock()]
+        app.auto_conversion_session.sticky_events = [MagicMock()]
 
         app.input_router.on_key_press(_key_event(KEY_SPACE))
 
-        assert app._last_retype_events == []
+        assert app.auto_conversion_session.sticky_events == []
 
     def test_sticky_cleared_on_backspace(self):
         app = _make_app()
-        app._last_retype_events = [MagicMock()]
+        app.auto_conversion_session.sticky_events = [MagicMock()]
 
         app.input_router.on_key_press(_key_event(KEY_BACKSPACE))
 
-        assert app._last_retype_events == []
+        assert app.auto_conversion_session.sticky_events == []
 
     def test_sticky_cleared_on_navigation(self):
         app = _make_app()
-        app._last_retype_events = [MagicMock()]
+        app.auto_conversion_session.sticky_events = [MagicMock()]
 
         app.input_router.on_key_release(_key_release_event(KEY_LEFT))
 
-        assert app._last_retype_events == []
+        assert app.auto_conversion_session.sticky_events == []
 
     def test_sticky_cleared_on_enter(self):
         app = _make_app()
-        app._last_retype_events = [MagicMock()]
+        app.auto_conversion_session.sticky_events = [MagicMock()]
 
         app.input_router.on_key_release(_key_release_event(KEY_ENTER))
 
-        assert app._last_retype_events == []
+        assert app.auto_conversion_session.sticky_events == []
 
     def test_sticky_cleared_on_mouse_click(self):
         app = _make_app()
-        app._last_retype_events = [MagicMock()]
+        app.auto_conversion_session.sticky_events = [MagicMock()]
 
         app.input_router.on_mouse_click(_mouse_event())
 
-        assert app._last_retype_events == []
+        assert app.auto_conversion_session.sticky_events == []
 
     def test_sticky_preserved_on_shift(self):
         """Shift must NOT clear sticky buffer — it's needed for Shift+Shift."""
         app = _make_app()
-        app._last_retype_events = [MagicMock()]
+        app.auto_conversion_session.sticky_events = [MagicMock()]
 
         app.input_router.on_key_press(_key_event(KEY_LEFTSHIFT))
 
-        assert len(app._last_retype_events) == 1
+        assert len(app.auto_conversion_session.sticky_events) == 1
 
     def test_sticky_preserved_on_modifier(self):
         """Modifier keys (Alt etc) must NOT clear sticky buffer."""
         KEY_LEFTALT = 56
         app = _make_app()
-        app._last_retype_events = [MagicMock()]
+        app.auto_conversion_session.sticky_events = [MagicMock()]
 
         app.input_router.on_key_press(_key_event(KEY_LEFTALT))
 
-        assert len(app._last_retype_events) == 1
+        assert len(app.auto_conversion_session.sticky_events) == 1
 
     def test_sticky_not_saved_for_selection_mode(self):
         """Selection conversion should NOT populate sticky buffer."""
         app = _make_app()
-        app._selection_valid = True
+        app.selection_tracker.set_valid(True)
 
         ctx = app.state_manager.context
         ctx.chars_in_buffer = 0
@@ -903,6 +908,6 @@ class TestStickyRetypeBuffer:
             return True
 
         app.conversion_engine.convert = mock_convert
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
-        assert app._last_retype_events == []
+        assert app.auto_conversion_session.sticky_events == []
