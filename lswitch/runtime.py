@@ -137,10 +137,7 @@ def create_core_components(
 
 def create_input_router_callbacks(
     *,
-    decode_buffer,
-    try_auto_conversion_at_space,
-    auto_conversion_session,
-    request_conversion,
+    conversion_runtime,
     selection_tracker,
     config,
     get_auto_detector,
@@ -150,20 +147,23 @@ def create_input_router_callbacks(
     log,
 ) -> InputRouterCallbacks:
     """Create late-bound callbacks needed by InputEventRouter."""
+    auto_conversion_session = conversion_runtime.auto_conversion_session
     return InputRouterCallbacks(
         conversion=InputConversionPort(
-            decode_buffer=decode_buffer,
+            decode_buffer=conversion_runtime.decode_buffer,
             auto_conversion_enabled=lambda: auto_conversion_enabled(
                 config=config,
                 auto_detector=get_auto_detector(),
             ),
-            try_auto_conversion_at_space=try_auto_conversion_at_space,
+            try_auto_conversion_at_space=(
+                conversion_runtime.try_space_auto_conversion
+            ),
             get_pending_auto_space=lambda: auto_conversion_session.pending_space,
             set_pending_auto_space=auto_conversion_session.set_pending_space,
             clear_last_retype_events=auto_conversion_session.clear_sticky_events,
             clear_last_auto_marker=auto_conversion_session.clear_marker,
             inject_deferred_space=lambda: inject_deferred_space(get_virtual_kb()),
-            request_conversion=request_conversion,
+            request_conversion=conversion_runtime.request_manual_conversion,
         ),
         selection=InputSelectionPort(
             prime_baseline_on_click=lambda: update_passive_selection_baseline_on_click(

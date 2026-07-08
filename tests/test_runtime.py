@@ -386,6 +386,21 @@ def test_create_input_router_wires_core_components_and_callbacks():
     clear_last_retype_events.assert_called_once()
 
 
+def _conversion_runtime(
+    *,
+    session,
+    decode_buffer=None,
+    try_space_auto_conversion=None,
+    request_manual_conversion=None,
+):
+    return types.SimpleNamespace(
+        auto_conversion_session=session,
+        decode_buffer=decode_buffer or (lambda: ""),
+        try_space_auto_conversion=try_space_auto_conversion or (lambda: False),
+        request_manual_conversion=request_manual_conversion or (lambda: None),
+    )
+
+
 def test_create_input_router_callbacks_wires_session_callbacks():
     session = types.SimpleNamespace(
         pending_space=True,
@@ -395,10 +410,10 @@ def test_create_input_router_callbacks_wires_session_callbacks():
     )
 
     callbacks = create_input_router_callbacks(
-        decode_buffer=lambda: "buffer",
-        try_auto_conversion_at_space=lambda: False,
-        auto_conversion_session=session,
-        request_conversion=lambda: None,
+        conversion_runtime=_conversion_runtime(
+            session=session,
+            decode_buffer=lambda: "buffer",
+        ),
         selection_tracker=MagicMock(),
         config=MagicMock(),
         get_auto_detector=lambda: None,
@@ -427,15 +442,14 @@ def test_create_input_router_callbacks_late_binds_auto_conversion_enabled():
     detector = object()
 
     callbacks = create_input_router_callbacks(
-        decode_buffer=lambda: "",
-        try_auto_conversion_at_space=lambda: False,
-        auto_conversion_session=types.SimpleNamespace(
-            pending_space=False,
-            set_pending_space=lambda value: None,
-            clear_sticky_events=lambda: None,
-            clear_marker=lambda: None,
+        conversion_runtime=_conversion_runtime(
+            session=types.SimpleNamespace(
+                pending_space=False,
+                set_pending_space=lambda value: None,
+                clear_sticky_events=lambda: None,
+                clear_marker=lambda: None,
+            ),
         ),
-        request_conversion=lambda: None,
         selection_tracker=MagicMock(),
         config=config,
         get_auto_detector=lambda: detector,
@@ -464,15 +478,14 @@ def test_create_input_router_callbacks_late_binds_selection_dependencies():
     }
 
     callbacks = create_input_router_callbacks(
-        decode_buffer=lambda: "",
-        try_auto_conversion_at_space=lambda: False,
-        auto_conversion_session=types.SimpleNamespace(
-            pending_space=False,
-            set_pending_space=lambda value: None,
-            clear_sticky_events=lambda: None,
-            clear_marker=lambda: None,
+        conversion_runtime=_conversion_runtime(
+            session=types.SimpleNamespace(
+                pending_space=False,
+                set_pending_space=lambda value: None,
+                clear_sticky_events=lambda: None,
+                clear_marker=lambda: None,
+            ),
         ),
-        request_conversion=lambda: None,
         selection_tracker=tracker,
         config=MagicMock(),
         get_auto_detector=lambda: None,
@@ -495,15 +508,14 @@ def test_create_input_router_callbacks_late_binds_virtual_keyboard_for_deferred_
     virtual_kb = MagicMock()
 
     callbacks = create_input_router_callbacks(
-        decode_buffer=lambda: "",
-        try_auto_conversion_at_space=lambda: False,
-        auto_conversion_session=types.SimpleNamespace(
-            pending_space=False,
-            set_pending_space=lambda value: None,
-            clear_sticky_events=lambda: None,
-            clear_marker=lambda: None,
+        conversion_runtime=_conversion_runtime(
+            session=types.SimpleNamespace(
+                pending_space=False,
+                set_pending_space=lambda value: None,
+                clear_sticky_events=lambda: None,
+                clear_marker=lambda: None,
+            ),
         ),
-        request_conversion=lambda: None,
         selection_tracker=MagicMock(),
         config=MagicMock(),
         get_auto_detector=lambda: None,

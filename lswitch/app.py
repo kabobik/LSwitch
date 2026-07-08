@@ -102,14 +102,7 @@ class LSwitchApp:
         self.input_router = create_input_router(
             core=core,
             callbacks=create_input_router_callbacks(
-                decode_buffer=self.conversion_runtime.decode_buffer,
-                try_auto_conversion_at_space=(
-                    self.conversion_runtime.try_space_auto_conversion
-                ),
-                auto_conversion_session=self.auto_conversion_session,
-                request_conversion=(
-                    self.conversion_runtime.request_manual_conversion
-                ),
+                conversion_runtime=self.conversion_runtime,
                 selection_tracker=self.selection_tracker,
                 config=self.config,
                 get_auto_detector=lambda: self.auto_detector,
