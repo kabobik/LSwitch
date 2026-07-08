@@ -1165,6 +1165,44 @@ def run_qt_runtime_loop(
         thread.join(timeout=join_timeout)
 
 
+def run_qt_app_runtime(
+    *,
+    qt_app,
+    event_bus,
+    show_tray: bool,
+    config,
+    owner_app,
+    xkb,
+    is_running,
+    device_manager,
+    event_manager,
+    stop_runtime,
+) -> None:
+    """Run full Qt runtime using app-owned adapters and lifecycle callbacks."""
+    run_qt_runtime_loop(
+        qt_app=qt_app,
+        event_bus=event_bus,
+        show_tray=show_tray,
+        create_tray=(
+            lambda: create_tray_indicator(
+                event_bus=event_bus,
+                config=config,
+                qt_app=qt_app,
+                owner_app=owner_app,
+                xkb=xkb,
+            )
+        ),
+        run_evdev_loop=(
+            lambda: run_evdev_event_loop(
+                is_running=is_running,
+                device_manager=device_manager,
+                event_manager=event_manager,
+            )
+        ),
+        stop_runtime=stop_runtime,
+    )
+
+
 def run_selected_runtime_loop(
     *,
     runtime_plan,

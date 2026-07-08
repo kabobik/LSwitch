@@ -55,6 +55,7 @@ from lswitch.runtime import (
     read_mouse_release_selection,
     run_evdev_event_loop,
     run_evdev_runtime_until_stopped,
+    run_qt_app_runtime,
     run_qt_runtime_loop,
     run_selected_runtime_loop,
     selection_baseline_tracking_enabled,
@@ -1909,6 +1910,59 @@ def test_run_qt_runtime_loop_skips_tray_when_disabled(monkeypatch):
     create_tray.assert_not_called()
     qt_app.setQuitOnLastWindowClosed.assert_called_once_with(False)
     qt_app.exec.assert_called_once_with()
+
+
+def test_run_qt_app_runtime_builds_tray_and_evdev_callbacks(monkeypatch):
+    captured = {}
+    tray = object()
+    qt_app = object()
+    event_bus = object()
+    config = object()
+    owner_app = object()
+    xkb = object()
+    device_manager = object()
+    event_manager = object()
+    is_running = MagicMock(return_value=True)
+
+    monkeypatch.setattr(
+        "lswitch.runtime.run_qt_runtime_loop",
+        lambda **kwargs: captured.update(kwargs),
+    )
+    create_tray = MagicMock(return_value=tray)
+    run_evdev = MagicMock()
+    monkeypatch.setattr("lswitch.runtime.create_tray_indicator", create_tray)
+    monkeypatch.setattr("lswitch.runtime.run_evdev_event_loop", run_evdev)
+
+    run_qt_app_runtime(
+        qt_app=qt_app,
+        event_bus=event_bus,
+        show_tray=True,
+        config=config,
+        owner_app=owner_app,
+        xkb=xkb,
+        is_running=is_running,
+        device_manager=device_manager,
+        event_manager=event_manager,
+        stop_runtime=lambda: None,
+    )
+
+    assert captured["qt_app"] is qt_app
+    assert captured["event_bus"] is event_bus
+    assert captured["show_tray"] is True
+    assert captured["create_tray"]() is tray
+    create_tray.assert_called_once_with(
+        event_bus=event_bus,
+        config=config,
+        qt_app=qt_app,
+        owner_app=owner_app,
+        xkb=xkb,
+    )
+    captured["run_evdev_loop"]()
+    run_evdev.assert_called_once_with(
+        is_running=is_running,
+        device_manager=device_manager,
+        event_manager=event_manager,
+    )
 
 
 def test_run_selected_runtime_loop_uses_existing_qt_app_for_qt_plan():

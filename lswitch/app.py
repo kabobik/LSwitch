@@ -19,16 +19,14 @@ from lswitch.runtime import (
     create_qt_runtime_bootstrap,
     create_synced_manual_conversion_controller,
     create_synced_space_auto_conversion_use_case,
-    create_tray_indicator,
     decode_buffer_events,
     execute_manual_conversion_with_session,
     extract_last_word_events,
     handle_poller_selection_changed,
     install_reload_signal_handler,
     perform_space_auto_conversion_at_boundary,
-    run_evdev_event_loop,
     run_evdev_runtime_until_stopped,
-    run_qt_runtime_loop,
+    run_qt_app_runtime,
     run_selected_runtime_loop,
     start_runtime_resources,
     stop_runtime_resources,
@@ -538,28 +536,16 @@ class LSwitchApp:
 
     def _run_with_qt_loop(self, qt_app, show_tray: bool):
         """Run evdev in a worker thread while the main thread runs Qt."""
-        def _create_tray():
-            return create_tray_indicator(
-                event_bus=self.event_bus,
-                config=self.config,
-                qt_app=qt_app,
-                owner_app=self,
-                xkb=self.xkb,
-            )
-
-        def _run_evdev_loop():
-            run_evdev_event_loop(
-                is_running=lambda: self._running,
-                device_manager=self.device_manager,
-                event_manager=self.event_manager,
-            )
-
-        run_qt_runtime_loop(
+        run_qt_app_runtime(
             qt_app=qt_app,
             event_bus=self.event_bus,
             show_tray=show_tray,
-            create_tray=_create_tray,
-            run_evdev_loop=_run_evdev_loop,
+            config=self.config,
+            owner_app=self,
+            xkb=self.xkb,
+            is_running=lambda: self._running,
+            device_manager=self.device_manager,
+            event_manager=self.event_manager,
             stop_runtime=self.stop,
         )
 
