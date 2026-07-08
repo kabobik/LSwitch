@@ -11,8 +11,7 @@ from lswitch.core.auto_conversion_session import AutoConversionSessionState
 from lswitch.runtime import (
     PidLock,
     SelectionPollerThread,
-    apply_runtime_timing_config,
-    apply_user_dictionary_config,
+    apply_runtime_config_update,
     create_core_components,
     create_input_router,
     create_input_router_callbacks,
@@ -204,23 +203,24 @@ class LSwitchApp:
 
     def _apply_runtime_config(self) -> None:
         """Apply config values that affect already-created runtime objects."""
-        timing_config = apply_runtime_timing_config(
+        applied = apply_runtime_config_update(
             config=self.config,
             state_manager=self.state_manager,
             conversion_engine=self.conversion_engine,
+            user_dict=self.user_dict,
+            enable_user_dictionary=self._enable_user_dictionary,
+            auto_detector=self.auto_detector,
+            learning_service=self.learning_service,
+            debug=self.debug,
+            manual_weight_step=self.MANUAL_WEIGHT_STEP,
+            log=logger,
         )
+        timing_config = applied.timing
         self.timing = timing_config.timing
         self.x11_selection_timing = timing_config.x11_selection_timing
         self.wayland_timing = timing_config.wayland_timing
         self.wayland_selection_timing = timing_config.wayland_selection_timing
-
-        self.user_dict = apply_user_dictionary_config(
-            config=self.config,
-            user_dict=self.user_dict,
-            enable_user_dictionary=self._enable_user_dictionary,
-            log=logger,
-        )
-        self._sync_learning_components()
+        self.user_dict = applied.user_dict
 
     def _on_config_changed(self, event) -> None:
         self._apply_runtime_config()

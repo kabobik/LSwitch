@@ -231,6 +231,12 @@ class RuntimeConfigSnapshot:
 
 
 @dataclass(frozen=True)
+class AppliedRuntimeConfig:
+    timing: RuntimeConfigSnapshot
+    user_dict: object | None
+
+
+@dataclass(frozen=True)
 class SpaceAutoConversionState:
     last_auto_marker: object | None
     pending_auto_space: bool
@@ -462,6 +468,46 @@ def apply_user_dictionary_config(
     if user_dict is not None:
         log.info("User dictionary disabled")
     return None
+
+
+def apply_runtime_config_update(
+    *,
+    config,
+    state_manager,
+    conversion_engine,
+    user_dict,
+    enable_user_dictionary,
+    auto_detector,
+    learning_service,
+    debug: bool,
+    manual_weight_step: int,
+    log,
+) -> AppliedRuntimeConfig:
+    """Apply runtime config changes and sync mutable services."""
+    timing = apply_runtime_timing_config(
+        config=config,
+        state_manager=state_manager,
+        conversion_engine=conversion_engine,
+    )
+    user_dict = apply_user_dictionary_config(
+        config=config,
+        user_dict=user_dict,
+        enable_user_dictionary=enable_user_dictionary,
+        log=log,
+    )
+    sync_user_dictionary_components(
+        user_dict=user_dict,
+        user_dict_min_weight=config.get("user_dict_min_weight", 2),
+        auto_detector=auto_detector,
+        conversion_engine=conversion_engine,
+        learning_service=learning_service,
+        debug=debug,
+        manual_weight_step=manual_weight_step,
+    )
+    return AppliedRuntimeConfig(
+        timing=timing,
+        user_dict=user_dict,
+    )
 
 
 def create_space_auto_conversion_use_case(

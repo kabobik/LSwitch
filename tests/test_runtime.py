@@ -16,6 +16,7 @@ from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
 from lswitch.core.typed_buffer import TypedBufferService
 from lswitch.runtime import (
+    AppliedRuntimeConfig,
     ConversionRuntimeComponents,
     InputDeviceRuntimeComponents,
     InputRouterCallbacks,
@@ -27,6 +28,7 @@ from lswitch.runtime import (
     SelectionPollerThread,
     SpaceAutoConversionState,
     StartedRuntimeResources,
+    apply_runtime_config_update,
     apply_runtime_timing_config,
     apply_space_auto_conversion_result,
     apply_user_dictionary_config,
@@ -586,6 +588,53 @@ def test_apply_user_dictionary_config_disables_existing_dictionary():
     assert result is None
     enable_user_dictionary.assert_not_called()
     log.info.assert_called_once_with("User dictionary disabled")
+
+
+def test_apply_runtime_config_update_applies_timing_user_dict_and_syncs_services():
+    timing = {"delay": 0.1}
+    values = {
+        "timing": timing,
+        "x11_selection_timing": {},
+        "wayland_timing": {},
+        "wayland_selection_timing": {},
+        "double_click_timeout": 0.4,
+        "user_dict_enabled": True,
+        "user_dict_min_weight": 6,
+    }
+    config = MagicMock()
+    config.get.side_effect = lambda key, default=None: values.get(key, default)
+    state_manager = MagicMock()
+    state_manager.double_click_timeout = 0.3
+    conversion_engine = MagicMock()
+    auto_detector = MagicMock()
+    learning_service = MagicMock()
+    user_dict = object()
+    enable_user_dictionary = MagicMock(return_value=user_dict)
+
+    applied = apply_runtime_config_update(
+        config=config,
+        state_manager=state_manager,
+        conversion_engine=conversion_engine,
+        user_dict=None,
+        enable_user_dictionary=enable_user_dictionary,
+        auto_detector=auto_detector,
+        learning_service=learning_service,
+        debug=True,
+        manual_weight_step=4,
+        log=MagicMock(),
+    )
+
+    assert isinstance(applied, AppliedRuntimeConfig)
+    assert applied.timing.timing is timing
+    assert applied.user_dict is user_dict
+    assert state_manager.double_click_timeout == 0.4
+    assert conversion_engine.timing is timing
+    assert auto_detector.user_dict is user_dict
+    assert auto_detector.user_dict_min_weight == 6
+    assert conversion_engine.user_dict is user_dict
+    assert learning_service.user_dict is user_dict
+    assert learning_service.debug is True
+    assert learning_service.manual_weight_step == 4
 
 
 def test_create_space_auto_conversion_use_case_wires_retype_service(monkeypatch):
