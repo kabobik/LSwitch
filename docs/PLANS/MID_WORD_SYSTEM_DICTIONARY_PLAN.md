@@ -250,7 +250,7 @@ mid-word режим должен быть optional.
 - `MidWordAutoConversionUseCase` добавлен рядом со space auto-conversion flow;
 - runtime/input wiring подключен через `ConversionRuntimeFacade` и
   `InputEventRouter`, feature остается выключенной по умолчанию;
-- runtime config reload еще не пересобирает prefix dictionary / detector;
+- runtime config reload пересобирает prefix dictionary / detector;
 - diagnostics для системных словарей еще не подключены.
 
 1. Добавить `PrefixDictionary` со встроенными `en_words.py` / `ru_words.py`.

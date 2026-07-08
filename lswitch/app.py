@@ -16,6 +16,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_router,
     create_input_router_callbacks,
+    create_mid_word_detection_runtime,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
     enable_user_dictionary_if_needed,
@@ -123,6 +124,8 @@ class LSwitchApp:
         self.conversion_engine = None
         self.event_manager = None
         self._udev_monitor = None
+        self.dictionary = None
+        self.prefix_dictionary = None
         self.auto_detector = None
         self.mid_word_detector = None
         self.user_dict = None
@@ -169,6 +172,8 @@ class LSwitchApp:
         self.virtual_kb = self._platform.virtual_kb
 
         conversion_runtime = platform_runtime.conversion
+        self.dictionary = conversion_runtime.dictionary
+        self.prefix_dictionary = conversion_runtime.prefix_dictionary
         self.auto_detector = conversion_runtime.auto_detector
         self.mid_word_detector = conversion_runtime.mid_word_detector
         self.conversion_engine = conversion_runtime.conversion_engine
@@ -227,6 +232,21 @@ class LSwitchApp:
         self.wayland_timing = timing_config.wayland_timing
         self.wayland_selection_timing = timing_config.wayland_selection_timing
         self.user_dict = applied.user_dict
+        self._apply_mid_word_runtime_config()
+
+    def _apply_mid_word_runtime_config(self) -> None:
+        """Rebuild mid-word detection runtime after relevant config changes."""
+        if self.dictionary is None:
+            return
+        mid_word_runtime = create_mid_word_detection_runtime(
+            dictionary=self.dictionary,
+            mid_word_min_prefix_len=self.config.get('mid_word_min_prefix_len', 4),
+            system_dict_enabled=self.config.get('system_dict_enabled', True),
+            system_dict_en_path=self.config.get('system_dict_en_path', ''),
+            system_dict_ru_path=self.config.get('system_dict_ru_path', ''),
+        )
+        self.prefix_dictionary = mid_word_runtime.prefix_dictionary
+        self.mid_word_detector = mid_word_runtime.mid_word_detector
 
     # ------------------------------------------------------------------
     # Event callbacks

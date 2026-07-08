@@ -135,6 +135,30 @@ class TestRuntimeConfig:
         assert app.auto_detector.user_dict is None
         assert app.conversion_engine.user_dict is None
 
+    def test_config_changed_rebuilds_mid_word_detector_without_restart(self):
+        app = _make_app()
+        dictionary = MagicMock()
+        dictionary.words_for_lang.side_effect = lambda lang: {
+            "en": {"hello"},
+            "ru": {"привет"},
+        }.get(lang, set())
+        app.dictionary = dictionary
+
+        app._wire_event_bus()
+        app.config.set("mid_word_min_prefix_len", 5)
+        app.config.set("system_dict_enabled", False)
+        app.event_bus.publish(
+            Event(
+                EventType.CONFIG_CHANGED,
+                {"mid_word_min_prefix_len": 5},
+                0.0,
+            )
+        )
+
+        assert app.prefix_dictionary.has_prefix("en", "hell") is False
+        assert app.prefix_dictionary.has_prefix("en", "hello") is True
+        assert app.mid_word_detector.min_prefix_len == 5
+
 
 class TestDoConversion:
     """_do_conversion calls ConversionEngine.convert()."""

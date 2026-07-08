@@ -28,6 +28,7 @@ from lswitch.runtime import (
     ConversionRuntimeComponents,
     InputDeviceRuntimeComponents,
     InputRouterCallbacks,
+    MidWordDetectionRuntime,
     PidLock,
     PlatformRuntimeComponents,
     QtRuntimeBootstrap,
@@ -47,6 +48,7 @@ from lswitch.runtime import (
     create_input_device_runtime,
     create_input_router,
     create_input_router_callbacks,
+    create_mid_word_detection_runtime,
     create_mid_word_auto_conversion_use_case,
     create_manual_conversion_controller,
     create_platform_runtime_components,
@@ -1735,6 +1737,26 @@ def test_create_conversion_runtime_wires_detector_and_engine():
     assert components.conversion_engine.user_dict is user_dict
     assert components.conversion_engine.debug is True
     assert components.conversion_engine.timing is timing
+
+
+def test_create_mid_word_detection_runtime_uses_configured_prefix_len():
+    dictionary = MagicMock()
+    dictionary.words_for_lang.side_effect = lambda lang: {
+        "en": {"hello"},
+        "ru": {"привет"},
+    }.get(lang, set())
+
+    runtime = create_mid_word_detection_runtime(
+        dictionary=dictionary,
+        mid_word_min_prefix_len=5,
+        system_dict_enabled=False,
+    )
+
+    assert isinstance(runtime, MidWordDetectionRuntime)
+    assert runtime.prefix_dictionary.has_prefix("en", "hell") is False
+    assert runtime.prefix_dictionary.has_prefix("en", "hello") is True
+    assert runtime.mid_word_detector.min_prefix_len == 5
+    assert runtime.mid_word_detector.prefix_dictionary is runtime.prefix_dictionary
 
 
 def test_create_input_device_runtime_wires_device_services():

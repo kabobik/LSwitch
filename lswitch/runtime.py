@@ -103,6 +103,12 @@ class ConversionRuntimeComponents:
 
 
 @dataclass(frozen=True)
+class MidWordDetectionRuntime:
+    prefix_dictionary: object
+    mid_word_detector: object
+
+
+@dataclass(frozen=True)
 class InputDeviceRuntimeComponents:
     event_manager: EventManager
     device_manager: object
@@ -252,12 +258,52 @@ def create_conversion_runtime(
     system_dict_ru_path: str = "",
 ) -> ConversionRuntimeComponents:
     """Create dictionary, auto-detection, and conversion executor services."""
+    dictionary = DictionaryService()
+    ngrams = NgramAnalyzer()
+    mid_word_runtime = create_mid_word_detection_runtime(
+        dictionary=dictionary,
+        mid_word_min_prefix_len=mid_word_min_prefix_len,
+        system_dict_enabled=system_dict_enabled,
+        system_dict_en_path=system_dict_en_path,
+        system_dict_ru_path=system_dict_ru_path,
+    )
+    return ConversionRuntimeComponents(
+        dictionary=dictionary,
+        ngrams=ngrams,
+        auto_detector=AutoDetector(
+            dictionary=dictionary,
+            ngrams=ngrams,
+            user_dict=user_dict,
+            user_dict_min_weight=user_dict_min_weight,
+        ),
+        prefix_dictionary=mid_word_runtime.prefix_dictionary,
+        mid_word_detector=mid_word_runtime.mid_word_detector,
+        conversion_engine=ConversionEngine(
+            xkb=xkb,
+            selection=selection,
+            virtual_kb=virtual_kb,
+            dictionary=dictionary,
+            system=system,
+            user_dict=user_dict,
+            debug=debug,
+            timing=timing,
+        ),
+    )
+
+
+def create_mid_word_detection_runtime(
+    *,
+    dictionary,
+    mid_word_min_prefix_len: int = 4,
+    system_dict_enabled: bool = False,
+    system_dict_en_path: str = "",
+    system_dict_ru_path: str = "",
+) -> MidWordDetectionRuntime:
+    """Create prefix dictionary and mid-word detector for current config."""
     from lswitch.intelligence.mid_word_detector import MidWordDetector
     from lswitch.intelligence.prefix_dictionary import PrefixDictionary
     from lswitch.intelligence.system_dictionary_loader import SystemDictionaryLoader
 
-    dictionary = DictionaryService()
-    ngrams = NgramAnalyzer()
     system_loader = SystemDictionaryLoader(
         explicit_paths={
             "en": system_dict_en_path,
@@ -270,29 +316,11 @@ def create_conversion_runtime(
         system_loader=system_loader,
         include_system=system_dict_enabled,
     )
-    return ConversionRuntimeComponents(
-        dictionary=dictionary,
-        ngrams=ngrams,
-        auto_detector=AutoDetector(
-            dictionary=dictionary,
-            ngrams=ngrams,
-            user_dict=user_dict,
-            user_dict_min_weight=user_dict_min_weight,
-        ),
+    return MidWordDetectionRuntime(
         prefix_dictionary=prefix_dictionary,
         mid_word_detector=MidWordDetector(
             prefix_dictionary,
             min_prefix_len=mid_word_min_prefix_len,
-        ),
-        conversion_engine=ConversionEngine(
-            xkb=xkb,
-            selection=selection,
-            virtual_kb=virtual_kb,
-            dictionary=dictionary,
-            system=system,
-            user_dict=user_dict,
-            debug=debug,
-            timing=timing,
         ),
     )
 
