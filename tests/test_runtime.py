@@ -54,6 +54,7 @@ from lswitch.runtime import (
     perform_space_auto_conversion_at_boundary,
     read_mouse_release_selection,
     run_evdev_event_loop,
+    run_evdev_runtime_until_stopped,
     run_qt_runtime_loop,
     run_selected_runtime_loop,
     selection_baseline_tracking_enabled,
@@ -1641,6 +1642,37 @@ def test_run_evdev_event_loop_propagates_polling_errors():
         assert str(exc) == "poll failed"
     else:
         raise AssertionError("expected polling error")
+
+
+def test_run_evdev_runtime_until_stopped_calls_stop(monkeypatch):
+    run_loop = MagicMock()
+    monkeypatch.setattr("lswitch.runtime.run_evdev_event_loop", run_loop)
+    stop_runtime = MagicMock()
+
+    run_evdev_runtime_until_stopped(
+        is_running=lambda: False,
+        device_manager=object(),
+        event_manager=object(),
+        stop_runtime=stop_runtime,
+    )
+
+    run_loop.assert_called_once()
+    stop_runtime.assert_called_once_with()
+
+
+def test_run_evdev_runtime_until_stopped_swallows_keyboard_interrupt(monkeypatch):
+    run_loop = MagicMock(side_effect=KeyboardInterrupt)
+    monkeypatch.setattr("lswitch.runtime.run_evdev_event_loop", run_loop)
+    stop_runtime = MagicMock()
+
+    run_evdev_runtime_until_stopped(
+        is_running=lambda: True,
+        device_manager=object(),
+        event_manager=object(),
+        stop_runtime=stop_runtime,
+    )
+
+    stop_runtime.assert_called_once_with()
 
 
 def test_create_tray_indicator_builds_context_menu_sets_layout_and_shows(monkeypatch):

@@ -27,6 +27,7 @@ from lswitch.runtime import (
     install_reload_signal_handler,
     perform_space_auto_conversion_at_boundary,
     run_evdev_event_loop,
+    run_evdev_runtime_until_stopped,
     run_qt_runtime_loop,
     run_selected_runtime_loop,
     start_runtime_resources,
@@ -528,16 +529,12 @@ class LSwitchApp:
 
     def _run_evdev_loop(self):
         """Evdev event loop (blocking, main thread)."""
-        try:
-            run_evdev_event_loop(
-                is_running=lambda: self._running,
-                device_manager=self.device_manager,
-                event_manager=self.event_manager,
-            )
-        except KeyboardInterrupt:
-            pass
-        finally:
-            self.stop()
+        run_evdev_runtime_until_stopped(
+            is_running=lambda: self._running,
+            device_manager=self.device_manager,
+            event_manager=self.event_manager,
+            stop_runtime=self.stop,
+        )
 
     def _run_with_qt_loop(self, qt_app, show_tray: bool):
         """Run evdev in a worker thread while the main thread runs Qt."""

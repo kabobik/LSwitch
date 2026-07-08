@@ -1013,6 +1013,26 @@ def run_evdev_event_loop(
             event_manager.handle_raw_event(event, device.name)
 
 
+def run_evdev_runtime_until_stopped(
+    *,
+    is_running,
+    device_manager,
+    event_manager,
+    stop_runtime,
+) -> None:
+    """Run evdev loop and always stop runtime when it exits."""
+    try:
+        run_evdev_event_loop(
+            is_running=is_running,
+            device_manager=device_manager,
+            event_manager=event_manager,
+        )
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop_runtime()
+
+
 def create_tray_indicator(
     *,
     event_bus,
