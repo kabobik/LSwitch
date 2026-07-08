@@ -13,7 +13,6 @@ from lswitch.runtime import (
     PidLock,
     SelectionPollerThread,
     apply_runtime_timing_config,
-    apply_space_auto_conversion_result,
     apply_user_dictionary_config,
     create_core_components,
     create_input_router,
@@ -24,6 +23,7 @@ from lswitch.runtime import (
     create_tray_indicator,
     extract_last_word_events,
     install_reload_signal_handler,
+    perform_space_auto_conversion_at_boundary,
     read_mouse_release_selection,
     run_evdev_event_loop,
     run_qt_runtime_loop,
@@ -489,7 +489,9 @@ class LSwitchApp:
         The Space key was already delivered to the active application before LSwitch processed
         it (passive monitoring), so we must also delete that extra space character via backspace.
         """
-        result = self._space_auto_conversion().perform_conversion(
+        perform_space_auto_conversion_at_boundary(
+            use_case=self._space_auto_conversion(),
+            session=self.auto_conversion_session,
             context=self.state_manager.context,
             word_len=word_len,
             word_events=word_events,
@@ -497,12 +499,6 @@ class LSwitchApp:
             original_word=orig_word,
             original_lang=orig_lang,
         )
-        state = apply_space_auto_conversion_result(
-            result=result,
-            last_auto_marker=self.auto_conversion_session.last_marker,
-            pending_auto_space=self.auto_conversion_session.pending_space,
-        )
-        self.auto_conversion_session.apply_space_state(state)
 
     def _space_auto_conversion(self):
         return create_space_auto_conversion_use_case(

@@ -505,6 +505,34 @@ def try_space_auto_conversion_at_boundary(
     return result.space_consumed
 
 
+def perform_space_auto_conversion_at_boundary(
+    *,
+    use_case,
+    session,
+    context,
+    word_len: int,
+    word_events: list,
+    direction: str,
+    original_word: str = "",
+    original_lang: str = "",
+) -> None:
+    """Perform a known space auto-conversion and apply transient session updates."""
+    result = use_case.perform_conversion(
+        context=context,
+        word_len=word_len,
+        word_events=word_events,
+        direction=direction,
+        original_word=original_word,
+        original_lang=original_lang,
+    )
+    state = apply_space_auto_conversion_result(
+        result=result,
+        last_auto_marker=session.last_marker,
+        pending_auto_space=session.pending_space,
+    )
+    session.apply_space_state(state)
+
+
 def read_mouse_release_selection(*, selection, platform):
     """Read selection after mouse release when platform tracking allows it."""
     if selection is None:

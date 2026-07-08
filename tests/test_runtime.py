@@ -41,6 +41,7 @@ from lswitch.runtime import (
     create_tray_indicator,
     extract_last_word_events,
     install_reload_signal_handler,
+    perform_space_auto_conversion_at_boundary,
     read_mouse_release_selection,
     run_evdev_event_loop,
     run_qt_runtime_loop,
@@ -612,6 +613,49 @@ def test_try_space_auto_conversion_at_boundary_executes_and_applies_session_stat
         threshold=3,
         last_auto_marker=marker,
         auto_confirm_enabled=True,
+    )
+    state = session.apply_space_state.call_args.args[0]
+    assert state.last_auto_marker is new_marker
+    assert state.pending_auto_space is True
+
+
+def test_perform_space_auto_conversion_at_boundary_executes_and_applies_session_state():
+    marker = object()
+    new_marker = object()
+    context = object()
+    events = [object()]
+    session = types.SimpleNamespace(
+        last_marker=marker,
+        pending_space=False,
+        apply_space_state=MagicMock(),
+    )
+    result = types.SimpleNamespace(
+        marker_changed=True,
+        marker=new_marker,
+        pending_space=True,
+        space_consumed=True,
+    )
+    use_case = MagicMock()
+    use_case.perform_conversion.return_value = result
+
+    perform_space_auto_conversion_at_boundary(
+        use_case=use_case,
+        session=session,
+        context=context,
+        word_len=6,
+        word_events=events,
+        direction="en_to_ru",
+        original_word="ghbdtn",
+        original_lang="en",
+    )
+
+    use_case.perform_conversion.assert_called_once_with(
+        context=context,
+        word_len=6,
+        word_events=events,
+        direction="en_to_ru",
+        original_word="ghbdtn",
+        original_lang="en",
     )
     state = session.apply_space_state.call_args.args[0]
     assert state.last_auto_marker is new_marker
