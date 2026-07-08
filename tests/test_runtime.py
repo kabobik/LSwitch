@@ -53,6 +53,7 @@ from lswitch.runtime import (
     start_runtime_resources,
     stop_runtime_resources,
     sync_user_dictionary_components,
+    try_space_auto_conversion_at_boundary,
     update_passive_selection_baseline_on_click,
     update_selection_baseline,
     wire_runtime_event_bus,
@@ -576,6 +577,44 @@ def test_apply_space_auto_conversion_result_preserves_state_when_result_is_noop(
     )
 
     assert state.last_auto_marker is marker
+    assert state.pending_auto_space is True
+
+
+def test_try_space_auto_conversion_at_boundary_executes_and_applies_session_state():
+    marker = object()
+    new_marker = object()
+    context = object()
+    session = types.SimpleNamespace(
+        last_marker=marker,
+        pending_space=False,
+        apply_space_state=MagicMock(),
+    )
+    result = types.SimpleNamespace(
+        marker_changed=True,
+        marker=new_marker,
+        pending_space=True,
+        space_consumed=True,
+    )
+    use_case = MagicMock()
+    use_case.execute.return_value = result
+
+    consumed = try_space_auto_conversion_at_boundary(
+        use_case=use_case,
+        session=session,
+        context=context,
+        threshold=3,
+        auto_confirm_enabled=True,
+    )
+
+    assert consumed is True
+    use_case.execute.assert_called_once_with(
+        context=context,
+        threshold=3,
+        last_auto_marker=marker,
+        auto_confirm_enabled=True,
+    )
+    state = session.apply_space_state.call_args.args[0]
+    assert state.last_auto_marker is new_marker
     assert state.pending_auto_space is True
 
 

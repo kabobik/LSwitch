@@ -31,6 +31,7 @@ from lswitch.runtime import (
     start_runtime_resources,
     stop_runtime_resources,
     sync_user_dictionary_components,
+    try_space_auto_conversion_at_boundary,
     update_passive_selection_baseline_on_click,
     update_selection_baseline,
     wire_runtime_event_bus,
@@ -452,21 +453,13 @@ class LSwitchApp:
         convert from the very first word.  Increase to avoid false-positives
         at the start of a field (e.g., 5 = activate after ≥5 chars typed).
         """
-        result = self._space_auto_conversion().execute(
+        return try_space_auto_conversion_at_boundary(
+            use_case=self._space_auto_conversion(),
+            session=self.auto_conversion_session,
             context=self.state_manager.context,
             threshold=self.config.get('auto_switch_threshold', 0),
-            last_auto_marker=self.auto_conversion_session.last_marker,
             auto_confirm_enabled=self.config.get('user_dict_auto_confirm', False),
         )
-
-        state = apply_space_auto_conversion_result(
-            result=result,
-            last_auto_marker=self.auto_conversion_session.last_marker,
-            pending_auto_space=self.auto_conversion_session.pending_space,
-        )
-        self.auto_conversion_session.apply_space_state(state)
-
-        return result.space_consumed
 
     def _extract_last_word_events(self, current_layout=None) -> "tuple[str, list]":
         """Extract events for the last typed word from event_buffer.

@@ -481,6 +481,30 @@ def apply_space_auto_conversion_result(
     )
 
 
+def try_space_auto_conversion_at_boundary(
+    *,
+    use_case,
+    session,
+    context,
+    threshold: int,
+    auto_confirm_enabled: bool,
+) -> bool:
+    """Execute space auto-conversion and apply transient session updates."""
+    result = use_case.execute(
+        context=context,
+        threshold=threshold,
+        last_auto_marker=session.last_marker,
+        auto_confirm_enabled=auto_confirm_enabled,
+    )
+    state = apply_space_auto_conversion_result(
+        result=result,
+        last_auto_marker=session.last_marker,
+        pending_auto_space=session.pending_space,
+    )
+    session.apply_space_state(state)
+    return result.space_consumed
+
+
 def read_mouse_release_selection(*, selection, platform):
     """Read selection after mouse release when platform tracking allows it."""
     if selection is None:
