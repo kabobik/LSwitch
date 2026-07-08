@@ -521,32 +521,28 @@ class LSwitchApp:
             headless=self.headless,
             qt_app=qt_bootstrap.qt_app,
             argv=sys.argv,
-            run_qt_loop=self._run_with_qt_loop,
-            run_evdev_loop=self._run_evdev_loop,
-        )
-
-    def _run_evdev_loop(self):
-        """Evdev event loop (blocking, main thread)."""
-        run_evdev_runtime_until_stopped(
-            is_running=lambda: self._running,
-            device_manager=self.device_manager,
-            event_manager=self.event_manager,
-            stop_runtime=self.stop,
-        )
-
-    def _run_with_qt_loop(self, qt_app, show_tray: bool):
-        """Run evdev in a worker thread while the main thread runs Qt."""
-        run_qt_app_runtime(
-            qt_app=qt_app,
-            event_bus=self.event_bus,
-            show_tray=show_tray,
-            config=self.config,
-            owner_app=self,
-            xkb=self.xkb,
-            is_running=lambda: self._running,
-            device_manager=self.device_manager,
-            event_manager=self.event_manager,
-            stop_runtime=self.stop,
+            run_qt_loop=(
+                lambda qt_app, show_tray: run_qt_app_runtime(
+                    qt_app=qt_app,
+                    event_bus=self.event_bus,
+                    show_tray=show_tray,
+                    config=self.config,
+                    owner_app=self,
+                    xkb=self.xkb,
+                    is_running=lambda: self._running,
+                    device_manager=self.device_manager,
+                    event_manager=self.event_manager,
+                    stop_runtime=self.stop,
+                )
+            ),
+            run_evdev_loop=(
+                lambda: run_evdev_runtime_until_stopped(
+                    is_running=lambda: self._running,
+                    device_manager=self.device_manager,
+                    event_manager=self.event_manager,
+                    stop_runtime=self.stop,
+                )
+            ),
         )
 
     # ------------------------------------------------------------------
