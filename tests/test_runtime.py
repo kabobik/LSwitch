@@ -40,6 +40,7 @@ from lswitch.runtime import (
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
     create_space_auto_conversion_use_case,
+    create_synced_space_auto_conversion_use_case,
     create_tray_indicator,
     decode_buffer_events,
     execute_manual_conversion_with_session,
@@ -654,6 +655,55 @@ def test_create_space_auto_conversion_use_case_wires_retype_service(monkeypatch)
     assert use_case.retype_service.virtual_kb is virtual_kb
     assert use_case.retype_service.xkb is xkb
     assert use_case.retype_service.debug is True
+
+
+def test_create_synced_space_auto_conversion_use_case_syncs_learning_service(
+    monkeypatch,
+):
+    created = {}
+
+    class FakeRetypeService:
+        def __init__(self, virtual_kb, xkb, debug):
+            self.virtual_kb = virtual_kb
+            self.xkb = xkb
+            self.debug = debug
+
+    class FakeSpaceAutoConversionUseCase:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            created["use_case"] = self
+
+    conversion_module = types.ModuleType("lswitch.core.conversion_use_cases")
+    conversion_module.SpaceAutoConversionUseCase = FakeSpaceAutoConversionUseCase
+    retype_module = types.ModuleType("lswitch.core.retype_service")
+    retype_module.RetypeService = FakeRetypeService
+    monkeypatch.setitem(
+        sys.modules,
+        "lswitch.core.conversion_use_cases",
+        conversion_module,
+    )
+    monkeypatch.setitem(sys.modules, "lswitch.core.retype_service", retype_module)
+    user_dict = object()
+    learning_service = MagicMock()
+
+    use_case = create_synced_space_auto_conversion_use_case(
+        auto_detector=object(),
+        typed_buffer=object(),
+        xkb=object(),
+        virtual_kb=object(),
+        user_dict=user_dict,
+        user_dict_min_weight=7,
+        learning_service=learning_service,
+        timing={},
+        debug=True,
+        manual_weight_step=6,
+    )
+
+    assert use_case is created["use_case"]
+    assert use_case.kwargs["learning_service"] is learning_service
+    assert learning_service.user_dict is user_dict
+    assert learning_service.debug is True
+    assert learning_service.manual_weight_step == 6
 
 
 def test_create_manual_conversion_controller_wires_dependencies(monkeypatch):

@@ -19,7 +19,7 @@ from lswitch.runtime import (
     create_manual_conversion_controller,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
-    create_space_auto_conversion_use_case,
+    create_synced_space_auto_conversion_use_case,
     create_tray_indicator,
     decode_buffer_events,
     execute_manual_conversion_with_session,
@@ -462,20 +462,17 @@ class LSwitchApp:
         )
 
     def _space_auto_conversion(self):
-        return create_space_auto_conversion_use_case(
+        return create_synced_space_auto_conversion_use_case(
             auto_detector=self.auto_detector,
             typed_buffer=self.typed_buffer,
             xkb=self.xkb,
             virtual_kb=self.virtual_kb,
-            learning_service=synced_learning_service(
-                user_dict=self.user_dict,
-                user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
-                learning_service=self.learning_service,
-                debug=self.debug,
-                manual_weight_step=self.MANUAL_WEIGHT_STEP,
-            ),
+            user_dict=self.user_dict,
+            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
+            learning_service=self.learning_service,
             timing=self.timing,
             debug=self.debug,
+            manual_weight_step=self.MANUAL_WEIGHT_STEP,
         )
 
     # ------------------------------------------------------------------

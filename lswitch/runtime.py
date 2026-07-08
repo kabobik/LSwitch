@@ -493,6 +493,37 @@ def create_space_auto_conversion_use_case(
     )
 
 
+def create_synced_space_auto_conversion_use_case(
+    *,
+    auto_detector,
+    typed_buffer,
+    xkb,
+    virtual_kb,
+    user_dict,
+    user_dict_min_weight,
+    learning_service,
+    timing: dict,
+    debug: bool,
+    manual_weight_step: int,
+):
+    """Create space auto-conversion use case with learning service synced first."""
+    return create_space_auto_conversion_use_case(
+        auto_detector=auto_detector,
+        typed_buffer=typed_buffer,
+        xkb=xkb,
+        virtual_kb=virtual_kb,
+        learning_service=synced_learning_service(
+            user_dict=user_dict,
+            user_dict_min_weight=user_dict_min_weight,
+            learning_service=learning_service,
+            debug=debug,
+            manual_weight_step=manual_weight_step,
+        ),
+        timing=timing,
+        debug=debug,
+    )
+
+
 def create_manual_conversion_controller(
     *,
     state_manager,
