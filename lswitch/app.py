@@ -330,9 +330,6 @@ class LSwitchApp:
     def _selection_baseline_initialized(self, value: bool) -> None:
         self.selection_tracker.baseline_initialized = bool(value)
 
-    def _clear_selection_repeat(self) -> None:
-        self.selection_tracker.clear_repeat()
-
     @property
     def _last_auto_marker(self):
         return self.auto_conversion_session.last_marker
