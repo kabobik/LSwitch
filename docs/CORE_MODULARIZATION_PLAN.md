@@ -377,28 +377,33 @@ AutoSwitchResult(kind="converted", marker=...)
   вынесены из `LSwitchApp`;
 - manual/undo/space conversion flow живет в controllers/use cases;
 - user dictionary learning side effects идут через `LearningService`;
-- runtime config update, user dictionary enable, Qt/evdev loop composition и
-  resource lifecycle вынесены в `runtime.py`;
+- runtime config update, user dictionary enable, Qt/evdev loop composition,
+  selection helpers, conversion boundary и resource lifecycle вынесены из
+  `runtime.py` в отдельные runtime modules;
+- input router получает conversion/selection зависимости через явные port
+  objects, а не длинный список callback-ов;
 - `LSwitchApp` больше не содержит крупных key/mouse handlers.
 
 Осталось:
 
-- `LSwitchApp` все еще содержит conversion wiring methods:
+- `LSwitchApp` все еще содержит thin compatibility wrappers:
   `_do_conversion()`, `_try_auto_conversion_at_space()`,
   `_do_auto_conversion_at_space()`, `_space_auto_conversion()`;
-- `LSwitchApp` сохраняет compatibility properties для старых tests/UI:
+- `LSwitchApp` сохраняет compatibility properties для старого внешнего API:
   `_selection_valid`, `_selection_generation`, `_prev_sel_text`,
   `_last_auto_marker`, `_pending_auto_space`;
-- `runtime.py` стал слишком широким и постепенно превращается во второй
-  composition-heavy module;
-- app-level tests все еще часто проверяют private facade вместо отдельных
-  services/controllers;
-- feature-планы еще не должны стартовать, пока conversion runtime boundary и
-  test ownership не стабилизированы.
+- `runtime.py` все еще остается compatibility/composition module, но уже не
+  содержит config/selection/lifecycle/conversion helper blocks физически;
+- app-level tests почти не проверяют private conversion/session facade:
+  остались только smoke tests для `_do_conversion()`;
+- следующий этап - feature readiness gate перед возвратом к mid-word,
+  per-app layout memory и layout profile планам.
 
 ## 7. Следующие крупные пакеты работ
 
 ### Пакет A - Conversion Runtime Facade
+
+Статус: выполнено.
 
 Цель: убрать conversion orchestration из `LSwitchApp`, не меняя behavior.
 
@@ -433,7 +438,17 @@ Acceptance:
 - tests для manual/space conversion можно запускать без полного app lifecycle;
 - текущий полный test suite проходит.
 
+Фактический результат:
+
+- `ConversionRuntimeFacade` создан и используется input router wiring-ом;
+- app conversion methods стали thin compatibility wrappers;
+- `DebugMonitor` и tests используют `conversion_runtime` /
+  `auto_conversion_session` вместо private app fields.
+
 ### Пакет B - App Compatibility Facade Cleanup
+
+Статус: выполнено для conversion/session surface, оставлен минимальный
+compatibility smoke.
 
 Цель: оставить `LSwitchApp` публичной точкой входа, но перестать использовать
 его private fields как основной тестовый API.
@@ -455,7 +470,16 @@ Acceptance:
 - количество прямых обращений tests к `LSwitchApp._*` заметно снижено;
 - полный test suite проходит.
 
+Фактический результат:
+
+- auto-conversion, user-dict, selection conversion, regression и debug monitor
+  tests переведены на state owners/facade;
+- в app tests остались только lifecycle/wiring smoke и `_do_conversion()`
+  compatibility coverage.
+
 ### Пакет C - Runtime Module Split
+
+Статус: выполнено как совместимый split.
 
 Цель: не дать `runtime.py` стать новым god module.
 
@@ -478,7 +502,19 @@ Acceptance:
   одним механическим commit-ом;
 - tests runtime/config/lifecycle/conversion остаются зелеными.
 
+Фактический результат:
+
+```text
+lswitch/runtime.py              # compatibility exports + composition factories
+lswitch/runtime_config.py       # config reload, timing, user dict sync
+lswitch/runtime_lifecycle.py    # pid lock, evdev/Qt loops, resources
+lswitch/runtime_selection.py    # selection baseline/poller helpers
+lswitch/runtime_conversion.py   # conversion facade/factories/boundaries
+```
+
 ### Пакет D - Input Router Callback Contract Cleanup
+
+Статус: выполнено.
 
 Цель: заменить часть callback soup на явные runtime/controller объекты.
 
@@ -496,7 +532,16 @@ Acceptance:
 - `LSwitchApp.__init__` не собирает длинные callback lists;
 - input router tests продолжают проверять behavior на уровне событий.
 
+Фактический результат:
+
+- `InputEventRouter` принимает `InputConversionPort` и `InputSelectionPort`;
+- `InputRouterCallbacks` состоит из двух port objects;
+- `LSwitchApp.__init__` передает `conversion_runtime` целиком, а не набор
+  conversion lambdas.
+
 ### Пакет E - Feature Readiness Gate
+
+Статус: следующий пакет.
 
 Цель: определить, когда можно возвращаться к feature-планам
 `MID_WORD_SYSTEM_DICTIONARY_PLAN.md`, `PER_APP_LAYOUT_MEMORY_PLAN.md` и
@@ -511,6 +556,13 @@ Feature-работы можно начинать, когда выполнены 
 - full suite зеленый;
 - для mid-word есть отдельная точка расширения рядом с
   `SpaceAutoConversionUseCase`, а не новый блок в `LSwitchApp`.
+
+Текущая оценка:
+
+- первые четыре условия выполнены;
+- перед стартом feature-работ нужно зафиксировать extension point для mid-word
+  рядом с `SpaceAutoConversionUseCase` и обновить соответствующий feature plan;
+- после этого можно переходить к `MID_WORD_SYSTEM_DICTIONARY_PLAN.md`.
 
 ## 8. Что делать после модульного ядра
 
