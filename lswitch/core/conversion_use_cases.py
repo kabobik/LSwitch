@@ -53,6 +53,40 @@ class SpaceAutoConversionResult:
     marker_changed: bool = False
 
 
+@dataclass(frozen=True)
+class AutoConversionCandidate:
+    text: str
+    events: list
+    current_lang: str
+
+
+class SpaceAutoConversionCandidateProvider:
+    """Extract the current word-boundary candidate for auto-conversion."""
+
+    def __init__(self, *, typed_buffer, xkb: "IXKBAdapter", layout_service):
+        self.typed_buffer = typed_buffer
+        self.xkb = xkb
+        self.layout_service = layout_service
+
+    def candidate_for_context(
+        self,
+        *,
+        context: "StateContext",
+        current_layout_info,
+    ) -> AutoConversionCandidate:
+        current_lang = self.layout_service.layout_to_lang(current_layout_info)
+        token = self.typed_buffer.last_word(
+            context,
+            current_layout=current_layout_info,
+            xkb=self.xkb,
+        )
+        return AutoConversionCandidate(
+            text=token.text,
+            events=token.events,
+            current_lang=current_lang,
+        )
+
+
 class UndoAutoConversionUseCase:
     """Undo the latest automatic conversion and record a keep correction."""
 
@@ -312,6 +346,7 @@ class SpaceAutoConversionUseCase:
         learning_service: "LearningService",
         timing: dict | None = None,
         debug: bool = False,
+        candidate_provider=None,
     ):
         self.auto_detector = auto_detector
         self.typed_buffer = typed_buffer
@@ -321,6 +356,13 @@ class SpaceAutoConversionUseCase:
         self.layout_service = LayoutService(xkb)
         self.timing = timing or {}
         self.debug = debug
+        self.candidate_provider = candidate_provider
+        if self.candidate_provider is None:
+            self.candidate_provider = SpaceAutoConversionCandidateProvider(
+                typed_buffer=typed_buffer,
+                xkb=xkb,
+                layout_service=self.layout_service,
+            )
 
     def execute(
         self,
@@ -352,33 +394,31 @@ class SpaceAutoConversionUseCase:
         except Exception:
             return SpaceAutoConversionResult(space_consumed=False)
 
-        current_lang = self.layout_service.layout_to_lang(current_layout_info)
-        token = self.typed_buffer.last_word(
-            context,
-            current_layout=current_layout_info,
-            xkb=self.xkb,
+        candidate = self.candidate_provider.candidate_for_context(
+            context=context,
+            current_layout_info=current_layout_info,
         )
 
         logger.debug(
             "AutoConv: extracted word=%r (%d chars), lang=%s, buf=%d",
-            token.text,
-            len(token.text) if token.text else 0,
-            current_lang,
+            candidate.text,
+            len(candidate.text) if candidate.text else 0,
+            candidate.current_lang,
             context.chars_in_buffer,
         )
 
-        if not token.text or len(token.text) < self.min_word_len:
+        if not candidate.text or len(candidate.text) < self.min_word_len:
             logger.debug(
                 "Auto-conv skipped: word %r too short (%d chars)",
-                token.text,
-                len(token.text) if token.text else 0,
+                candidate.text,
+                len(candidate.text) if candidate.text else 0,
             )
             return SpaceAutoConversionResult(space_consumed=False)
 
         try:
             should, reason = self.auto_detector.should_convert(
-                token.text,
-                current_lang,
+                candidate.text,
+                candidate.current_lang,
             )
         except Exception as exc:
             logger.warning("AutoDetector error: %s", exc)
@@ -398,20 +438,20 @@ class SpaceAutoConversionUseCase:
                 marker_changed=marker_changed,
             )
 
-        direction = "en_to_ru" if current_lang == "en" else "ru_to_en"
+        direction = "en_to_ru" if candidate.current_lang == "en" else "ru_to_en"
         logger.info(
             "Auto-convert at space: '%s' → %s (%s)",
-            token.text,
+            candidate.text,
             direction,
             reason,
         )
         result = self.perform_conversion(
             context=context,
-            word_len=len(token.events),
-            word_events=token.events,
+            word_len=len(candidate.events),
+            word_events=candidate.events,
             direction=direction,
-            original_word=token.text,
-            original_lang=current_lang,
+            original_word=candidate.text,
+            original_lang=candidate.current_lang,
         )
         return SpaceAutoConversionResult(
             space_consumed=True,

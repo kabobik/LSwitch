@@ -74,8 +74,24 @@ MidWordDetector
   - возвращает decision + reason.
 ```
 
-`LSwitchApp._on_key_press()` после добавления обычного символа в `event_buffer`
-может вызывать `MidWordDetector`, но только если включена отдельная настройка.
+Интеграция не должна добавляться напрямую в `LSwitchApp`. После модульного
+рефакторинга входная точка должна быть такой:
+
+```text
+InputEventRouter / typing flow
+  -> ConversionRuntimeFacade
+    -> SpaceAutoConversionUseCase
+    -> MidWordAutoConversionUseCase
+      -> AutoConversionCandidate / prefix provider
+      -> MidWordDetector
+      -> RetypeService
+      -> AutoConversionMarker(kind="mid_word")
+```
+
+Текущий space-triggered flow должен иметь явную точку расширения для candidate
+extraction рядом с `SpaceAutoConversionUseCase`. Mid-word режим подключается
+через новый use case, который переиспользует typed-buffer candidate/prefix
+extraction, `RetypeService` и typed marker model.
 
 ## 4. Настройки
 
@@ -228,10 +244,13 @@ mid-word режим должен быть optional.
 2. Добавить unit tests на prefix lookup и неоднозначные префиксы.
 3. Добавить `SystemDictionaryLoader`, который optional подмешивает Hunspell `.dic`.
 4. Добавить `MidWordDetector.should_switch(prefix, current_lang)`.
-5. Добавить конфиг `auto_switch_mid_word = false`.
-6. Подключить detector в `_on_key_press()` после обновления `event_buffer`.
-7. Реализовать mid-word switch replay и undo marker.
-8. Добавить diagnostics и manual QA сценарии.
+5. Добавить config/runtime wiring для `auto_switch_mid_word = false`.
+6. Добавить `MidWordAutoConversionUseCase` рядом со
+   `SpaceAutoConversionUseCase`, используя общий candidate/prefix provider.
+7. Подключить use case через `ConversionRuntimeFacade` и input router typing
+   flow после обновления `event_buffer`.
+8. Реализовать mid-word switch replay и undo marker.
+9. Добавить diagnostics и manual QA сценарии.
 
 MVP лучше сначала сделать на встроенных словарях, затем подключать системные.
 Так проще отделить алгоритм от проблем наличия пакетов на конкретной системе.

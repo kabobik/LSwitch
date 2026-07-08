@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from lswitch.core.auto_marker import AutoConversionMarker
 from lswitch.core.conversion_use_cases import (
+    AutoConversionCandidate,
     KEY_BACKSPACE,
     KEY_SPACE,
     ManualConversionPreparer,
@@ -370,9 +371,21 @@ def test_manual_conversion_use_case_failure_skips_learning_and_clears_repeat():
 class _Detector:
     def __init__(self, should: bool):
         self.should = should
+        self.calls = []
 
     def should_convert(self, word: str, current_lang: str):
+        self.calls.append((word, current_lang))
         return self.should, "test"
+
+
+class _CandidateProvider:
+    def __init__(self, candidate: AutoConversionCandidate):
+        self.candidate = candidate
+        self.calls = []
+
+    def candidate_for_context(self, *, context, current_layout_info):
+        self.calls.append((context, current_layout_info))
+        return self.candidate
 
 
 def _context_with_events(codes: list[int]) -> StateContext:
@@ -409,6 +422,93 @@ def _space_auto_use_case(*, should_convert: bool = True):
         },
     )
     return use_case, xkb, retype_service, learning_service
+
+
+def test_space_auto_conversion_use_case_uses_injected_candidate_provider():
+    xkb = MagicMock()
+    en_layout = LayoutInfo(name="en", index=0, xkb_name="us")
+    ru_layout = LayoutInfo(name="ru", index=1, xkb_name="ru")
+    xkb.get_current_layout.return_value = en_layout
+    xkb.get_layouts.return_value = [en_layout, ru_layout]
+    typed_buffer = MagicMock()
+    retype_service = MagicMock()
+    retype_service.retype_events.return_value = True
+    detector = _Detector(True)
+    candidate_events = [
+        KeyEventData(code=34, value=1, device_name="provider"),
+        KeyEventData(code=35, value=1, device_name="provider"),
+    ]
+    provider = _CandidateProvider(
+        AutoConversionCandidate(
+            text="zz",
+            events=candidate_events,
+            current_lang="en",
+        )
+    )
+    use_case = SpaceAutoConversionUseCase(
+        auto_detector=detector,
+        typed_buffer=typed_buffer,
+        xkb=xkb,
+        retype_service=retype_service,
+        learning_service=MagicMock(),
+        timing={"auto_before_replay_delay": 0, "auto_before_space_delay": 0},
+        candidate_provider=provider,
+    )
+    context = _context_with_events([30, 31, 32])
+
+    result = use_case.execute(
+        context=context,
+        threshold=0,
+        last_auto_marker=None,
+        auto_confirm_enabled=False,
+    )
+
+    assert result.space_consumed is True
+    assert result.marker is not None
+    assert result.marker.original_word == "zz"
+    assert result.marker.word_events == candidate_events
+    assert detector.calls == [("zz", "en")]
+    typed_buffer.last_word.assert_not_called()
+    assert provider.calls == [(context, en_layout)]
+    retype_service.retype_events.assert_called_once_with(
+        candidate_events,
+        delete_count=3,
+        target_layout=ru_layout,
+        before_replay_delay=0,
+        backspace_n_times_keyword=True,
+    )
+
+
+def test_space_auto_conversion_use_case_skips_empty_candidate_from_provider():
+    xkb = MagicMock()
+    en_layout = LayoutInfo(name="en", index=0, xkb_name="us")
+    xkb.get_current_layout.return_value = en_layout
+    typed_buffer = MagicMock()
+    retype_service = MagicMock()
+    detector = _Detector(True)
+    provider = _CandidateProvider(
+        AutoConversionCandidate(text="", events=[], current_lang="en")
+    )
+    use_case = SpaceAutoConversionUseCase(
+        auto_detector=detector,
+        typed_buffer=typed_buffer,
+        xkb=xkb,
+        retype_service=retype_service,
+        learning_service=MagicMock(),
+        candidate_provider=provider,
+    )
+
+    result = use_case.execute(
+        context=_context_with_events([34, 35]),
+        threshold=0,
+        last_auto_marker=None,
+        auto_confirm_enabled=False,
+    )
+
+    assert result.space_consumed is False
+    assert detector.calls == []
+    typed_buffer.last_word.assert_not_called()
+    retype_service.retype_events.assert_not_called()
 
 
 def test_space_auto_conversion_use_case_retypes_word_and_returns_marker():

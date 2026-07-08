@@ -539,11 +539,36 @@ Acceptance:
 - `LSwitchApp.__init__` передает `conversion_runtime` целиком, а не набор
   conversion lambdas.
 
-### Пакет E - Feature Readiness Gate
+### Пакет E - Auto-Conversion Extension Point
 
 Статус: следующий пакет.
 
-Цель: определить, когда можно возвращаться к feature-планам
+Цель: подготовить auto-conversion ядро к mid-word режиму без возврата новой
+логики в `LSwitchApp`.
+
+Сделать:
+
+- выделить рядом с `SpaceAutoConversionUseCase` явную модель candidate/prefix,
+  которую можно получить из typed buffer;
+- оставить текущий space-triggered behavior неизменным;
+- сделать так, чтобы будущий `MidWordAutoConversionUseCase` мог переиспользовать
+  extraction/retype/marker primitives;
+- обновить `MID_WORD_SYSTEM_DICTIONARY_PLAN.md`, чтобы feature подключалась к
+  conversion runtime/use case слою, а не к `LSwitchApp`.
+
+Acceptance:
+
+- `SpaceAutoConversionUseCase` больше не извлекает token как закрытую
+  inline-деталь, а получает его через отдельную точку расширения;
+- новый extension point покрыт unit tests;
+- полный test suite проходит;
+- feature plan обновлен под текущую архитектуру.
+
+### Пакет F - Feature Readiness Gate
+
+Статус: после пакета E.
+
+Цель: принять решение о возврате к feature-планам
 `MID_WORD_SYSTEM_DICTIONARY_PLAN.md`, `PER_APP_LAYOUT_MEMORY_PLAN.md` и
 `LAYOUT_PROFILE_ARCHITECTURE_PLAN.md`.
 
