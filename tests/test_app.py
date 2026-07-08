@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -162,11 +163,11 @@ class TestDoConversion:
     def test_input_router_uses_conversion_runtime_callbacks(self):
         app = _make_app()
         assert (
-            app.input_router.request_conversion
+            app.input_router.conversion.request_conversion
             == app.conversion_runtime.request_manual_conversion
         )
         assert (
-            app.input_router.try_auto_conversion_at_space
+            app.input_router.conversion.try_auto_conversion_at_space
             == app.conversion_runtime.try_space_auto_conversion
         )
 
@@ -320,7 +321,10 @@ class TestOnKeyRelease:
                  app.conversion_runtime,
                  'request_manual_conversion',
              ) as mock_conv:
-            app.input_router.request_conversion = mock_conv
+            app.input_router.conversion = replace(
+                app.input_router.conversion,
+                request_conversion=mock_conv,
+            )
             event = _make_event(EventType.KEY_RELEASE, KEY_LEFTSHIFT, value=0)
             app.input_router.on_key_release(event)
             mock_conv.assert_called_once()

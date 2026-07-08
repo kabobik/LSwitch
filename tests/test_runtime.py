@@ -12,7 +12,7 @@ from lswitch.core.event_bus import EventBus
 from lswitch.core.event_manager import EventManager
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.conversion_engine import ConversionEngine
-from lswitch.core.input_router import InputEventRouter
+from lswitch.core.input_router import InputConversionPort, InputEventRouter
 from lswitch.core.learning_service import LearningService
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
@@ -350,15 +350,17 @@ def test_create_input_router_wires_core_components_and_callbacks():
     router = create_input_router(
         core=core,
         callbacks=InputRouterCallbacks(
-            decode_buffer=lambda: "",
-            auto_conversion_enabled=lambda: False,
-            try_auto_conversion_at_space=lambda: False,
-            get_pending_auto_space=lambda: True,
-            set_pending_auto_space=set_pending_auto_space,
-            clear_last_retype_events=clear_last_retype_events,
-            clear_last_auto_marker=lambda: None,
-            inject_deferred_space=lambda: None,
-            request_conversion=lambda: None,
+            conversion=InputConversionPort(
+                decode_buffer=lambda: "",
+                auto_conversion_enabled=lambda: False,
+                try_auto_conversion_at_space=lambda: False,
+                get_pending_auto_space=lambda: True,
+                set_pending_auto_space=set_pending_auto_space,
+                clear_last_retype_events=clear_last_retype_events,
+                clear_last_auto_marker=lambda: None,
+                inject_deferred_space=lambda: None,
+                request_conversion=lambda: None,
+            ),
             prime_selection_baseline_on_click=lambda: None,
             read_mouse_release_selection=lambda: None,
         ),
@@ -401,11 +403,12 @@ def test_create_input_router_callbacks_wires_session_callbacks():
     )
 
     assert isinstance(callbacks, InputRouterCallbacks)
-    assert callbacks.decode_buffer() == "buffer"
-    assert callbacks.get_pending_auto_space() is True
-    callbacks.set_pending_auto_space(False)
-    callbacks.clear_last_retype_events()
-    callbacks.clear_last_auto_marker()
+    assert isinstance(callbacks.conversion, InputConversionPort)
+    assert callbacks.conversion.decode_buffer() == "buffer"
+    assert callbacks.conversion.get_pending_auto_space() is True
+    callbacks.conversion.set_pending_auto_space(False)
+    callbacks.conversion.clear_last_retype_events()
+    callbacks.conversion.clear_last_auto_marker()
 
     session.set_pending_space.assert_called_once_with(False)
     session.clear_sticky_events.assert_called_once()
@@ -436,7 +439,7 @@ def test_create_input_router_callbacks_late_binds_auto_conversion_enabled():
         log=MagicMock(),
     )
 
-    assert callbacks.auto_conversion_enabled() is True
+    assert callbacks.conversion.auto_conversion_enabled() is True
     config.get.assert_called_once_with("auto_switch")
 
 
@@ -504,7 +507,7 @@ def test_create_input_router_callbacks_late_binds_virtual_keyboard_for_deferred_
         log=MagicMock(),
     )
 
-    callbacks.inject_deferred_space()
+    callbacks.conversion.inject_deferred_space()
 
     from lswitch.core.event_manager import KEY_SPACE
 

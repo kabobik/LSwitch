@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.event_bus import EventBus
 from lswitch.core.event_manager import EventManager
-from lswitch.core.input_router import InputEventRouter
+from lswitch.core.input_router import InputConversionPort, InputEventRouter
 from lswitch.core.learning_service import LearningService
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
@@ -83,15 +83,7 @@ class RuntimeCoreComponents:
 
 @dataclass(frozen=True)
 class InputRouterCallbacks:
-    decode_buffer: Callable[[], str]
-    auto_conversion_enabled: Callable[[], bool]
-    try_auto_conversion_at_space: Callable[[], bool]
-    get_pending_auto_space: Callable[[], bool]
-    set_pending_auto_space: Callable[[bool], None]
-    clear_last_retype_events: Callable[[], None]
-    clear_last_auto_marker: Callable[[], None]
-    inject_deferred_space: Callable[[], None]
-    request_conversion: Callable[[], None]
+    conversion: InputConversionPort
     prime_selection_baseline_on_click: Callable[[], None]
     read_mouse_release_selection: Callable[[], object | None]
 
@@ -157,20 +149,20 @@ def create_input_router_callbacks(
 ) -> InputRouterCallbacks:
     """Create late-bound callbacks needed by InputEventRouter."""
     return InputRouterCallbacks(
-        decode_buffer=decode_buffer,
-        auto_conversion_enabled=(
-            lambda: auto_conversion_enabled(
+        conversion=InputConversionPort(
+            decode_buffer=decode_buffer,
+            auto_conversion_enabled=lambda: auto_conversion_enabled(
                 config=config,
                 auto_detector=get_auto_detector(),
-            )
+            ),
+            try_auto_conversion_at_space=try_auto_conversion_at_space,
+            get_pending_auto_space=lambda: auto_conversion_session.pending_space,
+            set_pending_auto_space=auto_conversion_session.set_pending_space,
+            clear_last_retype_events=auto_conversion_session.clear_sticky_events,
+            clear_last_auto_marker=auto_conversion_session.clear_marker,
+            inject_deferred_space=lambda: inject_deferred_space(get_virtual_kb()),
+            request_conversion=request_conversion,
         ),
-        try_auto_conversion_at_space=try_auto_conversion_at_space,
-        get_pending_auto_space=lambda: auto_conversion_session.pending_space,
-        set_pending_auto_space=auto_conversion_session.set_pending_space,
-        clear_last_retype_events=auto_conversion_session.clear_sticky_events,
-        clear_last_auto_marker=auto_conversion_session.clear_marker,
-        inject_deferred_space=lambda: inject_deferred_space(get_virtual_kb()),
-        request_conversion=request_conversion,
         prime_selection_baseline_on_click=(
             lambda: update_passive_selection_baseline_on_click(
                 selection_tracker=selection_tracker,
@@ -211,15 +203,7 @@ def create_input_router(
         state_manager=core.state_manager,
         typed_buffer=core.typed_buffer,
         selection_tracker=core.selection_tracker,
-        decode_buffer=callbacks.decode_buffer,
-        auto_conversion_enabled=callbacks.auto_conversion_enabled,
-        try_auto_conversion_at_space=callbacks.try_auto_conversion_at_space,
-        get_pending_auto_space=callbacks.get_pending_auto_space,
-        set_pending_auto_space=callbacks.set_pending_auto_space,
-        clear_last_retype_events=callbacks.clear_last_retype_events,
-        clear_last_auto_marker=callbacks.clear_last_auto_marker,
-        inject_deferred_space=callbacks.inject_deferred_space,
-        request_conversion=callbacks.request_conversion,
+        conversion=callbacks.conversion,
         prime_selection_baseline_on_click=callbacks.prime_selection_baseline_on_click,
         read_mouse_release_selection=callbacks.read_mouse_release_selection,
     )

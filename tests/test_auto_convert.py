@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import time
 from unittest.mock import MagicMock, call, patch
 
@@ -422,7 +423,10 @@ class TestSpaceKeyHandling:
             'try_space_auto_conversion',
             return_value=True,
         ) as mock_try:
-            app.input_router.try_auto_conversion_at_space = mock_try
+            app.input_router.conversion = replace(
+                app.input_router.conversion,
+                try_auto_conversion_at_space=mock_try,
+            )
             event = _event(KEY_SPACE)
             app.input_router.on_key_press(event)
             mock_try.assert_called_once()

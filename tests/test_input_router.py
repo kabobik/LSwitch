@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.event_manager import KEY_BACKSPACE, KEY_ENTER, KEY_SPACE
-from lswitch.core.input_router import InputEventRouter
+from lswitch.core.input_router import InputConversionPort, InputEventRouter
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
 from lswitch.core.typed_buffer import TypedBufferService
@@ -44,15 +44,21 @@ def _router(
         state_manager=state_manager,
         typed_buffer=typed_buffer,
         selection_tracker=selection_tracker,
-        decode_buffer=lambda: typed_buffer.decode(state_manager.context.event_buffer),
-        auto_conversion_enabled=auto_conversion_enabled or (lambda: False),
-        try_auto_conversion_at_space=try_auto_conversion_at_space or (lambda: False),
-        get_pending_auto_space=get_pending_auto_space or (lambda: False),
-        set_pending_auto_space=set_pending_auto_space or (lambda value: None),
-        clear_last_retype_events=clear_last_retype_events or (lambda: None),
-        clear_last_auto_marker=clear_last_auto_marker or (lambda: None),
-        inject_deferred_space=inject_deferred_space or (lambda: None),
-        request_conversion=request_conversion or (lambda: None),
+        conversion=InputConversionPort(
+            decode_buffer=lambda: typed_buffer.decode(
+                state_manager.context.event_buffer
+            ),
+            auto_conversion_enabled=auto_conversion_enabled or (lambda: False),
+            try_auto_conversion_at_space=(
+                try_auto_conversion_at_space or (lambda: False)
+            ),
+            get_pending_auto_space=get_pending_auto_space or (lambda: False),
+            set_pending_auto_space=set_pending_auto_space or (lambda value: None),
+            clear_last_retype_events=clear_last_retype_events or (lambda: None),
+            clear_last_auto_marker=clear_last_auto_marker or (lambda: None),
+            inject_deferred_space=inject_deferred_space or (lambda: None),
+            request_conversion=request_conversion or (lambda: None),
+        ),
         prime_selection_baseline_on_click=(
             prime_selection_baseline_on_click or (lambda: None)
         ),
