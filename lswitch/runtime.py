@@ -560,6 +560,49 @@ def create_manual_conversion_controller(
     )
 
 
+def create_synced_manual_conversion_controller(
+    *,
+    state_manager,
+    selection_tracker,
+    typed_buffer,
+    user_dict,
+    user_dict_min_weight,
+    learning_service,
+    conversion_engine,
+    virtual_kb,
+    xkb,
+    selection,
+    timing: dict,
+    debug: bool,
+    manual_weight_step: int,
+    decode_events,
+    extract_last_word,
+    update_selection_baseline,
+):
+    """Create manual conversion controller with learning service synced first."""
+    return create_manual_conversion_controller(
+        state_manager=state_manager,
+        selection_tracker=selection_tracker,
+        typed_buffer=typed_buffer,
+        learning_service=synced_learning_service(
+            user_dict=user_dict,
+            user_dict_min_weight=user_dict_min_weight,
+            learning_service=learning_service,
+            debug=debug,
+            manual_weight_step=manual_weight_step,
+        ),
+        conversion_engine=conversion_engine,
+        virtual_kb=virtual_kb,
+        xkb=xkb,
+        selection=selection,
+        timing=timing,
+        debug=debug,
+        decode_events=decode_events,
+        extract_last_word=extract_last_word,
+        update_selection_baseline=update_selection_baseline,
+    )
+
+
 def execute_manual_conversion_with_session(*, controller, session) -> None:
     """Execute manual conversion and apply transient session updates."""
     result = controller.execute(

@@ -16,9 +16,9 @@ from lswitch.runtime import (
     create_core_components,
     create_input_router,
     create_input_router_callbacks,
-    create_manual_conversion_controller,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
+    create_synced_manual_conversion_controller,
     create_synced_space_auto_conversion_use_case,
     create_tray_indicator,
     decode_buffer_events,
@@ -362,23 +362,20 @@ class LSwitchApp:
              AutoDetector will handle this word automatically.
         """
         execute_manual_conversion_with_session(
-            controller=create_manual_conversion_controller(
+            controller=create_synced_manual_conversion_controller(
                 state_manager=self.state_manager,
                 selection_tracker=self.selection_tracker,
                 typed_buffer=self.typed_buffer,
-                learning_service=synced_learning_service(
-                    user_dict=self.user_dict,
-                    user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
-                    learning_service=self.learning_service,
-                    debug=self.debug,
-                    manual_weight_step=self.MANUAL_WEIGHT_STEP,
-                ),
+                user_dict=self.user_dict,
+                user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
+                learning_service=self.learning_service,
                 conversion_engine=self.conversion_engine,
                 virtual_kb=self.virtual_kb,
                 xkb=self.xkb,
                 selection=self.selection,
                 timing=self.timing,
                 debug=self.debug,
+                manual_weight_step=self.MANUAL_WEIGHT_STEP,
                 decode_events=self._decode_buffer,
                 extract_last_word=(
                     lambda current_layout=None: extract_last_word_events(

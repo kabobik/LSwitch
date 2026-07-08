@@ -40,6 +40,7 @@ from lswitch.runtime import (
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
     create_space_auto_conversion_use_case,
+    create_synced_manual_conversion_controller,
     create_synced_space_auto_conversion_use_case,
     create_tray_indicator,
     decode_buffer_events,
@@ -741,6 +742,52 @@ def test_create_manual_conversion_controller_wires_dependencies(monkeypatch):
 
     assert controller is created["controller"]
     assert controller.kwargs == dependencies
+
+
+def test_create_synced_manual_conversion_controller_syncs_learning_service(
+    monkeypatch,
+):
+    created = {}
+
+    class FakeManualConversionController:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            created["controller"] = self
+
+    controller_module = types.ModuleType("lswitch.core.manual_conversion_controller")
+    controller_module.ManualConversionController = FakeManualConversionController
+    monkeypatch.setitem(
+        sys.modules,
+        "lswitch.core.manual_conversion_controller",
+        controller_module,
+    )
+    user_dict = object()
+    learning_service = MagicMock()
+
+    controller = create_synced_manual_conversion_controller(
+        state_manager=object(),
+        selection_tracker=object(),
+        typed_buffer=object(),
+        user_dict=user_dict,
+        user_dict_min_weight=8,
+        learning_service=learning_service,
+        conversion_engine=object(),
+        virtual_kb=object(),
+        xkb=object(),
+        selection=object(),
+        timing={},
+        debug=True,
+        manual_weight_step=5,
+        decode_events=object(),
+        extract_last_word=object(),
+        update_selection_baseline=object(),
+    )
+
+    assert controller is created["controller"]
+    assert controller.kwargs["learning_service"] is learning_service
+    assert learning_service.user_dict is user_dict
+    assert learning_service.debug is True
+    assert learning_service.manual_weight_step == 5
 
 
 def test_execute_manual_conversion_with_session_passes_and_applies_state():
