@@ -397,7 +397,14 @@ class LSwitchApp:
                 timing=self.timing,
                 debug=self.debug,
                 decode_events=self._decode_buffer,
-                extract_last_word=self._extract_last_word_events,
+                extract_last_word=(
+                    lambda current_layout=None: extract_last_word_events(
+                        typed_buffer=self.typed_buffer,
+                        context=self.state_manager.context,
+                        current_layout=current_layout,
+                        xkb=self.xkb,
+                    )
+                ),
                 update_selection_baseline=(
                     lambda: update_selection_baseline(
                         selection_tracker=self.selection_tracker,
