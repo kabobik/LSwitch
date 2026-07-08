@@ -54,6 +54,14 @@ class SpaceAutoConversionResult:
 
 
 @dataclass(frozen=True)
+class MidWordAutoConversionResult:
+    switched: bool
+    marker: AutoConversionMarker | None = None
+    marker_changed: bool = False
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class AutoConversionCandidate:
     text: str
     events: list
@@ -510,4 +518,100 @@ class SpaceAutoConversionUseCase:
             pending_space=True,
             marker=marker,
             marker_changed=marker is not None,
+        )
+
+
+class MidWordAutoConversionUseCase:
+    """Execute mid-word auto-switch for an unfinished typed token."""
+
+    def __init__(
+        self,
+        *,
+        mid_word_detector,
+        typed_buffer,
+        xkb: "IXKBAdapter",
+        retype_service,
+        timing: dict | None = None,
+        debug: bool = False,
+        candidate_provider=None,
+    ):
+        self.mid_word_detector = mid_word_detector
+        self.typed_buffer = typed_buffer
+        self.xkb = xkb
+        self.retype_service = retype_service
+        self.layout_service = LayoutService(xkb)
+        self.timing = timing or {}
+        self.debug = debug
+        self.candidate_provider = candidate_provider
+        if self.candidate_provider is None:
+            self.candidate_provider = SpaceAutoConversionCandidateProvider(
+                typed_buffer=typed_buffer,
+                xkb=xkb,
+                layout_service=self.layout_service,
+            )
+
+    def execute(self, *, context: "StateContext") -> MidWordAutoConversionResult:
+        if self.mid_word_detector is None:
+            return MidWordAutoConversionResult(switched=False)
+
+        if context.chars_in_buffer == 0:
+            return MidWordAutoConversionResult(switched=False)
+
+        try:
+            current_layout_info = self.xkb.get_current_layout() if self.xkb else None
+        except Exception:
+            return MidWordAutoConversionResult(switched=False)
+
+        candidate = self.candidate_provider.candidate_for_context(
+            context=context,
+            current_layout_info=current_layout_info,
+        )
+        if not candidate.text:
+            return MidWordAutoConversionResult(switched=False, reason="empty candidate")
+
+        decision = self.mid_word_detector.should_switch(
+            candidate.text,
+            candidate.current_lang,
+        )
+        if not decision.should_switch:
+            return MidWordAutoConversionResult(
+                switched=False,
+                reason=decision.reason,
+            )
+
+        direction = "en_to_ru" if candidate.current_lang == "en" else "ru_to_en"
+        target = self.layout_service.find_available_layout_for_lang(
+            decision.target_lang
+        )
+        conversion_ok = self.retype_service.retype_events(
+            candidate.events,
+            delete_count=len(candidate.events),
+            target_layout=target,
+            before_replay_delay=self.timing.get(
+                "mid_word_before_replay_delay",
+                self.timing.get("auto_before_replay_delay", 0.03),
+            ),
+            backspace_n_times_keyword=True,
+        )
+        if not conversion_ok:
+            return MidWordAutoConversionResult(
+                switched=False,
+                reason="retype failed",
+            )
+
+        from lswitch.core.states import State
+
+        context.reset()
+        context.state = State.IDLE
+        marker = AutoConversionMarker.for_mid_word_conversion(
+            original_word=candidate.text,
+            original_lang=candidate.current_lang,
+            direction=direction,
+            word_events=candidate.events,
+        )
+        return MidWordAutoConversionResult(
+            switched=True,
+            marker=marker,
+            marker_changed=True,
+            reason=decision.reason,
         )

@@ -43,6 +43,27 @@ class AutoConversionMarker:
         )
 
     @classmethod
+    def for_mid_word_conversion(
+        cls,
+        *,
+        original_word: str,
+        original_lang: str,
+        direction: str,
+        word_events: list,
+    ) -> "AutoConversionMarker":
+        target_lang = "ru" if direction == "en_to_ru" else "en"
+        return cls(
+            kind="mid_word",
+            original_word=original_word,
+            original_lang=original_lang,
+            target_lang=target_lang,
+            direction=direction,
+            word_events=list(word_events),
+            converted_len=len(word_events),
+            had_space=False,
+        )
+
+    @classmethod
     def from_legacy(cls, marker: "AutoConversionMarker | dict") -> "AutoConversionMarker":
         if isinstance(marker, cls):
             return marker

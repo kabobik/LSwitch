@@ -11,6 +11,7 @@ from lswitch.core.conversion_use_cases import (
     KEY_SPACE,
     ManualConversionPreparer,
     ManualConversionUseCase,
+    MidWordAutoConversionUseCase,
     PostConversionStateUpdater,
     RecentAutoConversionUseCase,
     SpaceAutoConversionUseCase,
@@ -22,6 +23,7 @@ from lswitch.core.learning_service import PendingManualLearning
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.states import State, StateContext
 from lswitch.core.typed_buffer import TypedBufferService
+from lswitch.intelligence.mid_word_detector import MidWordDecision
 from lswitch.input.key_mapper import keycode_to_char
 from lswitch.platform.xkb_adapter import LayoutInfo
 
@@ -388,6 +390,16 @@ class _CandidateProvider:
         return self.candidate
 
 
+class _MidWordDetector:
+    def __init__(self, decision: MidWordDecision):
+        self.decision = decision
+        self.calls = []
+
+    def should_switch(self, prefix: str, current_lang: str):
+        self.calls.append((prefix, current_lang))
+        return self.decision
+
+
 def _context_with_events(codes: list[int]) -> StateContext:
     context = StateContext()
     context.state = State.TYPING
@@ -589,3 +601,124 @@ def test_space_auto_conversion_use_case_skips_below_threshold():
     assert result.marker_changed is False
     learning_service.record_auto_confirmation.assert_not_called()
     retype_service.retype_events.assert_not_called()
+
+
+def _mid_word_use_case(
+    *,
+    decision: MidWordDecision,
+    candidate: AutoConversionCandidate | None = None,
+    retype_ok: bool = True,
+):
+    xkb = MagicMock()
+    en_layout = LayoutInfo(name="en", index=0, xkb_name="us")
+    ru_layout = LayoutInfo(name="ru", index=1, xkb_name="ru")
+    xkb.get_current_layout.return_value = en_layout
+    xkb.get_layouts.return_value = [en_layout, ru_layout]
+    retype_service = MagicMock()
+    retype_service.retype_events.return_value = retype_ok
+    detector = _MidWordDetector(decision)
+    provider = _CandidateProvider(
+        candidate
+        or AutoConversionCandidate(
+            text="ghbd",
+            events=[
+                KeyEventData(code=34, value=1, device_name="provider"),
+                KeyEventData(code=35, value=1, device_name="provider"),
+                KeyEventData(code=48, value=1, device_name="provider"),
+                KeyEventData(code=32, value=1, device_name="provider"),
+            ],
+            current_lang="en",
+        )
+    )
+    use_case = MidWordAutoConversionUseCase(
+        mid_word_detector=detector,
+        typed_buffer=MagicMock(),
+        xkb=xkb,
+        retype_service=retype_service,
+        timing={"mid_word_before_replay_delay": 0},
+        candidate_provider=provider,
+    )
+    return use_case, detector, provider, retype_service, ru_layout
+
+
+def test_mid_word_auto_conversion_use_case_retypes_prefix_and_returns_marker():
+    decision = MidWordDecision(
+        should_switch=True,
+        reason="target prefix found and source prefix absent",
+        current_lang="en",
+        target_lang="ru",
+        typed_prefix="ghbd",
+        converted_prefix="прив",
+        target_prefix_count=1,
+    )
+    use_case, detector, provider, retype_service, ru_layout = _mid_word_use_case(
+        decision=decision
+    )
+    context = _context_with_events([34, 35, 48, 32])
+    candidate = provider.candidate
+
+    result = use_case.execute(context=context)
+
+    assert result.switched is True
+    assert result.marker is not None
+    assert result.marker.kind == "mid_word"
+    assert result.marker.original_word == "ghbd"
+    assert result.marker.original_lang == "en"
+    assert result.marker.target_lang == "ru"
+    assert result.marker.had_space is False
+    assert result.marker.converted_len == 4
+    assert result.marker_changed is True
+    assert detector.calls == [("ghbd", "en")]
+    retype_service.retype_events.assert_called_once_with(
+        candidate.events,
+        delete_count=4,
+        target_layout=ru_layout,
+        before_replay_delay=0,
+        backspace_n_times_keyword=True,
+    )
+    assert context.event_buffer == []
+    assert context.chars_in_buffer == 0
+    assert context.state == State.IDLE
+
+
+def test_mid_word_auto_conversion_use_case_skips_when_detector_rejects():
+    decision = MidWordDecision(
+        should_switch=False,
+        reason="source prefix exists",
+        current_lang="en",
+        target_lang="ru",
+    )
+    use_case, detector, _provider, retype_service, _ru_layout = _mid_word_use_case(
+        decision=decision
+    )
+    context = _context_with_events([34, 35, 48, 32])
+
+    result = use_case.execute(context=context)
+
+    assert result.switched is False
+    assert result.reason == "source prefix exists"
+    assert detector.calls == [("ghbd", "en")]
+    retype_service.retype_events.assert_not_called()
+    assert context.event_buffer
+
+
+def test_mid_word_auto_conversion_use_case_keeps_context_when_retype_fails():
+    decision = MidWordDecision(
+        should_switch=True,
+        reason="target prefix found and source prefix absent",
+        current_lang="en",
+        target_lang="ru",
+    )
+    use_case, _detector, _provider, retype_service, _ru_layout = _mid_word_use_case(
+        decision=decision,
+        retype_ok=False,
+    )
+    context = _context_with_events([34, 35, 48, 32])
+
+    result = use_case.execute(context=context)
+
+    assert result.switched is False
+    assert result.reason == "retype failed"
+    assert result.marker is None
+    retype_service.retype_events.assert_called_once()
+    assert context.event_buffer

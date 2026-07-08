@@ -247,6 +247,7 @@ mid-word режим должен быть optional.
   source prefix должен отсутствовать, target prefix должен существовать;
 - `SystemDictionaryLoader` добавлен как optional Hunspell/MySpell loader;
 - config keys добавлены с безопасным `auto_switch_mid_word = false` по умолчанию;
+- `MidWordAutoConversionUseCase` добавлен рядом со space auto-conversion flow;
 - runtime/input wiring еще не подключен;
 - diagnostics для системных словарей еще не подключены.
 

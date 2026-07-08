@@ -27,6 +27,26 @@ def test_space_marker_exposes_typed_fields_and_legacy_keys():
     assert marker.get("missing", "fallback") == "fallback"
 
 
+def test_mid_word_marker_has_no_space_and_copies_events():
+    events = [object(), object()]
+
+    marker = AutoConversionMarker.for_mid_word_conversion(
+        original_word="gh",
+        original_lang="en",
+        direction="en_to_ru",
+        word_events=events,
+    )
+
+    assert marker.kind == "mid_word"
+    assert marker.original_word == "gh"
+    assert marker.original_lang == "en"
+    assert marker.target_lang == "ru"
+    assert marker.word_events == events
+    assert marker.word_events is not events
+    assert marker.converted_len == 2
+    assert marker.had_space is False
+
+
 def test_marker_from_legacy_dict_and_mutable_time_alias():
     marker = AutoConversionMarker.from_legacy({
         "word": "gp",
