@@ -120,7 +120,7 @@ class DebugMonitorWindow(QWidget):
         splitter.addWidget(buffer_group)
 
         # -- Section 3: Last Word --
-        word_group = QGroupBox("Last Word (extracted by _extract_last_word_events)")
+        word_group = QGroupBox("Last Word")
         word_layout = QVBoxLayout(word_group)
 
         self._word_label = QLabel("Word: (none)")
@@ -137,7 +137,7 @@ class DebugMonitorWindow(QWidget):
         splitter.addWidget(word_group)
 
         # -- Section 4: Auto Marker --
-        marker_group = QGroupBox("Auto Marker (_last_auto_marker)")
+        marker_group = QGroupBox("Auto Marker")
         marker_layout = QVBoxLayout(marker_group)
 
         self._marker_label = QLabel("No marker")
@@ -406,8 +406,22 @@ class DebugMonitorWindow(QWidget):
         else:
             self._buffer_summary.setText("Buffer: (empty)")
 
+    def _extract_last_word(self, current_layout):
+        return self._app.conversion_runtime.extract_last_word(current_layout)
+
+    def _current_auto_marker(self):
+        return self._app.auto_conversion_session.last_marker
+
+    def _marker_value(self, marker, *names, default='?'):
+        for name in names:
+            if isinstance(marker, dict) and name in marker:
+                return marker[name]
+            if hasattr(marker, name):
+                return getattr(marker, name)
+        return default
+
     def _refresh_last_word(self):
-        """Update last word display using app's _extract_last_word_events."""
+        """Update last word display using the conversion runtime."""
         try:
             # Get current layout for proper character resolution
             current_layout = None
@@ -417,7 +431,7 @@ class DebugMonitorWindow(QWidget):
                 except Exception:
                     pass
 
-            word, word_events = self._app._extract_last_word_events(current_layout)
+            word, word_events = self._extract_last_word(current_layout)
 
             if word:
                 self._word_label.setText(f"Word: '{word}' ({len(word)} chars)")
@@ -439,16 +453,16 @@ class DebugMonitorWindow(QWidget):
 
     def _refresh_marker(self):
         """Update auto marker display."""
-        marker = getattr(self._app, '_last_auto_marker', None)
+        marker = self._current_auto_marker()
 
         if marker is None:
             self._marker_label.setText("No marker")
             self._marker_age_label.setText("Age: -")
             self._marker_label.setStyleSheet("")
         else:
-            word = marker.get('word', '?')
-            direction = marker.get('direction', '?')
-            lang = marker.get('lang', '?')
+            word = self._marker_value(marker, 'word', 'original_word')
+            direction = self._marker_value(marker, 'direction')
+            lang = self._marker_value(marker, 'lang', 'original_lang')
             self._marker_label.setText(
                 f"Word: '{word}'\n"
                 f"Direction: {direction}\n"
@@ -460,12 +474,12 @@ class DebugMonitorWindow(QWidget):
     @pyqtSlot()
     def _update_marker_age(self):
         """Update marker age display (called by timer)."""
-        marker = getattr(self._app, '_last_auto_marker', None)
+        marker = self._current_auto_marker()
         if marker is None:
             self._marker_age_label.setText("Age: -")
             return
 
-        marker_time = marker.get('time', 0)
+        marker_time = self._marker_value(marker, 'time', 'created_at', default=0)
         if marker_time > 0:
             age = time.time() - marker_time
             self._marker_age_label.setText(f"Age: {age:.1f}s")
