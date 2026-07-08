@@ -251,7 +251,7 @@ mid-word режим должен быть optional.
 - runtime/input wiring подключен через `ConversionRuntimeFacade` и
   `InputEventRouter`, feature остается выключенной по умолчанию;
 - runtime config reload пересобирает prefix dictionary / detector;
-- diagnostics для системных словарей еще не подключены.
+- Wayland diagnostics показывают наличие EN/RU системных словарей и word counts.
 
 1. Добавить `PrefixDictionary` со встроенными `en_words.py` / `ru_words.py`.
 2. Добавить unit tests на prefix lookup и неоднозначные префиксы.
