@@ -39,6 +39,12 @@ class InputConversionPort:
     request_conversion: Callable[[], None]
 
 
+@dataclass(frozen=True)
+class InputSelectionPort:
+    prime_baseline_on_click: Callable[[], None]
+    read_mouse_release_selection: Callable[[], object | None]
+
+
 class InputEventRouter:
     """Routes input events to the current input handlers.
 
@@ -54,15 +60,13 @@ class InputEventRouter:
         typed_buffer: "TypedBufferService",
         selection_tracker: "SelectionFreshnessTracker",
         conversion: InputConversionPort,
-        prime_selection_baseline_on_click: Callable[[], None],
-        read_mouse_release_selection: Callable[[], object | None],
+        selection: InputSelectionPort,
     ):
         self.state_manager = state_manager
         self.typed_buffer = typed_buffer
         self.selection_tracker = selection_tracker
         self.conversion = conversion
-        self.prime_selection_baseline_on_click = prime_selection_baseline_on_click
-        self.read_mouse_release_selection = read_mouse_release_selection
+        self.selection = selection
 
     def on_key_press(self, event: Event) -> None:
         data = event.data
@@ -151,12 +155,12 @@ class InputEventRouter:
     def on_mouse_click(self, event: Event) -> None:
         self.conversion.clear_last_auto_marker()
         self._clear_selection_state()
-        self.prime_selection_baseline_on_click()
+        self.selection.prime_baseline_on_click()
         self.state_manager.on_mouse_click()
 
     def on_mouse_release(self, event: Event) -> None:
         try:
-            info = self.read_mouse_release_selection()
+            info = self.selection.read_mouse_release_selection()
             if info is None:
                 return
             text = getattr(info, "text", "") or ""

@@ -6,7 +6,11 @@ from unittest.mock import MagicMock
 
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.event_manager import KEY_BACKSPACE, KEY_ENTER, KEY_SPACE
-from lswitch.core.input_router import InputConversionPort, InputEventRouter
+from lswitch.core.input_router import (
+    InputConversionPort,
+    InputEventRouter,
+    InputSelectionPort,
+)
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
 from lswitch.core.typed_buffer import TypedBufferService
@@ -59,10 +63,14 @@ def _router(
             inject_deferred_space=inject_deferred_space or (lambda: None),
             request_conversion=request_conversion or (lambda: None),
         ),
-        prime_selection_baseline_on_click=(
-            prime_selection_baseline_on_click or (lambda: None)
+        selection=InputSelectionPort(
+            prime_baseline_on_click=(
+                prime_selection_baseline_on_click or (lambda: None)
+            ),
+            read_mouse_release_selection=(
+                read_mouse_release_selection or (lambda: None)
+            ),
         ),
-        read_mouse_release_selection=read_mouse_release_selection or (lambda: None),
     )
     return router, state_manager, selection_tracker
 

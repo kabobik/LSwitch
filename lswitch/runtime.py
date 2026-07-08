@@ -1,13 +1,16 @@
 """Runtime component factories."""
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.event_bus import EventBus
 from lswitch.core.event_manager import EventManager
-from lswitch.core.input_router import InputConversionPort, InputEventRouter
+from lswitch.core.input_router import (
+    InputConversionPort,
+    InputEventRouter,
+    InputSelectionPort,
+)
 from lswitch.core.learning_service import LearningService
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
@@ -84,8 +87,7 @@ class RuntimeCoreComponents:
 @dataclass(frozen=True)
 class InputRouterCallbacks:
     conversion: InputConversionPort
-    prime_selection_baseline_on_click: Callable[[], None]
-    read_mouse_release_selection: Callable[[], object | None]
+    selection: InputSelectionPort
 
 
 @dataclass(frozen=True)
@@ -163,19 +165,17 @@ def create_input_router_callbacks(
             inject_deferred_space=lambda: inject_deferred_space(get_virtual_kb()),
             request_conversion=request_conversion,
         ),
-        prime_selection_baseline_on_click=(
-            lambda: update_passive_selection_baseline_on_click(
+        selection=InputSelectionPort(
+            prime_baseline_on_click=lambda: update_passive_selection_baseline_on_click(
                 selection_tracker=selection_tracker,
                 selection=get_selection(),
                 platform=get_platform(),
                 log=log,
-            )
-        ),
-        read_mouse_release_selection=(
-            lambda: read_mouse_release_selection(
+            ),
+            read_mouse_release_selection=lambda: read_mouse_release_selection(
                 selection=get_selection(),
                 platform=get_platform(),
-            )
+            ),
         ),
     )
 
@@ -204,8 +204,7 @@ def create_input_router(
         typed_buffer=core.typed_buffer,
         selection_tracker=core.selection_tracker,
         conversion=callbacks.conversion,
-        prime_selection_baseline_on_click=callbacks.prime_selection_baseline_on_click,
-        read_mouse_release_selection=callbacks.read_mouse_release_selection,
+        selection=callbacks.selection,
     )
 
 

@@ -12,7 +12,11 @@ from lswitch.core.event_bus import EventBus
 from lswitch.core.event_manager import EventManager
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.conversion_engine import ConversionEngine
-from lswitch.core.input_router import InputConversionPort, InputEventRouter
+from lswitch.core.input_router import (
+    InputConversionPort,
+    InputEventRouter,
+    InputSelectionPort,
+)
 from lswitch.core.learning_service import LearningService
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
@@ -361,8 +365,10 @@ def test_create_input_router_wires_core_components_and_callbacks():
                 inject_deferred_space=lambda: None,
                 request_conversion=lambda: None,
             ),
-            prime_selection_baseline_on_click=lambda: None,
-            read_mouse_release_selection=lambda: None,
+            selection=InputSelectionPort(
+                prime_baseline_on_click=lambda: None,
+                read_mouse_release_selection=lambda: None,
+            ),
         ),
     )
 
@@ -477,8 +483,8 @@ def test_create_input_router_callbacks_late_binds_selection_dependencies():
     )
 
     tracker.on_click_passive_selection.return_value = "fresh"
-    callbacks.prime_selection_baseline_on_click()
-    info = callbacks.read_mouse_release_selection()
+    callbacks.selection.prime_baseline_on_click()
+    info = callbacks.selection.read_mouse_release_selection()
 
     tracker.on_click_passive_selection.assert_called_once_with("fresh", 7)
     assert info.text == "fresh"
