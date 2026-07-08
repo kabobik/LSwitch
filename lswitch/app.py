@@ -85,6 +85,7 @@ class LSwitchApp:
         self.typed_buffer = core.typed_buffer
         self.selection_tracker = core.selection_tracker
         self.learning_service = core.learning_service
+        self.auto_conversion_session = AutoConversionSessionState()
 
         self.input_router = create_input_router(
             core=core,
@@ -94,10 +95,16 @@ class LSwitchApp:
                 try_auto_conversion_at_space=(
                     lambda: self._try_auto_conversion_at_space()
                 ),
-                get_pending_auto_space=self._get_pending_auto_space,
-                set_pending_auto_space=self._set_pending_auto_space,
-                clear_last_retype_events=self._clear_last_retype_events,
-                clear_last_auto_marker=self._clear_last_auto_marker,
+                get_pending_auto_space=(
+                    lambda: self.auto_conversion_session.pending_space
+                ),
+                set_pending_auto_space=(
+                    self.auto_conversion_session.set_pending_space
+                ),
+                clear_last_retype_events=(
+                    self.auto_conversion_session.clear_sticky_events
+                ),
+                clear_last_auto_marker=self.auto_conversion_session.clear_marker,
                 inject_deferred_space=self._inject_deferred_space,
                 request_conversion=lambda: self._do_conversion(),
                 prime_selection_baseline_on_click=(
@@ -128,7 +135,6 @@ class LSwitchApp:
         self._udev_monitor = None
         self.auto_detector = None
         self.user_dict = None
-        self.auto_conversion_session = AutoConversionSessionState()
         self._platform = None
         self._selection_poller: SelectionPollerThread | None = None
 
@@ -352,18 +358,6 @@ class LSwitchApp:
 
     def _auto_conversion_enabled(self) -> bool:
         return bool(self.auto_detector and self.config.get('auto_switch'))
-
-    def _get_pending_auto_space(self) -> bool:
-        return self.auto_conversion_session.pending_space
-
-    def _set_pending_auto_space(self, value: bool) -> None:
-        self.auto_conversion_session.set_pending_space(value)
-
-    def _clear_last_retype_events(self) -> None:
-        self.auto_conversion_session.clear_sticky_events()
-
-    def _clear_last_auto_marker(self) -> None:
-        self.auto_conversion_session.clear_marker()
 
     def _inject_deferred_space(self) -> None:
         from lswitch.core.event_manager import KEY_SPACE
