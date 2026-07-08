@@ -44,6 +44,13 @@ class DictionaryService:
     def in_any(self, word: str) -> bool:
         return self.in_ru(word) or self.in_en(word)
 
+    def words_for_lang(self, lang: str) -> set[str]:
+        if lang == "en":
+            return set(self._load_en())
+        if lang == "ru":
+            return set(self._load_ru())
+        return set()
+
     def should_convert(self, word: str, current_layout: str) -> tuple[bool, str]:
         """Determine whether *word* typed in *current_layout* should be converted.
 

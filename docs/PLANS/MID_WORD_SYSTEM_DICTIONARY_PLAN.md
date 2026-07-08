@@ -240,6 +240,14 @@ mid-word режим должен быть optional.
 
 ## 10. MVP-план
 
+Текущий статус:
+
+- `PrefixDictionary` добавлен для встроенных EN/RU словарей;
+- `MidWordDetector` добавлен с консервативной политикой:
+  source prefix должен отсутствовать, target prefix должен существовать;
+- runtime/input wiring еще не подключен;
+- `SystemDictionaryLoader` еще не добавлен.
+
 1. Добавить `PrefixDictionary` со встроенными `en_words.py` / `ru_words.py`.
 2. Добавить unit tests на prefix lookup и неоднозначные префиксы.
 3. Добавить `SystemDictionaryLoader`, который optional подмешивает Hunspell `.dic`.
