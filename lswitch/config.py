@@ -67,6 +67,11 @@ DEFAULT_CONFIG: dict = {
     'layout_switch_key': 'Alt_L+Shift_L',
     'auto_switch': False,
     'auto_switch_threshold': 0,
+    'auto_switch_mid_word': False,
+    'mid_word_min_prefix_len': 4,
+    'system_dict_enabled': True,
+    'system_dict_en_path': '',
+    'system_dict_ru_path': '',
     'user_dict_enabled': False,
     'user_dict_auto_confirm': False,
     'user_dict_min_weight': 2,
@@ -100,6 +105,11 @@ _CONFIG_COMMENTS: dict[str, str] = {
     'layout_switch_key': 'Shortcut used by the system to switch keyboard layout.',
     'auto_switch': 'Enable automatic wrong-layout detection and conversion.',
     'auto_switch_threshold': 'Minimum detector confidence for automatic conversion.',
+    'auto_switch_mid_word': 'Enable layout switching while a word is still being typed.',
+    'mid_word_min_prefix_len': 'Minimum prefix length before mid-word detection starts.',
+    'system_dict_enabled': 'Use system Hunspell/MySpell dictionaries when available.',
+    'system_dict_en_path': 'Optional explicit English Hunspell/MySpell .dic path.',
+    'system_dict_ru_path': 'Optional explicit Russian Hunspell/MySpell .dic path.',
     'user_dict_enabled': 'Enable the self-learning user dictionary.',
     'user_dict_auto_confirm': 'Automatically confirm accepted auto-conversions in the user dictionary.',
     'user_dict_min_weight': 'Minimum user dictionary score required to affect detection.',
@@ -297,6 +307,40 @@ def validate_config(conf: dict | None) -> dict:
     if ast_i < 0:
         raise ValueError(f"Invalid 'auto_switch_threshold': must be >= 0")
     out['auto_switch_threshold'] = ast_i
+
+    # auto_switch_mid_word — boolean
+    asmw = conf.get('auto_switch_mid_word', defaults['auto_switch_mid_word'])
+    if not isinstance(asmw, bool):
+        raise ValueError("Invalid 'auto_switch_mid_word': must be boolean")
+    out['auto_switch_mid_word'] = asmw
+
+    # mid_word_min_prefix_len — positive int
+    mw_min_raw = conf.get(
+        'mid_word_min_prefix_len',
+        defaults['mid_word_min_prefix_len'],
+    )
+    try:
+        mw_min_i = int(mw_min_raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid 'mid_word_min_prefix_len': {mw_min_raw}")
+    if not (1 <= mw_min_i <= 32):
+        raise ValueError(
+            "Invalid 'mid_word_min_prefix_len': must be between 1 and 32"
+        )
+    out['mid_word_min_prefix_len'] = mw_min_i
+
+    # system_dict_enabled — boolean
+    sde = conf.get('system_dict_enabled', defaults['system_dict_enabled'])
+    if not isinstance(sde, bool):
+        raise ValueError("Invalid 'system_dict_enabled': must be boolean")
+    out['system_dict_enabled'] = sde
+
+    # system_dict_*_path — optional string paths
+    for key in ('system_dict_en_path', 'system_dict_ru_path'):
+        path_value = conf.get(key, defaults[key])
+        if not isinstance(path_value, str):
+            raise ValueError(f"Invalid '{key}': must be a string")
+        out[key] = path_value
 
     # user_dict_enabled — boolean
     ude = conf.get('user_dict_enabled', defaults['user_dict_enabled'])

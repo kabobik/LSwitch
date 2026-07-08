@@ -32,6 +32,11 @@ class TestDefaultConfig:
         'layout_switch_key',
         'auto_switch',
         'auto_switch_threshold',
+        'auto_switch_mid_word',
+        'mid_word_min_prefix_len',
+        'system_dict_enabled',
+        'system_dict_en_path',
+        'system_dict_ru_path',
         'user_dict_enabled',
         'user_dict_auto_confirm',
         'user_dict_min_weight',
@@ -65,6 +70,11 @@ class TestValidateConfig:
             'layout_switch_key': 'Caps_Lock',
             'auto_switch': True,
             'auto_switch_threshold': 5,
+            'auto_switch_mid_word': True,
+            'mid_word_min_prefix_len': 5,
+            'system_dict_enabled': False,
+            'system_dict_en_path': '/tmp/en_US.dic',
+            'system_dict_ru_path': '/tmp/ru_RU.dic',
             'user_dict_enabled': True,
             'user_dict_auto_confirm': True,
             'user_dict_min_weight': 3,
@@ -77,6 +87,11 @@ class TestValidateConfig:
         assert result['double_click_timeout'] == 0.5
         assert result['debug'] is True
         assert result['auto_switch_threshold'] == 5
+        assert result['auto_switch_mid_word'] is True
+        assert result['mid_word_min_prefix_len'] == 5
+        assert result['system_dict_enabled'] is False
+        assert result['system_dict_en_path'] == '/tmp/en_US.dic'
+        assert result['system_dict_ru_path'] == '/tmp/ru_RU.dic'
         assert result['user_dict_auto_confirm'] is True
         assert result['wayland_selection_strategy'] == 'clipboard_copy'
         assert result['timing']['key_press_delay'] == 0.002
@@ -104,6 +119,22 @@ class TestValidateConfig:
     def test_invalid_auto_switch_threshold_negative(self):
         with pytest.raises(ValueError, match="auto_switch_threshold"):
             validate_config({'auto_switch_threshold': -1})
+
+    def test_invalid_auto_switch_mid_word_type(self):
+        with pytest.raises(ValueError, match="auto_switch_mid_word"):
+            validate_config({'auto_switch_mid_word': 'yes'})
+
+    def test_invalid_mid_word_min_prefix_len_range(self):
+        with pytest.raises(ValueError, match="mid_word_min_prefix_len"):
+            validate_config({'mid_word_min_prefix_len': 0})
+
+    def test_invalid_system_dict_enabled_type(self):
+        with pytest.raises(ValueError, match="system_dict_enabled"):
+            validate_config({'system_dict_enabled': 'yes'})
+
+    def test_invalid_system_dict_path_type(self):
+        with pytest.raises(ValueError, match="system_dict_en_path"):
+            validate_config({'system_dict_en_path': 123})
 
     def test_invalid_user_dict_auto_confirm_type(self):
         with pytest.raises(ValueError, match="user_dict_auto_confirm"):
@@ -157,6 +188,11 @@ class TestLoadConfig:
             debug = true
             double_click_timeout = 0.5
             wayland_selection_strategy = "primary_selection"
+            auto_switch_mid_word = true
+            mid_word_min_prefix_len = 5
+            system_dict_enabled = false
+            system_dict_en_path = "/tmp/en_US.dic"
+            system_dict_ru_path = "/tmp/ru_RU.dic"
 
             [timing]
             key_press_delay = 0.002
@@ -176,6 +212,11 @@ class TestLoadConfig:
         assert result['debug'] is True
         assert result['double_click_timeout'] == 0.5
         assert result['wayland_selection_strategy'] == 'primary_selection'
+        assert result['auto_switch_mid_word'] is True
+        assert result['mid_word_min_prefix_len'] == 5
+        assert result['system_dict_enabled'] is False
+        assert result['system_dict_en_path'] == '/tmp/en_US.dic'
+        assert result['system_dict_ru_path'] == '/tmp/ru_RU.dic'
         assert result['timing']['key_press_delay'] == 0.002
         assert result['x11_selection_timing']['poll_interval'] == 0.25
         assert result['wayland_timing']['wl_clipboard_timeout'] == 2.0
@@ -247,6 +288,8 @@ class TestConfigManager:
         assert "[wayland_selection_timing]" in saved
         assert 'debug = true' in saved
         assert 'double_click_timeout = 0.7' in saved
+        assert 'auto_switch_mid_word = false' in saved
+        assert 'mid_word_min_prefix_len = 4' in saved
 
         # Reload
         mgr2 = ConfigManager(config_path=cfg_path)

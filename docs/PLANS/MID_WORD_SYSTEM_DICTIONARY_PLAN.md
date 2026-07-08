@@ -246,8 +246,9 @@ mid-word режим должен быть optional.
 - `MidWordDetector` добавлен с консервативной политикой:
   source prefix должен отсутствовать, target prefix должен существовать;
 - `SystemDictionaryLoader` добавлен как optional Hunspell/MySpell loader;
+- config keys добавлены с безопасным `auto_switch_mid_word = false` по умолчанию;
 - runtime/input wiring еще не подключен;
-- config/diagnostics для системных словарей еще не подключены.
+- diagnostics для системных словарей еще не подключены.
 
 1. Добавить `PrefixDictionary` со встроенными `en_words.py` / `ru_words.py`.
 2. Добавить unit tests на prefix lookup и неоднозначные префиксы.
