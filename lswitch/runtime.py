@@ -517,6 +517,13 @@ def execute_manual_conversion_with_session(*, controller, session) -> None:
     session.apply_manual_result(result)
 
 
+def decode_buffer_events(*, typed_buffer, context, events: list | None = None) -> str:
+    """Decode explicit events or the current context event buffer."""
+    if events is None:
+        events = context.event_buffer
+    return typed_buffer.decode(events)
+
+
 def extract_last_word_events(
     *,
     typed_buffer,

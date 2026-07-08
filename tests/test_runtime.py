@@ -41,6 +41,7 @@ from lswitch.runtime import (
     create_qt_runtime_bootstrap,
     create_space_auto_conversion_use_case,
     create_tray_indicator,
+    decode_buffer_events,
     execute_manual_conversion_with_session,
     extract_last_word_events,
     handle_poller_selection_changed,
@@ -697,6 +698,33 @@ def test_execute_manual_conversion_with_session_passes_and_applies_state():
         sticky_events=sticky_events,
     )
     session.apply_manual_result.assert_called_once_with(result)
+
+
+def test_decode_buffer_events_uses_context_buffer_by_default():
+    events = [object()]
+    typed_buffer = MagicMock()
+    typed_buffer.decode.return_value = "hello"
+    context = types.SimpleNamespace(event_buffer=events)
+
+    assert decode_buffer_events(typed_buffer=typed_buffer, context=context) == "hello"
+    typed_buffer.decode.assert_called_once_with(events)
+
+
+def test_decode_buffer_events_uses_explicit_events():
+    context_events = [object()]
+    explicit_events = [object()]
+    typed_buffer = MagicMock()
+    typed_buffer.decode.return_value = "word"
+    context = types.SimpleNamespace(event_buffer=context_events)
+
+    text = decode_buffer_events(
+        typed_buffer=typed_buffer,
+        context=context,
+        events=explicit_events,
+    )
+
+    assert text == "word"
+    typed_buffer.decode.assert_called_once_with(explicit_events)
 
 
 def test_extract_last_word_events_returns_token_text_and_events():

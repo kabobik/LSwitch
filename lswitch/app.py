@@ -21,6 +21,7 @@ from lswitch.runtime import (
     create_qt_runtime_bootstrap,
     create_space_auto_conversion_use_case,
     create_tray_indicator,
+    decode_buffer_events,
     execute_manual_conversion_with_session,
     extract_last_word_events,
     handle_poller_selection_changed,
@@ -342,9 +343,11 @@ class LSwitchApp:
 
     def _decode_buffer(self, events: list | None = None) -> str:
         """Decode event buffer to human-readable string of characters."""
-        if events is None:
-            events = self.state_manager.context.event_buffer
-        return self.typed_buffer.decode(events)
+        return decode_buffer_events(
+            typed_buffer=self.typed_buffer,
+            context=self.state_manager.context,
+            events=events,
+        )
 
     # ------------------------------------------------------------------
     # Selection validity tracking
