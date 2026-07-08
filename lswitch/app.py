@@ -465,8 +465,7 @@ class LSwitchApp:
             last_auto_marker=self.auto_conversion_session.last_marker,
             pending_auto_space=self.auto_conversion_session.pending_space,
         )
-        self.auto_conversion_session.last_marker = state.last_auto_marker
-        self.auto_conversion_session.pending_space = state.pending_auto_space
+        self.auto_conversion_session.apply_space_state(state)
 
         return result.space_consumed
 
@@ -511,8 +510,7 @@ class LSwitchApp:
             last_auto_marker=self.auto_conversion_session.last_marker,
             pending_auto_space=self.auto_conversion_session.pending_space,
         )
-        self.auto_conversion_session.last_marker = state.last_auto_marker
-        self.auto_conversion_session.pending_space = state.pending_auto_space
+        self.auto_conversion_session.apply_space_state(state)
 
     def _space_auto_conversion(self):
         return create_space_auto_conversion_use_case(

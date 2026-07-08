@@ -21,3 +21,7 @@ class AutoConversionSessionState:
 
     def set_pending_space(self, value: bool) -> None:
         self.pending_space = bool(value)
+
+    def apply_space_state(self, state) -> None:
+        self.last_marker = state.last_auto_marker
+        self.pending_space = bool(state.pending_auto_space)
