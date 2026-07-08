@@ -489,6 +489,15 @@ def create_manual_conversion_controller(
     )
 
 
+def execute_manual_conversion_with_session(*, controller, session) -> None:
+    """Execute manual conversion and apply transient session updates."""
+    result = controller.execute(
+        last_auto_marker=session.last_marker,
+        sticky_events=session.sticky_events,
+    )
+    session.apply_manual_result(result)
+
+
 def extract_last_word_events(
     *,
     typed_buffer,

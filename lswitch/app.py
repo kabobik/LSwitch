@@ -21,6 +21,7 @@ from lswitch.runtime import (
     create_qt_runtime_bootstrap,
     create_space_auto_conversion_use_case,
     create_tray_indicator,
+    execute_manual_conversion_with_session,
     extract_last_word_events,
     install_reload_signal_handler,
     perform_space_auto_conversion_at_boundary,
@@ -394,25 +395,24 @@ class LSwitchApp:
              Weight accumulates across sessions; once |weight| >= min_weight
              AutoDetector will handle this word automatically.
         """
-        result = create_manual_conversion_controller(
-            state_manager=self.state_manager,
-            selection_tracker=self.selection_tracker,
-            typed_buffer=self.typed_buffer,
-            learning_service=self._learning(),
-            conversion_engine=self.conversion_engine,
-            virtual_kb=self.virtual_kb,
-            xkb=self.xkb,
-            selection=self.selection,
-            timing=self.timing,
-            debug=self.debug,
-            decode_events=self._decode_buffer,
-            extract_last_word=self._extract_last_word_events,
-            update_selection_baseline=self._update_selection_baseline,
-        ).execute(
-            last_auto_marker=self.auto_conversion_session.last_marker,
-            sticky_events=self.auto_conversion_session.sticky_events,
+        execute_manual_conversion_with_session(
+            controller=create_manual_conversion_controller(
+                state_manager=self.state_manager,
+                selection_tracker=self.selection_tracker,
+                typed_buffer=self.typed_buffer,
+                learning_service=self._learning(),
+                conversion_engine=self.conversion_engine,
+                virtual_kb=self.virtual_kb,
+                xkb=self.xkb,
+                selection=self.selection,
+                timing=self.timing,
+                debug=self.debug,
+                decode_events=self._decode_buffer,
+                extract_last_word=self._extract_last_word_events,
+                update_selection_baseline=self._update_selection_baseline,
+            ),
+            session=self.auto_conversion_session,
         )
-        self.auto_conversion_session.apply_manual_result(result)
 
     # ------------------------------------------------------------------
     # Auto-conversion (space-triggered, AutoDetector)

@@ -40,6 +40,7 @@ from lswitch.runtime import (
     create_qt_runtime_bootstrap,
     create_space_auto_conversion_use_case,
     create_tray_indicator,
+    execute_manual_conversion_with_session,
     extract_last_word_events,
     install_reload_signal_handler,
     perform_space_auto_conversion_at_boundary,
@@ -592,6 +593,33 @@ def test_create_manual_conversion_controller_wires_dependencies(monkeypatch):
 
     assert controller is created["controller"]
     assert controller.kwargs == dependencies
+
+
+def test_execute_manual_conversion_with_session_passes_and_applies_state():
+    marker = object()
+    sticky_events = [object()]
+    result = types.SimpleNamespace(
+        last_auto_marker=None,
+        sticky_events=[],
+    )
+    controller = MagicMock()
+    controller.execute.return_value = result
+    session = types.SimpleNamespace(
+        last_marker=marker,
+        sticky_events=sticky_events,
+        apply_manual_result=MagicMock(),
+    )
+
+    execute_manual_conversion_with_session(
+        controller=controller,
+        session=session,
+    )
+
+    controller.execute.assert_called_once_with(
+        last_auto_marker=marker,
+        sticky_events=sticky_events,
+    )
+    session.apply_manual_result.assert_called_once_with(result)
 
 
 def test_extract_last_word_events_returns_token_text_and_events():
