@@ -160,7 +160,15 @@ class LSwitchApp:
         conversion_runtime = platform_runtime.conversion
         self.auto_detector = conversion_runtime.auto_detector
         self.conversion_engine = conversion_runtime.conversion_engine
-        self._sync_learning_components()
+        sync_user_dictionary_components(
+            user_dict=self.user_dict,
+            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
+            auto_detector=self.auto_detector,
+            conversion_engine=self.conversion_engine,
+            learning_service=self.learning_service,
+            debug=self.debug,
+            manual_weight_step=self.MANUAL_WEIGHT_STEP,
+        )
 
         input_runtime = platform_runtime.input_devices
         self.event_manager = input_runtime.event_manager
@@ -188,18 +196,6 @@ class LSwitchApp:
         self.user_dict = UserDictionary()
         logger.info("User dictionary enabled: %s", self.user_dict.path)
         return self.user_dict
-
-    def _sync_learning_components(self) -> None:
-        """Propagate current UserDictionary settings into runtime components."""
-        sync_user_dictionary_components(
-            user_dict=self.user_dict,
-            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
-            auto_detector=self.auto_detector,
-            conversion_engine=self.conversion_engine,
-            learning_service=self.learning_service,
-            debug=self.debug,
-            manual_weight_step=self.MANUAL_WEIGHT_STEP,
-        )
 
     def _apply_runtime_config(self) -> None:
         """Apply config values that affect already-created runtime objects."""
