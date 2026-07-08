@@ -6,6 +6,7 @@ import sys
 import types
 from unittest.mock import MagicMock
 
+import lswitch.runtime as runtime_module
 from lswitch.core.event_bus import EventBus
 from lswitch.core.event_manager import EventManager
 from lswitch.core.events import Event, EventType, KeyEventData
@@ -17,6 +18,7 @@ from lswitch.core.state_manager import StateManager
 from lswitch.core.typed_buffer import TypedBufferService
 from lswitch.runtime import (
     AppliedRuntimeConfig,
+    ConversionRuntimeFacade,
     ConversionRuntimeComponents,
     InputDeviceRuntimeComponents,
     InputRouterCallbacks,
@@ -94,6 +96,119 @@ def test_create_core_components_builds_core_runtime_services():
     assert components.learning_service.debug is True
     assert components.learning_service.manual_weight_step == 3
     assert components.learning_service.user_dict is None
+
+
+def test_conversion_runtime_facade_requests_manual_conversion(monkeypatch):
+    controller = object()
+    execute = MagicMock()
+    create_controller = MagicMock(return_value=controller)
+    monkeypatch.setattr(
+        runtime_module,
+        "create_synced_manual_conversion_controller",
+        create_controller,
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "execute_manual_conversion_with_session",
+        execute,
+    )
+    session = object()
+    config = MagicMock()
+    config.get.return_value = 5
+    dependencies = {
+        "auto_detector": object(),
+        "conversion_engine": object(),
+        "virtual_kb": object(),
+        "xkb": object(),
+        "selection": object(),
+        "platform": object(),
+        "user_dict": object(),
+        "timing": {"manual": 0.1},
+    }
+    facade = ConversionRuntimeFacade(
+        state_manager=StateManager(),
+        selection_tracker=SelectionFreshnessTracker(),
+        typed_buffer=TypedBufferService(),
+        auto_conversion_session=session,
+        config=config,
+        learning_service=LearningService(None),
+        get_auto_detector=lambda: dependencies["auto_detector"],
+        get_conversion_engine=lambda: dependencies["conversion_engine"],
+        get_virtual_kb=lambda: dependencies["virtual_kb"],
+        get_xkb=lambda: dependencies["xkb"],
+        get_selection=lambda: dependencies["selection"],
+        get_platform=lambda: dependencies["platform"],
+        get_user_dict=lambda: dependencies["user_dict"],
+        get_timing=lambda: dependencies["timing"],
+        debug=True,
+        manual_weight_step=4,
+    )
+
+    facade.request_manual_conversion()
+
+    create_controller.assert_called_once()
+    kwargs = create_controller.call_args.kwargs
+    assert kwargs["conversion_engine"] is dependencies["conversion_engine"]
+    assert kwargs["virtual_kb"] is dependencies["virtual_kb"]
+    assert kwargs["xkb"] is dependencies["xkb"]
+    assert kwargs["selection"] is dependencies["selection"]
+    assert kwargs["user_dict"] is dependencies["user_dict"]
+    assert kwargs["timing"] is dependencies["timing"]
+    assert kwargs["debug"] is True
+    assert kwargs["manual_weight_step"] == 4
+    assert kwargs["decode_events"] == facade.decode_buffer
+    assert kwargs["extract_last_word"] == facade.extract_last_word
+    assert kwargs["update_selection_baseline"] == facade.update_selection_baseline
+    execute.assert_called_once_with(controller=controller, session=session)
+
+
+def test_conversion_runtime_facade_tries_space_auto_conversion(monkeypatch):
+    use_case = object()
+    run_boundary = MagicMock(return_value=True)
+    monkeypatch.setattr(
+        runtime_module,
+        "try_space_auto_conversion_at_boundary",
+        run_boundary,
+    )
+    config = MagicMock()
+    config.get.side_effect = lambda key, default=None: {
+        "auto_switch_threshold": 3,
+        "user_dict_auto_confirm": True,
+    }.get(key, default)
+    session = object()
+    state_manager = StateManager()
+    facade = ConversionRuntimeFacade(
+        state_manager=state_manager,
+        selection_tracker=SelectionFreshnessTracker(),
+        typed_buffer=TypedBufferService(),
+        auto_conversion_session=session,
+        config=config,
+        learning_service=LearningService(None),
+        get_auto_detector=lambda: object(),
+        get_conversion_engine=lambda: object(),
+        get_virtual_kb=lambda: object(),
+        get_xkb=lambda: object(),
+        get_selection=lambda: object(),
+        get_platform=lambda: object(),
+        get_user_dict=lambda: object(),
+        get_timing=lambda: {},
+        debug=False,
+        manual_weight_step=2,
+    )
+    monkeypatch.setattr(
+        facade,
+        "create_space_auto_conversion_use_case",
+        MagicMock(return_value=use_case),
+    )
+
+    assert facade.try_space_auto_conversion() is True
+    run_boundary.assert_called_once_with(
+        use_case=use_case,
+        session=session,
+        context=state_manager.context,
+        threshold=3,
+        auto_confirm_enabled=True,
+    )
 
 
 def test_pid_lock_path_uses_xdg_runtime_dir(monkeypatch, tmp_path):

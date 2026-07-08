@@ -159,6 +159,17 @@ class TestDoConversion:
             app._do_conversion()
             mock_complete.assert_called_once()
 
+    def test_input_router_uses_conversion_runtime_callbacks(self):
+        app = _make_app()
+        assert (
+            app.input_router.request_conversion
+            == app.conversion_runtime.request_manual_conversion
+        )
+        assert (
+            app.input_router.try_auto_conversion_at_space
+            == app.conversion_runtime.try_space_auto_conversion
+        )
+
 
 class TestOnMouseClick:
     """_on_mouse_click delegates to state_manager."""
@@ -302,10 +313,14 @@ class TestOnKeyRelease:
         assert app._pending_auto_space is False
 
     def test_shift_double_triggers_conversion(self):
-        """Shift release with double-shift → _do_conversion called."""
+        """Shift release with double-shift → conversion runtime called."""
         app = _wired_app()
         with patch.object(app.state_manager, 'on_shift_up', return_value=True), \
-             patch.object(app, '_do_conversion') as mock_conv:
+             patch.object(
+                 app.conversion_runtime,
+                 'request_manual_conversion',
+             ) as mock_conv:
+            app.input_router.request_conversion = mock_conv
             event = _make_event(EventType.KEY_RELEASE, KEY_LEFTSHIFT, value=0)
             app.input_router.on_key_release(event)
             mock_conv.assert_called_once()

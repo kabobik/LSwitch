@@ -382,12 +382,17 @@ class TestSpaceKeyHandling:
         assert app.state_manager.context.chars_in_buffer == 1
 
     def test_space_triggers_auto_conversion(self):
-        """auto_switch=True, detector says yes → _try_auto_conversion_at_space fires."""
+        """auto_switch=True, detector says yes → conversion runtime fires."""
         app = _make_app(auto_switch=True, threshold=0)
         app.auto_detector = _MockAutoDetector(should=True)
         app._wire_event_bus()
         _fill_buffer(app, [KEY_G, KEY_H, KEY_B, KEY_D, KEY_T, KEY_N])
-        with patch.object(app, '_try_auto_conversion_at_space', return_value=True) as mock_try:
+        with patch.object(
+            app.conversion_runtime,
+            'try_space_auto_conversion',
+            return_value=True,
+        ) as mock_try:
+            app.input_router.try_auto_conversion_at_space = mock_try
             event = _event(KEY_SPACE)
             app.input_router.on_key_press(event)
             mock_try.assert_called_once()

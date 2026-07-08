@@ -9,6 +9,7 @@ import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.config import ConfigManager
 from lswitch.core.auto_conversion_session import AutoConversionSessionState
 from lswitch.runtime import (
+    ConversionRuntimeFacade,
     PidLock,
     SelectionPollerThread,
     apply_runtime_config_update,
@@ -17,15 +18,9 @@ from lswitch.runtime import (
     create_input_router_callbacks,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
-    create_synced_manual_conversion_controller,
-    create_synced_space_auto_conversion_use_case,
-    decode_buffer_events,
     enable_user_dictionary_if_needed,
-    execute_manual_conversion_with_session,
-    extract_last_word_events,
     handle_poller_selection_changed,
     install_reload_signal_handler,
-    perform_space_auto_conversion_at_boundary,
     read_runtime_config_snapshot,
     run_evdev_runtime_until_stopped,
     run_qt_app_runtime,
@@ -34,8 +29,6 @@ from lswitch.runtime import (
     stop_runtime_resources,
     sync_user_dictionary_components,
     set_selection_valid_with_logging,
-    try_space_auto_conversion_at_boundary,
-    update_selection_baseline,
     wire_runtime_event_bus,
 )
 
@@ -87,16 +80,36 @@ class LSwitchApp:
         self.selection_tracker = core.selection_tracker
         self.learning_service = core.learning_service
         self.auto_conversion_session = AutoConversionSessionState()
+        self.conversion_runtime = ConversionRuntimeFacade(
+            state_manager=self.state_manager,
+            selection_tracker=self.selection_tracker,
+            typed_buffer=self.typed_buffer,
+            auto_conversion_session=self.auto_conversion_session,
+            config=self.config,
+            learning_service=self.learning_service,
+            get_auto_detector=lambda: self.auto_detector,
+            get_conversion_engine=lambda: self.conversion_engine,
+            get_virtual_kb=lambda: self.virtual_kb,
+            get_xkb=lambda: self.xkb,
+            get_selection=lambda: self.selection,
+            get_platform=lambda: self._platform,
+            get_user_dict=lambda: self.user_dict,
+            get_timing=lambda: self.timing,
+            debug=self.debug,
+            manual_weight_step=self.MANUAL_WEIGHT_STEP,
+        )
 
         self.input_router = create_input_router(
             core=core,
             callbacks=create_input_router_callbacks(
-                decode_buffer=self._decode_buffer,
+                decode_buffer=self.conversion_runtime.decode_buffer,
                 try_auto_conversion_at_space=(
-                    lambda: self._try_auto_conversion_at_space()
+                    self.conversion_runtime.try_space_auto_conversion
                 ),
                 auto_conversion_session=self.auto_conversion_session,
-                request_conversion=lambda: self._do_conversion(),
+                request_conversion=(
+                    self.conversion_runtime.request_manual_conversion
+                ),
                 selection_tracker=self.selection_tracker,
                 config=self.config,
                 get_auto_detector=lambda: self.auto_detector,
@@ -309,11 +322,7 @@ class LSwitchApp:
 
     def _decode_buffer(self, events: list | None = None) -> str:
         """Decode event buffer to human-readable string of characters."""
-        return decode_buffer_events(
-            typed_buffer=self.typed_buffer,
-            context=self.state_manager.context,
-            events=events,
-        )
+        return self.conversion_runtime.decode_buffer(events)
 
     # ------------------------------------------------------------------
     # Selection validity tracking
@@ -338,75 +347,16 @@ class LSwitchApp:
     # ------------------------------------------------------------------
 
     def _do_conversion(self):
-        """Trigger conversion if state machine is in CONVERTING state.
-
-        User-dict learning logic:
-          A) Shift+Shift right after auto-conversion (undo):
-             _last_auto_marker is set, event_buffer is empty (reset by auto-conv).
-             → add_correction(typed_word, typed_lang)  — keep confidence +2
-          B) Pure manual Shift+Shift (no prior auto-conversion):
-             _last_auto_marker is None, event_buffer has the typed chars.
-             → add_confirmation(typed_word, typed_lang)  — convert confidence +2
-             Weight accumulates across sessions; once |weight| >= min_weight
-             AutoDetector will handle this word automatically.
-        """
-        execute_manual_conversion_with_session(
-            controller=create_synced_manual_conversion_controller(
-                state_manager=self.state_manager,
-                selection_tracker=self.selection_tracker,
-                typed_buffer=self.typed_buffer,
-                user_dict=self.user_dict,
-                user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
-                learning_service=self.learning_service,
-                conversion_engine=self.conversion_engine,
-                virtual_kb=self.virtual_kb,
-                xkb=self.xkb,
-                selection=self.selection,
-                timing=self.timing,
-                debug=self.debug,
-                manual_weight_step=self.MANUAL_WEIGHT_STEP,
-                decode_events=self._decode_buffer,
-                extract_last_word=(
-                    lambda current_layout=None: extract_last_word_events(
-                        typed_buffer=self.typed_buffer,
-                        context=self.state_manager.context,
-                        current_layout=current_layout,
-                        xkb=self.xkb,
-                    )
-                ),
-                update_selection_baseline=(
-                    lambda: update_selection_baseline(
-                        selection_tracker=self.selection_tracker,
-                        selection=self.selection,
-                        platform=self._platform,
-                    )
-                ),
-            ),
-            session=self.auto_conversion_session,
-        )
+        """Compatibility wrapper for manual conversion requests."""
+        self.conversion_runtime.request_manual_conversion()
 
     # ------------------------------------------------------------------
     # Auto-conversion (space-triggered, AutoDetector)
     # ------------------------------------------------------------------
 
     def _try_auto_conversion_at_space(self) -> bool:
-        """Check and perform auto-conversion at Space word boundary.
-
-        Returns True if conversion was performed (Space consumed).
-        Returns False if no conversion needed (Space should be added to buffer).
-
-        ``auto_switch_threshold`` — minimum number of chars typed since last
-        reset before auto-conversion activates.  Set to 0 (default) to
-        convert from the very first word.  Increase to avoid false-positives
-        at the start of a field (e.g., 5 = activate after ≥5 chars typed).
-        """
-        return try_space_auto_conversion_at_boundary(
-            use_case=self._space_auto_conversion(),
-            session=self.auto_conversion_session,
-            context=self.state_manager.context,
-            threshold=self.config.get('auto_switch_threshold', 0),
-            auto_confirm_enabled=self.config.get('user_dict_auto_confirm', False),
-        )
+        """Compatibility wrapper for space-triggered auto-conversion."""
+        return self.conversion_runtime.try_space_auto_conversion()
 
     def _extract_last_word_events(self, current_layout=None) -> "tuple[str, list]":
         """Extract events for the last typed word from event_buffer.
@@ -420,12 +370,7 @@ class LSwitchApp:
         EN physical-key equivalents, where б→, and ю→. are non-alpha and would
         truncate the word prematurely).
         """
-        return extract_last_word_events(
-            typed_buffer=self.typed_buffer,
-            context=self.state_manager.context,
-            current_layout=current_layout,
-            xkb=self.xkb,
-        )
+        return self.conversion_runtime.extract_last_word(current_layout)
 
     def _do_auto_conversion_at_space(
         self, word_len: int, word_events: list, direction: str,
@@ -436,10 +381,7 @@ class LSwitchApp:
         The Space key was already delivered to the active application before LSwitch processed
         it (passive monitoring), so we must also delete that extra space character via backspace.
         """
-        perform_space_auto_conversion_at_boundary(
-            use_case=self._space_auto_conversion(),
-            session=self.auto_conversion_session,
-            context=self.state_manager.context,
+        self.conversion_runtime.perform_space_auto_conversion(
             word_len=word_len,
             word_events=word_events,
             direction=direction,
@@ -448,18 +390,7 @@ class LSwitchApp:
         )
 
     def _space_auto_conversion(self):
-        return create_synced_space_auto_conversion_use_case(
-            auto_detector=self.auto_detector,
-            typed_buffer=self.typed_buffer,
-            xkb=self.xkb,
-            virtual_kb=self.virtual_kb,
-            user_dict=self.user_dict,
-            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
-            learning_service=self.learning_service,
-            timing=self.timing,
-            debug=self.debug,
-            manual_weight_step=self.MANUAL_WEIGHT_STEP,
-        )
+        return self.conversion_runtime.create_space_auto_conversion_use_case()
 
     # ------------------------------------------------------------------
     # Main loop
