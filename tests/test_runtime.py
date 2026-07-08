@@ -34,6 +34,7 @@ from lswitch.runtime import (
     create_core_components,
     create_input_device_runtime,
     create_input_router,
+    create_input_router_callbacks,
     create_manual_conversion_controller,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
@@ -244,6 +245,80 @@ def test_create_input_router_wires_core_components_and_callbacks():
     assert core.typed_buffer.decode(core.state_manager.context.event_buffer) == "a"
     set_pending_auto_space.assert_called_once_with(False)
     clear_last_retype_events.assert_called_once()
+
+
+def test_create_input_router_callbacks_wires_session_callbacks():
+    session = types.SimpleNamespace(
+        pending_space=True,
+        set_pending_space=MagicMock(),
+        clear_sticky_events=MagicMock(),
+        clear_marker=MagicMock(),
+    )
+
+    callbacks = create_input_router_callbacks(
+        decode_buffer=lambda: "buffer",
+        auto_conversion_enabled=lambda: False,
+        try_auto_conversion_at_space=lambda: False,
+        auto_conversion_session=session,
+        inject_deferred_space=lambda: None,
+        request_conversion=lambda: None,
+        selection_tracker=MagicMock(),
+        get_selection=lambda: None,
+        get_platform=lambda: None,
+        log=MagicMock(),
+    )
+
+    assert isinstance(callbacks, InputRouterCallbacks)
+    assert callbacks.decode_buffer() == "buffer"
+    assert callbacks.get_pending_auto_space() is True
+    callbacks.set_pending_auto_space(False)
+    callbacks.clear_last_retype_events()
+    callbacks.clear_last_auto_marker()
+
+    session.set_pending_space.assert_called_once_with(False)
+    session.clear_sticky_events.assert_called_once()
+    session.clear_marker.assert_called_once()
+
+
+def test_create_input_router_callbacks_late_binds_selection_dependencies():
+    tracker = MagicMock()
+    log = MagicMock()
+    platform = types.SimpleNamespace(selection_mouse_release_tracking_enabled=True)
+
+    class PassiveSelection:
+        def get_passive_selection(self):
+            return types.SimpleNamespace(text="fresh", owner_id=7)
+
+    current = {
+        "selection": PassiveSelection(),
+        "platform": platform,
+    }
+
+    callbacks = create_input_router_callbacks(
+        decode_buffer=lambda: "",
+        auto_conversion_enabled=lambda: False,
+        try_auto_conversion_at_space=lambda: False,
+        auto_conversion_session=types.SimpleNamespace(
+            pending_space=False,
+            set_pending_space=lambda value: None,
+            clear_sticky_events=lambda: None,
+            clear_marker=lambda: None,
+        ),
+        inject_deferred_space=lambda: None,
+        request_conversion=lambda: None,
+        selection_tracker=tracker,
+        get_selection=lambda: current["selection"],
+        get_platform=lambda: current["platform"],
+        log=log,
+    )
+
+    tracker.on_click_passive_selection.return_value = "fresh"
+    callbacks.prime_selection_baseline_on_click()
+    info = callbacks.read_mouse_release_selection()
+
+    tracker.on_click_passive_selection.assert_called_once_with("fresh", 7)
+    assert info.text == "fresh"
+    assert info.owner_id == 7
 
 
 def test_wire_runtime_event_bus_subscribes_input_router_and_config_handlers():

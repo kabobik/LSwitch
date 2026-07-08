@@ -273,6 +273,47 @@ def create_qt_runtime_bootstrap(*, runtime_plan, argv) -> QtRuntimeBootstrap:
     )
 
 
+def create_input_router_callbacks(
+    *,
+    decode_buffer,
+    auto_conversion_enabled,
+    try_auto_conversion_at_space,
+    auto_conversion_session,
+    inject_deferred_space,
+    request_conversion,
+    selection_tracker,
+    get_selection,
+    get_platform,
+    log,
+) -> InputRouterCallbacks:
+    """Create late-bound callbacks needed by InputEventRouter."""
+    return InputRouterCallbacks(
+        decode_buffer=decode_buffer,
+        auto_conversion_enabled=auto_conversion_enabled,
+        try_auto_conversion_at_space=try_auto_conversion_at_space,
+        get_pending_auto_space=lambda: auto_conversion_session.pending_space,
+        set_pending_auto_space=auto_conversion_session.set_pending_space,
+        clear_last_retype_events=auto_conversion_session.clear_sticky_events,
+        clear_last_auto_marker=auto_conversion_session.clear_marker,
+        inject_deferred_space=inject_deferred_space,
+        request_conversion=request_conversion,
+        prime_selection_baseline_on_click=(
+            lambda: update_passive_selection_baseline_on_click(
+                selection_tracker=selection_tracker,
+                selection=get_selection(),
+                platform=get_platform(),
+                log=log,
+            )
+        ),
+        read_mouse_release_selection=(
+            lambda: read_mouse_release_selection(
+                selection=get_selection(),
+                platform=get_platform(),
+            )
+        ),
+    )
+
+
 def create_input_router(
     *,
     core: RuntimeCoreComponents,

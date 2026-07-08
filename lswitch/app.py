@@ -9,13 +9,13 @@ import lswitch.log  # registers TRACE level and logger.trace()
 from lswitch.config import ConfigManager
 from lswitch.core.auto_conversion_session import AutoConversionSessionState
 from lswitch.runtime import (
-    InputRouterCallbacks,
     PidLock,
     SelectionPollerThread,
     apply_runtime_timing_config,
     apply_user_dictionary_config,
     create_core_components,
     create_input_router,
+    create_input_router_callbacks,
     create_manual_conversion_controller,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
@@ -24,7 +24,6 @@ from lswitch.runtime import (
     extract_last_word_events,
     install_reload_signal_handler,
     perform_space_auto_conversion_at_boundary,
-    read_mouse_release_selection,
     run_evdev_event_loop,
     run_qt_runtime_loop,
     run_selected_runtime_loop,
@@ -32,7 +31,6 @@ from lswitch.runtime import (
     stop_runtime_resources,
     sync_user_dictionary_components,
     try_space_auto_conversion_at_boundary,
-    update_passive_selection_baseline_on_click,
     update_selection_baseline,
     wire_runtime_event_bus,
 )
@@ -90,38 +88,19 @@ class LSwitchApp:
 
         self.input_router = create_input_router(
             core=core,
-            callbacks=InputRouterCallbacks(
+            callbacks=create_input_router_callbacks(
                 decode_buffer=self._decode_buffer,
                 auto_conversion_enabled=self._auto_conversion_enabled,
                 try_auto_conversion_at_space=(
                     lambda: self._try_auto_conversion_at_space()
                 ),
-                get_pending_auto_space=(
-                    lambda: self.auto_conversion_session.pending_space
-                ),
-                set_pending_auto_space=(
-                    self.auto_conversion_session.set_pending_space
-                ),
-                clear_last_retype_events=(
-                    self.auto_conversion_session.clear_sticky_events
-                ),
-                clear_last_auto_marker=self.auto_conversion_session.clear_marker,
+                auto_conversion_session=self.auto_conversion_session,
                 inject_deferred_space=self._inject_deferred_space,
                 request_conversion=lambda: self._do_conversion(),
-                prime_selection_baseline_on_click=(
-                    lambda: update_passive_selection_baseline_on_click(
-                        selection_tracker=self.selection_tracker,
-                        selection=self.selection,
-                        platform=self._platform,
-                        log=logger,
-                    )
-                ),
-                read_mouse_release_selection=(
-                    lambda: read_mouse_release_selection(
-                        selection=self.selection,
-                        platform=self._platform,
-                    )
-                ),
+                selection_tracker=self.selection_tracker,
+                get_selection=lambda: self.selection,
+                get_platform=lambda: self._platform,
+                log=logger,
             ),
         )
 
