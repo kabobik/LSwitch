@@ -202,16 +202,6 @@ class LSwitchApp:
             manual_weight_step=self.MANUAL_WEIGHT_STEP,
         )
 
-    def _learning(self):
-        """Return LearningService synced with the current app-level user_dict."""
-        return synced_learning_service(
-            user_dict=self.user_dict,
-            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
-            learning_service=self.learning_service,
-            debug=self.debug,
-            manual_weight_step=self.MANUAL_WEIGHT_STEP,
-        )
-
     def _apply_runtime_config(self) -> None:
         """Apply config values that affect already-created runtime objects."""
         timing_config = apply_runtime_timing_config(
@@ -387,7 +377,13 @@ class LSwitchApp:
                 state_manager=self.state_manager,
                 selection_tracker=self.selection_tracker,
                 typed_buffer=self.typed_buffer,
-                learning_service=self._learning(),
+                learning_service=synced_learning_service(
+                    user_dict=self.user_dict,
+                    user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
+                    learning_service=self.learning_service,
+                    debug=self.debug,
+                    manual_weight_step=self.MANUAL_WEIGHT_STEP,
+                ),
                 conversion_engine=self.conversion_engine,
                 virtual_kb=self.virtual_kb,
                 xkb=self.xkb,
@@ -482,7 +478,13 @@ class LSwitchApp:
             typed_buffer=self.typed_buffer,
             xkb=self.xkb,
             virtual_kb=self.virtual_kb,
-            learning_service=self._learning(),
+            learning_service=synced_learning_service(
+                user_dict=self.user_dict,
+                user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
+                learning_service=self.learning_service,
+                debug=self.debug,
+                manual_weight_step=self.MANUAL_WEIGHT_STEP,
+            ),
             timing=self.timing,
             debug=self.debug,
         )
