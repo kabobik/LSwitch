@@ -43,6 +43,7 @@ from lswitch.runtime import (
     create_tray_indicator,
     execute_manual_conversion_with_session,
     extract_last_word_events,
+    handle_poller_selection_changed,
     inject_deferred_space,
     install_reload_signal_handler,
     perform_space_auto_conversion_at_boundary,
@@ -990,6 +991,25 @@ def test_update_selection_baseline_tolerates_read_errors():
     )
 
     tracker.update_baseline.assert_not_called()
+
+
+def test_handle_poller_selection_changed_marks_tracker_and_logs():
+    tracker = MagicMock()
+    log = MagicMock()
+
+    handle_poller_selection_changed(
+        selection_tracker=tracker,
+        text="x" * 60,
+        owner_id=42,
+        log=log,
+    )
+
+    tracker.on_poller_changed.assert_called_once_with()
+    log.debug.assert_called_once_with(
+        "Poller: selection changed, fresh=True — text=%r owner=0x%x",
+        "x" * 50,
+        42,
+    )
 
 
 def test_update_passive_selection_baseline_on_click_updates_tracker_and_logs_fresh():

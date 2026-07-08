@@ -655,6 +655,22 @@ def update_selection_baseline(*, selection_tracker, selection, platform) -> None
         pass
 
 
+def handle_poller_selection_changed(
+    *,
+    selection_tracker,
+    text: str,
+    owner_id: int,
+    log,
+) -> None:
+    """Mark selection as fresh after the platform poller reports a change."""
+    selection_tracker.on_poller_changed()
+    log.debug(
+        "Poller: selection changed, fresh=True — text=%r owner=0x%x",
+        text[:50] if text else "",
+        owner_id,
+    )
+
+
 def update_passive_selection_baseline_on_click(
     *,
     selection_tracker,

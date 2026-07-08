@@ -23,6 +23,7 @@ from lswitch.runtime import (
     create_tray_indicator,
     execute_manual_conversion_with_session,
     extract_last_word_events,
+    handle_poller_selection_changed,
     install_reload_signal_handler,
     perform_space_auto_conversion_at_boundary,
     run_evdev_event_loop,
@@ -356,10 +357,11 @@ class LSwitchApp:
         Does NOT update baseline (_prev_sel_text / _prev_sel_owner_id) —
         baseline is maintained by _on_mouse_release and tracked conversions.
         """
-        self.selection_tracker.on_poller_changed()
-        logger.debug(
-            "Poller: selection changed, fresh=True — text=%r owner=0x%x",
-            text[:50] if text else "", owner_id,
+        handle_poller_selection_changed(
+            selection_tracker=self.selection_tracker,
+            text=text,
+            owner_id=owner_id,
+            log=logger,
         )
 
     def _update_selection_baseline(self) -> None:
