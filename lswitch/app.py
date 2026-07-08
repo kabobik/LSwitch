@@ -339,12 +339,6 @@ class LSwitchApp:
             platform=self._platform,
         )
 
-    def _passive_selection_reader(self):
-        """Return a no-shortcut selection reader when the adapter provides one."""
-        from lswitch.platform.selection_adapter import get_passive_selection_reader
-
-        return get_passive_selection_reader(self.selection)
-
     def _update_passive_selection_baseline_on_click(self) -> None:
         """Prime baseline on platforms with safe passive selection reads."""
         update_passive_selection_baseline_on_click(
