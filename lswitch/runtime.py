@@ -276,11 +276,12 @@ def create_qt_runtime_bootstrap(*, runtime_plan, argv) -> QtRuntimeBootstrap:
 def create_input_router_callbacks(
     *,
     decode_buffer,
-    auto_conversion_enabled,
     try_auto_conversion_at_space,
     auto_conversion_session,
     request_conversion,
     selection_tracker,
+    config,
+    get_auto_detector,
     get_virtual_kb,
     get_selection,
     get_platform,
@@ -289,7 +290,12 @@ def create_input_router_callbacks(
     """Create late-bound callbacks needed by InputEventRouter."""
     return InputRouterCallbacks(
         decode_buffer=decode_buffer,
-        auto_conversion_enabled=auto_conversion_enabled,
+        auto_conversion_enabled=(
+            lambda: auto_conversion_enabled(
+                config=config,
+                auto_detector=get_auto_detector(),
+            )
+        ),
         try_auto_conversion_at_space=try_auto_conversion_at_space,
         get_pending_auto_space=lambda: auto_conversion_session.pending_space,
         set_pending_auto_space=auto_conversion_session.set_pending_space,
@@ -312,6 +318,11 @@ def create_input_router_callbacks(
             )
         ),
     )
+
+
+def auto_conversion_enabled(*, config, auto_detector) -> bool:
+    """Return whether space-triggered auto-conversion is currently available."""
+    return bool(auto_detector and config.get("auto_switch"))
 
 
 def inject_deferred_space(virtual_kb) -> None:

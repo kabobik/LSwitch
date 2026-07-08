@@ -91,13 +91,14 @@ class LSwitchApp:
             core=core,
             callbacks=create_input_router_callbacks(
                 decode_buffer=self._decode_buffer,
-                auto_conversion_enabled=self._auto_conversion_enabled,
                 try_auto_conversion_at_space=(
                     lambda: self._try_auto_conversion_at_space()
                 ),
                 auto_conversion_session=self.auto_conversion_session,
                 request_conversion=lambda: self._do_conversion(),
                 selection_tracker=self.selection_tracker,
+                config=self.config,
+                get_auto_detector=lambda: self.auto_detector,
                 get_virtual_kb=lambda: self.virtual_kb,
                 get_selection=lambda: self.selection,
                 get_platform=lambda: self._platform,
@@ -333,9 +334,6 @@ class LSwitchApp:
     @_pending_auto_space.setter
     def _pending_auto_space(self, value: bool) -> None:
         self.auto_conversion_session.set_pending_space(value)
-
-    def _auto_conversion_enabled(self) -> bool:
-        return bool(self.auto_detector and self.config.get('auto_switch'))
 
     # ------------------------------------------------------------------
     # Helpers

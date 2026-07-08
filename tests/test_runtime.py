@@ -30,6 +30,7 @@ from lswitch.runtime import (
     apply_runtime_timing_config,
     apply_space_auto_conversion_result,
     apply_user_dictionary_config,
+    auto_conversion_enabled,
     create_conversion_runtime,
     create_core_components,
     create_input_device_runtime,
@@ -259,11 +260,12 @@ def test_create_input_router_callbacks_wires_session_callbacks():
 
     callbacks = create_input_router_callbacks(
         decode_buffer=lambda: "buffer",
-        auto_conversion_enabled=lambda: False,
         try_auto_conversion_at_space=lambda: False,
         auto_conversion_session=session,
         request_conversion=lambda: None,
         selection_tracker=MagicMock(),
+        config=MagicMock(),
+        get_auto_detector=lambda: None,
         get_virtual_kb=lambda: None,
         get_selection=lambda: None,
         get_platform=lambda: None,
@@ -282,6 +284,34 @@ def test_create_input_router_callbacks_wires_session_callbacks():
     session.clear_marker.assert_called_once()
 
 
+def test_create_input_router_callbacks_late_binds_auto_conversion_enabled():
+    config = MagicMock()
+    config.get.return_value = True
+    detector = object()
+
+    callbacks = create_input_router_callbacks(
+        decode_buffer=lambda: "",
+        try_auto_conversion_at_space=lambda: False,
+        auto_conversion_session=types.SimpleNamespace(
+            pending_space=False,
+            set_pending_space=lambda value: None,
+            clear_sticky_events=lambda: None,
+            clear_marker=lambda: None,
+        ),
+        request_conversion=lambda: None,
+        selection_tracker=MagicMock(),
+        config=config,
+        get_auto_detector=lambda: detector,
+        get_virtual_kb=lambda: None,
+        get_selection=lambda: None,
+        get_platform=lambda: None,
+        log=MagicMock(),
+    )
+
+    assert callbacks.auto_conversion_enabled() is True
+    config.get.assert_called_once_with("auto_switch")
+
+
 def test_create_input_router_callbacks_late_binds_selection_dependencies():
     tracker = MagicMock()
     log = MagicMock()
@@ -298,7 +328,6 @@ def test_create_input_router_callbacks_late_binds_selection_dependencies():
 
     callbacks = create_input_router_callbacks(
         decode_buffer=lambda: "",
-        auto_conversion_enabled=lambda: False,
         try_auto_conversion_at_space=lambda: False,
         auto_conversion_session=types.SimpleNamespace(
             pending_space=False,
@@ -308,6 +337,8 @@ def test_create_input_router_callbacks_late_binds_selection_dependencies():
         ),
         request_conversion=lambda: None,
         selection_tracker=tracker,
+        config=MagicMock(),
+        get_auto_detector=lambda: None,
         get_virtual_kb=lambda: None,
         get_selection=lambda: current["selection"],
         get_platform=lambda: current["platform"],
@@ -328,7 +359,6 @@ def test_create_input_router_callbacks_late_binds_virtual_keyboard_for_deferred_
 
     callbacks = create_input_router_callbacks(
         decode_buffer=lambda: "",
-        auto_conversion_enabled=lambda: False,
         try_auto_conversion_at_space=lambda: False,
         auto_conversion_session=types.SimpleNamespace(
             pending_space=False,
@@ -338,6 +368,8 @@ def test_create_input_router_callbacks_late_binds_virtual_keyboard_for_deferred_
         ),
         request_conversion=lambda: None,
         selection_tracker=MagicMock(),
+        config=MagicMock(),
+        get_auto_detector=lambda: None,
         get_virtual_kb=lambda: virtual_kb,
         get_selection=lambda: None,
         get_platform=lambda: None,
@@ -353,6 +385,17 @@ def test_create_input_router_callbacks_late_binds_virtual_keyboard_for_deferred_
 
 def test_inject_deferred_space_ignores_missing_virtual_keyboard():
     inject_deferred_space(None)
+
+
+def test_auto_conversion_enabled_requires_detector_and_config_flag():
+    config = MagicMock()
+    config.get.return_value = True
+
+    assert auto_conversion_enabled(config=config, auto_detector=object()) is True
+    assert auto_conversion_enabled(config=config, auto_detector=None) is False
+
+    config.get.return_value = False
+    assert auto_conversion_enabled(config=config, auto_detector=object()) is False
 
 
 def test_wire_runtime_event_bus_subscribes_input_router_and_config_handlers():
