@@ -358,130 +358,161 @@ AutoSwitchResult(kind="converted", marker=...)
 
 Главное - перестать размазывать side effects по одному большому handler-у.
 
-## 6. Этапы работ
+## 6. Текущий статус рефакторинга
 
-### Этап 1 - Зафиксировать текущие границы и regression coverage
+Мелкие этапы 1-10 из первой версии плана в основном уже закрыты или переведены
+в compatibility facade. Дальше задачи нужно брать более крупными вертикальными
+срезами, чтобы не продолжать бесконечное перемещение single-use helper-ов.
 
-Цель: перед переносом логики убедиться, что основные сценарии покрыты.
+Выполнено:
 
-Проверить и при необходимости дополнить тесты:
+- input routing переехал в `InputEventRouter`;
+- typed buffer decode / last-word extraction живут в `TypedBufferService` и
+  runtime helper-ах;
+- replay/backspace/layout switching вынесены в `RetypeService`;
+- auto-conversion marker стал typed model, transient state вынесен в
+  `AutoConversionSessionState`;
+- selection freshness и baseline state живут в `SelectionFreshnessTracker`;
+- mouse release/click baseline, poller freshness и selection baseline helpers
+  вынесены из `LSwitchApp`;
+- manual/undo/space conversion flow живет в controllers/use cases;
+- user dictionary learning side effects идут через `LearningService`;
+- runtime config update, user dictionary enable, Qt/evdev loop composition и
+  resource lifecycle вынесены в `runtime.py`;
+- `LSwitchApp` больше не содержит крупных key/mouse handlers.
 
-- manual retype conversion;
-- selection conversion;
-- space-triggered auto-conversion;
-- Shift+Shift undo after auto-conversion;
-- repeated Shift+Shift selection conversion;
-- selection freshness через mouse release/poller;
-- config reload user dictionary enable/disable.
+Осталось:
 
-Acceptance:
+- `LSwitchApp` все еще содержит conversion wiring methods:
+  `_do_conversion()`, `_try_auto_conversion_at_space()`,
+  `_do_auto_conversion_at_space()`, `_space_auto_conversion()`;
+- `LSwitchApp` сохраняет compatibility properties для старых tests/UI:
+  `_selection_valid`, `_selection_generation`, `_prev_sel_text`,
+  `_last_auto_marker`, `_pending_auto_space`;
+- `runtime.py` стал слишком широким и постепенно превращается во второй
+  composition-heavy module;
+- app-level tests все еще часто проверяют private facade вместо отдельных
+  services/controllers;
+- feature-планы еще не должны стартовать, пока conversion runtime boundary и
+  test ownership не стабилизированы.
 
-- текущий test suite проходит;
-- есть короткий список core scenarios, которые нельзя сломать;
-- новые refactor PR не меняют behavior.
+## 7. Следующие крупные пакеты работ
 
-### Этап 2 - TypedBufferService
+### Пакет A - Conversion Runtime Facade
 
-Перенести операции над `event_buffer` и word extraction из `LSwitchApp`.
+Цель: убрать conversion orchestration из `LSwitchApp`, не меняя behavior.
 
-Acceptance:
+Сделать единый объект, например:
 
-- `LSwitchApp._on_key_press()` больше не делает append/pop напрямую;
-- `_decode_buffer()` и `_extract_last_word_events()` переехали или стали
-  thin wrappers;
-- тесты auto-conversion и buffer extraction проходят.
+```text
+ConversionRuntimeFacade
+  request_manual_conversion()
+  try_space_auto_conversion()
+  perform_space_auto_conversion(...)
+  extract_last_word(...)
+  decode_buffer(...)
+```
 
-### Этап 3 - RetypeService
+Он должен владеть wiring-ом:
 
-Вынести общий replay primitive из `RetypeMode` и
-`_do_auto_conversion_at_space()`.
-
-Acceptance:
-
-- одно место делает `Backspace + switch_layout + replay_events`;
-- `RetypeMode` стал thin wrapper;
-- auto-conversion на `Space` сохраняет deferred Space behavior.
-
-### Этап 4 - AutoConversionMarker + UndoAutoConversionUseCase
-
-Заменить `_last_auto_marker` dict на dataclass и вынести undo path.
-
-Acceptance:
-
-- undo тесты не зависят от magic dict keys;
-- marker lifecycle явно очищается на navigation/mouse/reset;
-- текущий Shift+Shift undo работает как раньше.
-
-### Этап 5 - SelectionFreshnessTracker
-
-Вынести selection freshness и baseline tracking.
-
-Acceptance:
-
-- `LSwitchApp` не хранит напрямую `_selection_valid`,
-  `_selection_generation`, repeat generation и baseline fields;
-- mouse click/release handlers стали thin delegation;
-- poller callback делегирует tracker-у.
-
-### Этап 6 - LearningService
-
-Вынести user dictionary writes из `_do_conversion()` и auto-conversion paths.
+- `ManualConversionController`;
+- `SpaceAutoConversionUseCase`;
+- `AutoConversionSessionState`;
+- `SelectionFreshnessTracker` baseline updates;
+- synced `LearningService`;
+- accessors к platform adapters (`xkb`, `selection`, `virtual_kb`,
+  `conversion_engine`).
 
 Acceptance:
 
-- `LSwitchApp` не вызывает напрямую `add_confirmation()` /
-  `add_correction()` кроме initialization;
-- manual conversion, selection conversion и undo learning покрыты тестами;
-- `AutoDetector` по-прежнему получает user dictionary для read decisions.
+- `LSwitchApp._do_conversion()`, `_try_auto_conversion_at_space()`,
+  `_do_auto_conversion_at_space()` становятся thin compatibility wrappers или
+  удаляются из internal wiring;
+- `InputRouterCallbacks` получает conversion callbacks от facade, а не от app
+  lambdas;
+- tests для manual/space conversion можно запускать без полного app lifecycle;
+- текущий полный test suite проходит.
 
-### Этап 7 - Conversion use cases
+### Пакет B - App Compatibility Facade Cleanup
 
-Разделить `_do_conversion()` на use cases.
+Цель: оставить `LSwitchApp` публичной точкой входа, но перестать использовать
+его private fields как основной тестовый API.
 
-Acceptance:
+Сделать:
 
-- `_do_conversion()` в `LSwitchApp` только проверяет state/request и вызывает
-  use case;
-- manual conversion и undo conversion имеют отдельные тесты без полного app
-  lifecycle;
-- `ConversionEngine` либо остается lower-level executor, либо переименовывается
-  по фактической роли.
-
-### Этап 8 - InputEventRouter
-
-Перенести key/mouse event orchestration из `LSwitchApp`.
-
-Acceptance:
-
-- `LSwitchApp._wire_event_bus()` подписывает router handlers;
-- `LSwitchApp` больше не содержит крупных `_on_key_press`,
-  `_on_key_release`, `_on_key_repeat`, `_on_mouse_click`,
-  `_on_mouse_release`;
-- app tests можно постепенно заменить tests для router/controllers.
-
-### Этап 9 - LayoutService
-
-Вынести EN/RU layout helpers и target layout lookup.
+- перевести часть tests с `app._selection_valid`,
+  `app._last_auto_marker`, `app._extract_last_word_events()` на
+  `SelectionFreshnessTracker`, `AutoConversionSessionState`,
+  `TypedBufferService` и conversion facade;
+- оставить в `LSwitchApp` минимальные compatibility properties только там, где
+  их реально использует UI/debug monitor;
+- убрать app wrappers, которые больше не нужны после перевода tests.
 
 Acceptance:
 
-- `_layout_to_lang()` удален из `LSwitchApp`;
-- `SelectionMode`, auto-conversion и future controllers используют одну
-  реализацию поиска layout по language;
-- это не полноценные layout profiles, а маленький стабилизирующий слой.
+- app tests покрывают lifecycle/wiring smoke cases;
+- domain behavior покрывается tests соответствующих services/controllers;
+- количество прямых обращений tests к `LSwitchApp._*` заметно снижено;
+- полный test suite проходит.
 
-### Этап 10 - Runtime composition cleanup
+### Пакет C - Runtime Module Split
 
-Сократить `LSwitchApp` до lifecycle/composition root.
+Цель: не дать `runtime.py` стать новым god module.
+
+Разделить `runtime.py` на несколько модулей без изменения public imports или с
+малой совместимой прослойкой:
+
+```text
+lswitch/runtime.py              # temporary compatibility exports
+lswitch/runtime/config.py       # config reload, timing, user dict sync
+lswitch/runtime/composition.py  # core/platform/input/conversion factories
+lswitch/runtime/lifecycle.py    # pid lock, evdev/Qt loops, resources
+lswitch/runtime/selection.py    # selection baseline/poller helpers
+lswitch/runtime/conversion.py   # conversion facade/factories/boundaries
+```
 
 Acceptance:
 
-- `LSwitchApp` создает компоненты, запускает loop, останавливает resources;
-- продуктовая логика живет в controllers/use cases;
-- новые feature flags можно подключать без добавления больших блоков в
-  `app.py`.
+- `runtime.py` больше не содержит все helpers физически в одном файле;
+- старые imports из `lswitch.runtime` либо продолжают работать, либо заменены
+  одним механическим commit-ом;
+- tests runtime/config/lifecycle/conversion остаются зелеными.
 
-## 7. Что делать после модульного ядра
+### Пакет D - Input Router Callback Contract Cleanup
+
+Цель: заменить часть callback soup на явные runtime/controller объекты.
+
+Сделать:
+
+- `InputRouterCallbacks.request_conversion` и
+  `try_auto_conversion_at_space` перевести на `ConversionRuntimeFacade`;
+- pending-space, marker clearing и sticky-events оставить через
+  `AutoConversionSessionState`, а не отдельные lambdas;
+- selection read/baseline callbacks сгруппировать в selection runtime object.
+
+Acceptance:
+
+- `InputRouterCallbacks` становится короче и читабельнее;
+- `LSwitchApp.__init__` не собирает длинные callback lists;
+- input router tests продолжают проверять behavior на уровне событий.
+
+### Пакет E - Feature Readiness Gate
+
+Цель: определить, когда можно возвращаться к feature-планам
+`MID_WORD_SYSTEM_DICTIONARY_PLAN.md`, `PER_APP_LAYOUT_MEMORY_PLAN.md` и
+`LAYOUT_PROFILE_ARCHITECTURE_PLAN.md`.
+
+Feature-работы можно начинать, когда выполнены условия:
+
+- conversion facade существует и используется input router-ом;
+- app private-field tests сокращены до lifecycle/facade smoke coverage;
+- runtime module split хотя бы начат, чтобы новые capabilities не добавлялись в
+  большой `runtime.py`;
+- full suite зеленый;
+- для mid-word есть отдельная точка расширения рядом с
+  `SpaceAutoConversionUseCase`, а не новый блок в `LSwitchApp`.
+
+## 8. Что делать после модульного ядра
 
 После этапов 1-10 порядок feature-работ:
 
@@ -493,7 +524,7 @@ Acceptance:
 5. `LAYOUT_PROFILE_ARCHITECTURE_PLAN.md` как следующий большой слой, когда
    EN/RU helpers уже локализованы в `LayoutService`.
 
-## 8. Файловая структура после миграции
+## 9. Файловая структура после миграции
 
 Ориентировочный вид:
 
@@ -536,7 +567,7 @@ lswitch/
 Не обязательно создать все файлы сразу. Файл появляется только тогда, когда в
 него переносится реальная логика.
 
-## 9. Риски
+## 10. Риски
 
 ### Слишком крупный PR
 
@@ -571,7 +602,7 @@ lswitch/
 - last auto conversion -> `AutoConversionMarkerStore` или поле controller-а;
 - user learning writes -> `LearningService`.
 
-## 10. Definition of done
+## 11. Definition of done
 
 Общий рефакторинг можно считать завершенным, когда:
 
