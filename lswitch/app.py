@@ -96,9 +96,19 @@ class LSwitchApp:
             inject_deferred_space=self._inject_deferred_space,
             request_conversion=lambda: self._do_conversion(),
             prime_selection_baseline_on_click=(
-                lambda: self._update_passive_selection_baseline_on_click()
+                lambda: update_passive_selection_baseline_on_click(
+                    selection_tracker=self.selection_tracker,
+                    selection=self.selection,
+                    platform=self._platform,
+                    log=logger,
+                )
             ),
-            read_mouse_release_selection=self._read_mouse_release_selection,
+            read_mouse_release_selection=(
+                lambda: read_mouse_release_selection(
+                    selection=self.selection,
+                    platform=self._platform,
+                )
+            ),
         )
 
         # Platform adapters — created by _init_platform()
@@ -331,21 +341,6 @@ class LSwitchApp:
 
         if self.virtual_kb:
             self.virtual_kb.tap_key(KEY_SPACE)
-
-    def _read_mouse_release_selection(self):
-        return read_mouse_release_selection(
-            selection=self.selection,
-            platform=self._platform,
-        )
-
-    def _update_passive_selection_baseline_on_click(self) -> None:
-        """Prime baseline on platforms with safe passive selection reads."""
-        update_passive_selection_baseline_on_click(
-            selection_tracker=self.selection_tracker,
-            selection=self.selection,
-            platform=self._platform,
-            log=logger,
-        )
 
     # ------------------------------------------------------------------
     # Helpers
