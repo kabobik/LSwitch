@@ -52,6 +52,7 @@ from lswitch.runtime import (
     start_runtime_resources,
     stop_runtime_resources,
     sync_user_dictionary_components,
+    update_passive_selection_baseline_on_click,
     update_selection_baseline,
     wire_runtime_event_bus,
 )
@@ -724,6 +725,69 @@ def test_update_selection_baseline_tolerates_read_errors():
     )
 
     tracker.update_baseline.assert_not_called()
+
+
+def test_update_passive_selection_baseline_on_click_updates_tracker_and_logs_fresh():
+    tracker = MagicMock()
+    tracker.on_click_passive_selection.return_value = "fresh"
+    log = MagicMock()
+
+    class PassiveSelection:
+        def get_passive_selection(self):
+            return types.SimpleNamespace(text="fresh selection", owner_id=42)
+
+    update_passive_selection_baseline_on_click(
+        selection_tracker=tracker,
+        selection=PassiveSelection(),
+        platform=types.SimpleNamespace(selection_mouse_release_tracking_enabled=True),
+        log=log,
+    )
+
+    tracker.on_click_passive_selection.assert_called_once_with("fresh selection", 42)
+    log.debug.assert_called_once()
+
+
+def test_update_passive_selection_baseline_on_click_skips_when_platform_disables_tracking():
+    tracker = MagicMock()
+
+    update_passive_selection_baseline_on_click(
+        selection_tracker=tracker,
+        selection=MagicMock(),
+        platform=types.SimpleNamespace(selection_mouse_release_tracking_enabled=False),
+        log=MagicMock(),
+    )
+
+    tracker.on_click_passive_selection.assert_not_called()
+
+
+def test_update_passive_selection_baseline_on_click_skips_without_passive_reader():
+    tracker = MagicMock()
+
+    update_passive_selection_baseline_on_click(
+        selection_tracker=tracker,
+        selection=MagicMock(),
+        platform=types.SimpleNamespace(selection_mouse_release_tracking_enabled=True),
+        log=MagicMock(),
+    )
+
+    tracker.on_click_passive_selection.assert_not_called()
+
+
+def test_update_passive_selection_baseline_on_click_tolerates_read_errors():
+    tracker = MagicMock()
+
+    class PassiveSelection:
+        def get_passive_selection(self):
+            raise RuntimeError("selection unavailable")
+
+    update_passive_selection_baseline_on_click(
+        selection_tracker=tracker,
+        selection=PassiveSelection(),
+        platform=types.SimpleNamespace(selection_mouse_release_tracking_enabled=True),
+        log=MagicMock(),
+    )
+
+    tracker.on_click_passive_selection.assert_not_called()
 
 
 def test_create_conversion_runtime_wires_detector_and_engine():

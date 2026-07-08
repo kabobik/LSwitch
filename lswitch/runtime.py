@@ -528,6 +528,55 @@ def update_selection_baseline(*, selection_tracker, selection, platform) -> None
         pass
 
 
+def update_passive_selection_baseline_on_click(
+    *,
+    selection_tracker,
+    selection,
+    platform,
+    log,
+) -> None:
+    """Prime baseline on platforms with safe passive selection reads."""
+    if platform is None:
+        return
+    if not getattr(
+        platform,
+        "selection_mouse_release_tracking_enabled",
+        True,
+    ):
+        return
+
+    from lswitch.platform.selection_adapter import get_passive_selection_reader
+
+    reader = get_passive_selection_reader(selection)
+    if reader is None:
+        return
+    try:
+        info = reader()
+        result = selection_tracker.on_click_passive_selection(
+            info.text or "",
+            info.owner_id,
+        )
+        if result == "initial":
+            log.trace(  # type: ignore[attr-defined]
+                "MouseClick: initial passive selection baseline — text=%r",
+                info.text[:50] if info.text else "",
+            )
+            return
+        if result == "fresh":
+            log.debug(
+                "MouseClick: fresh passive selection — text=%r owner=0x%x",
+                info.text[:50] if info.text else "",
+                info.owner_id,
+            )
+            return
+        log.trace(  # type: ignore[attr-defined]
+            "MouseClick: passive selection baseline — text=%r",
+            info.text[:50] if info.text else "",
+        )
+    except Exception:
+        pass
+
+
 def create_conversion_runtime(
     *,
     xkb,

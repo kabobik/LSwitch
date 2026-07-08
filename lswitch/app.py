@@ -30,6 +30,7 @@ from lswitch.runtime import (
     start_runtime_resources,
     stop_runtime_resources,
     sync_user_dictionary_components,
+    update_passive_selection_baseline_on_click,
     update_selection_baseline,
     wire_runtime_event_bus,
 )
@@ -346,41 +347,12 @@ class LSwitchApp:
 
     def _update_passive_selection_baseline_on_click(self) -> None:
         """Prime baseline on platforms with safe passive selection reads."""
-        if self._platform is None:
-            return
-        if not getattr(
-            self._platform,
-            "selection_mouse_release_tracking_enabled",
-            True,
-        ):
-            return
-        reader = self._passive_selection_reader()
-        if reader is None:
-            return
-        try:
-            info = reader()
-            result = self.selection_tracker.on_click_passive_selection(
-                info.text or "",
-                info.owner_id,
-            )
-            if result == "initial":
-                logger.trace(  # type: ignore[attr-defined]
-                    "MouseClick: initial passive selection baseline — text=%r",
-                    info.text[:50] if info.text else "",
-                )
-                return
-            if result == "fresh":
-                logger.debug(
-                    "MouseClick: fresh passive selection — text=%r owner=0x%x",
-                    info.text[:50] if info.text else "", info.owner_id,
-                )
-                return
-            logger.trace(  # type: ignore[attr-defined]
-                "MouseClick: passive selection baseline — text=%r",
-                info.text[:50] if info.text else "",
-            )
-        except Exception:
-            pass
+        update_passive_selection_baseline_on_click(
+            selection_tracker=self.selection_tracker,
+            selection=self.selection,
+            platform=self._platform,
+            log=logger,
+        )
 
     # ------------------------------------------------------------------
     # Helpers
