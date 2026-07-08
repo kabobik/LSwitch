@@ -59,6 +59,7 @@ from lswitch.runtime import (
     read_existing_pid,
     start_runtime_resources,
     stop_runtime_resources,
+    synced_learning_service,
     sync_user_dictionary_components,
     try_space_auto_conversion_at_boundary,
     update_passive_selection_baseline_on_click,
@@ -458,6 +459,24 @@ def test_sync_user_dictionary_components_falls_back_to_default_min_weight():
 
     assert auto_detector.user_dict is None
     assert auto_detector.user_dict_min_weight == 2
+
+
+def test_synced_learning_service_updates_and_returns_learning_service():
+    user_dict = object()
+    learning_service = MagicMock()
+
+    result = synced_learning_service(
+        user_dict=user_dict,
+        user_dict_min_weight=5,
+        learning_service=learning_service,
+        debug=True,
+        manual_weight_step=4,
+    )
+
+    assert result is learning_service
+    assert learning_service.user_dict is user_dict
+    assert learning_service.debug is True
+    assert learning_service.manual_weight_step == 4
 
 
 def test_apply_runtime_timing_config_updates_state_and_conversion_engine():

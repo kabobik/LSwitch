@@ -396,6 +396,27 @@ def sync_user_dictionary_components(
         learning_service.manual_weight_step = manual_weight_step
 
 
+def synced_learning_service(
+    *,
+    user_dict,
+    user_dict_min_weight,
+    learning_service,
+    debug: bool,
+    manual_weight_step: int,
+):
+    """Sync and return the learning service for short-lived use case wiring."""
+    sync_user_dictionary_components(
+        user_dict=user_dict,
+        user_dict_min_weight=user_dict_min_weight,
+        auto_detector=None,
+        conversion_engine=None,
+        learning_service=learning_service,
+        debug=debug,
+        manual_weight_step=manual_weight_step,
+    )
+    return learning_service
+
+
 def apply_runtime_timing_config(
     *,
     config,

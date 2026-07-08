@@ -32,6 +32,7 @@ from lswitch.runtime import (
     run_selected_runtime_loop,
     start_runtime_resources,
     stop_runtime_resources,
+    synced_learning_service,
     sync_user_dictionary_components,
     try_space_auto_conversion_at_boundary,
     update_selection_baseline,
@@ -203,16 +204,13 @@ class LSwitchApp:
 
     def _learning(self):
         """Return LearningService synced with the current app-level user_dict."""
-        sync_user_dictionary_components(
+        return synced_learning_service(
             user_dict=self.user_dict,
             user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
-            auto_detector=None,
-            conversion_engine=None,
             learning_service=self.learning_service,
             debug=self.debug,
             manual_weight_step=self.MANUAL_WEIGHT_STEP,
         )
-        return self.learning_service
 
     def _apply_runtime_config(self) -> None:
         """Apply config values that affect already-created runtime objects."""
