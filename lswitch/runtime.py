@@ -5,6 +5,7 @@ import logging
 import os
 import signal
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from lswitch.core.conversion_engine import ConversionEngine
@@ -173,6 +174,21 @@ class RuntimeCoreComponents:
 
 
 @dataclass(frozen=True)
+class InputRouterCallbacks:
+    decode_buffer: Callable[[], str]
+    auto_conversion_enabled: Callable[[], bool]
+    try_auto_conversion_at_space: Callable[[], bool]
+    get_pending_auto_space: Callable[[], bool]
+    set_pending_auto_space: Callable[[bool], None]
+    clear_last_retype_events: Callable[[], None]
+    clear_last_auto_marker: Callable[[], None]
+    inject_deferred_space: Callable[[], None]
+    request_conversion: Callable[[], None]
+    prime_selection_baseline_on_click: Callable[[], None]
+    read_mouse_release_selection: Callable[[], object | None]
+
+
+@dataclass(frozen=True)
 class ConversionRuntimeComponents:
     dictionary: DictionaryService
     ngrams: NgramAnalyzer
@@ -260,34 +276,24 @@ def create_qt_runtime_bootstrap(*, runtime_plan, argv) -> QtRuntimeBootstrap:
 def create_input_router(
     *,
     core: RuntimeCoreComponents,
-    decode_buffer,
-    auto_conversion_enabled,
-    try_auto_conversion_at_space,
-    get_pending_auto_space,
-    set_pending_auto_space,
-    clear_last_retype_events,
-    clear_last_auto_marker,
-    inject_deferred_space,
-    request_conversion,
-    prime_selection_baseline_on_click,
-    read_mouse_release_selection,
+    callbacks: InputRouterCallbacks,
 ) -> InputEventRouter:
     """Create the input router around app/runtime callbacks."""
     return InputEventRouter(
         state_manager=core.state_manager,
         typed_buffer=core.typed_buffer,
         selection_tracker=core.selection_tracker,
-        decode_buffer=decode_buffer,
-        auto_conversion_enabled=auto_conversion_enabled,
-        try_auto_conversion_at_space=try_auto_conversion_at_space,
-        get_pending_auto_space=get_pending_auto_space,
-        set_pending_auto_space=set_pending_auto_space,
-        clear_last_retype_events=clear_last_retype_events,
-        clear_last_auto_marker=clear_last_auto_marker,
-        inject_deferred_space=inject_deferred_space,
-        request_conversion=request_conversion,
-        prime_selection_baseline_on_click=prime_selection_baseline_on_click,
-        read_mouse_release_selection=read_mouse_release_selection,
+        decode_buffer=callbacks.decode_buffer,
+        auto_conversion_enabled=callbacks.auto_conversion_enabled,
+        try_auto_conversion_at_space=callbacks.try_auto_conversion_at_space,
+        get_pending_auto_space=callbacks.get_pending_auto_space,
+        set_pending_auto_space=callbacks.set_pending_auto_space,
+        clear_last_retype_events=callbacks.clear_last_retype_events,
+        clear_last_auto_marker=callbacks.clear_last_auto_marker,
+        inject_deferred_space=callbacks.inject_deferred_space,
+        request_conversion=callbacks.request_conversion,
+        prime_selection_baseline_on_click=callbacks.prime_selection_baseline_on_click,
+        read_mouse_release_selection=callbacks.read_mouse_release_selection,
     )
 
 

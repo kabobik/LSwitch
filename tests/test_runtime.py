@@ -18,6 +18,7 @@ from lswitch.core.typed_buffer import TypedBufferService
 from lswitch.runtime import (
     ConversionRuntimeComponents,
     InputDeviceRuntimeComponents,
+    InputRouterCallbacks,
     PidLock,
     PlatformRuntimeComponents,
     QtRuntimeBootstrap,
@@ -214,17 +215,19 @@ def test_create_input_router_wires_core_components_and_callbacks():
 
     router = create_input_router(
         core=core,
-        decode_buffer=lambda: "",
-        auto_conversion_enabled=lambda: False,
-        try_auto_conversion_at_space=lambda: False,
-        get_pending_auto_space=lambda: True,
-        set_pending_auto_space=set_pending_auto_space,
-        clear_last_retype_events=clear_last_retype_events,
-        clear_last_auto_marker=lambda: None,
-        inject_deferred_space=lambda: None,
-        request_conversion=lambda: None,
-        prime_selection_baseline_on_click=lambda: None,
-        read_mouse_release_selection=lambda: None,
+        callbacks=InputRouterCallbacks(
+            decode_buffer=lambda: "",
+            auto_conversion_enabled=lambda: False,
+            try_auto_conversion_at_space=lambda: False,
+            get_pending_auto_space=lambda: True,
+            set_pending_auto_space=set_pending_auto_space,
+            clear_last_retype_events=clear_last_retype_events,
+            clear_last_auto_marker=lambda: None,
+            inject_deferred_space=lambda: None,
+            request_conversion=lambda: None,
+            prime_selection_baseline_on_click=lambda: None,
+            read_mouse_release_selection=lambda: None,
+        ),
     )
 
     assert isinstance(router, InputEventRouter)
