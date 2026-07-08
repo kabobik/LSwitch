@@ -367,14 +367,6 @@ class LSwitchApp:
             log=logger,
         )
 
-    def _update_selection_baseline(self) -> None:
-        """Update passive selection baseline when the platform supports it."""
-        update_selection_baseline(
-            selection_tracker=self.selection_tracker,
-            selection=self.selection,
-            platform=self._platform,
-        )
-
     # ------------------------------------------------------------------
     # Conversion
     # ------------------------------------------------------------------
@@ -406,7 +398,13 @@ class LSwitchApp:
                 debug=self.debug,
                 decode_events=self._decode_buffer,
                 extract_last_word=self._extract_last_word_events,
-                update_selection_baseline=self._update_selection_baseline,
+                update_selection_baseline=(
+                    lambda: update_selection_baseline(
+                        selection_tracker=self.selection_tracker,
+                        selection=self.selection,
+                        platform=self._platform,
+                    )
+                ),
             ),
             session=self.auto_conversion_session,
         )
