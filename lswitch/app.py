@@ -183,7 +183,7 @@ class LSwitchApp:
         wire_runtime_event_bus(
             event_bus=self.event_bus,
             input_router=self.input_router,
-            on_config_changed=self._on_config_changed,
+            on_config_changed=lambda event: self._apply_runtime_config(),
         )
 
     def _enable_user_dictionary(self):
@@ -216,9 +216,6 @@ class LSwitchApp:
         self.wayland_timing = timing_config.wayland_timing
         self.wayland_selection_timing = timing_config.wayland_selection_timing
         self.user_dict = applied.user_dict
-
-    def _on_config_changed(self, event) -> None:
-        self._apply_runtime_config()
 
     # ------------------------------------------------------------------
     # Event callbacks
