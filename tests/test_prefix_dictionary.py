@@ -6,6 +6,24 @@ from lswitch.intelligence.dictionary_service import DictionaryService
 from lswitch.intelligence.prefix_dictionary import PrefixDictionary
 
 
+class _Loaded:
+    def __init__(self, words: set[str]):
+        self.words = words
+
+
+class _SystemLoader:
+    def __init__(self):
+        self.loaded_langs = []
+
+    def load(self, lang: str):
+        self.loaded_langs.append(lang)
+        if lang == "en":
+            return _Loaded({"customword"})
+        if lang == "ru":
+            return _Loaded({"кастомный"})
+        return None
+
+
 def test_prefix_dictionary_counts_prefixes_per_language():
     dictionary = PrefixDictionary(
         en_words={"hello", "help", "world"},
@@ -36,6 +54,22 @@ def test_prefix_dictionary_from_dictionary_service_uses_builtin_words():
     assert dictionary.in_lang("ru", "привет") is True
     assert dictionary.has_prefix("en", "hell") is True
     assert dictionary.has_prefix("ru", "прив") is True
+
+
+def test_prefix_dictionary_can_merge_optional_system_words():
+    service = DictionaryService()
+    loader = _SystemLoader()
+
+    dictionary = PrefixDictionary.from_dictionary_service(
+        service,
+        system_loader=loader,
+        include_system=True,
+    )
+
+    assert dictionary.in_lang("en", "hello") is True
+    assert dictionary.in_lang("en", "customword") is True
+    assert dictionary.has_prefix("ru", "каст") is True
+    assert loader.loaded_langs == ["en", "ru"]
 
 
 def test_dictionary_service_exposes_word_sets_by_language():

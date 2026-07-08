@@ -32,10 +32,17 @@ class PrefixDictionary:
         dictionary,
         *,
         min_prefix_len: int = 1,
+        system_loader=None,
+        include_system: bool = False,
     ) -> "PrefixDictionary":
+        en_words = dictionary.words_for_lang("en")
+        ru_words = dictionary.words_for_lang("ru")
+        if include_system and system_loader is not None:
+            en_words = cls._merge_system_words(en_words, system_loader, "en")
+            ru_words = cls._merge_system_words(ru_words, system_loader, "ru")
         return cls(
-            en_words=dictionary.words_for_lang("en"),
-            ru_words=dictionary.words_for_lang("ru"),
+            en_words=en_words,
+            ru_words=ru_words,
             min_prefix_len=min_prefix_len,
         )
 
@@ -74,3 +81,11 @@ class PrefixDictionary:
             for end in range(self.min_prefix_len, len(word) + 1):
                 counts[word[:end]] += 1
         return counts
+
+    @staticmethod
+    def _merge_system_words(words: set[str], system_loader, lang: str) -> set[str]:
+        merged = set(words)
+        loaded = system_loader.load(lang)
+        if loaded is not None:
+            merged.update(loaded.words)
+        return merged
