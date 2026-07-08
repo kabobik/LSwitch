@@ -541,7 +541,7 @@ Acceptance:
 
 ### Пакет E - Auto-Conversion Extension Point
 
-Статус: следующий пакет.
+Статус: выполнено.
 
 Цель: подготовить auto-conversion ядро к mid-word режиму без возврата новой
 логики в `LSwitchApp`.
@@ -564,9 +564,20 @@ Acceptance:
 - полный test suite проходит;
 - feature plan обновлен под текущую архитектуру.
 
+Фактический результат:
+
+- добавлены `AutoConversionCandidate` и
+  `SpaceAutoConversionCandidateProvider`;
+- `SpaceAutoConversionUseCase` получает candidate через extension point, при
+  этом default provider сохраняет прежнее last-word поведение;
+- добавлены unit tests на injected provider и empty candidate;
+- `MID_WORD_SYSTEM_DICTIONARY_PLAN.md` обновлен: интеграция идет через
+  `ConversionRuntimeFacade` / use case слой, а не через `LSwitchApp`;
+- полный suite: `804 passed`.
+
 ### Пакет F - Feature Readiness Gate
 
-Статус: после пакета E.
+Статус: выполнено.
 
 Цель: принять решение о возврате к feature-планам
 `MID_WORD_SYSTEM_DICTIONARY_PLAN.md`, `PER_APP_LAYOUT_MEMORY_PLAN.md` и
@@ -584,10 +595,8 @@ Feature-работы можно начинать, когда выполнены 
 
 Текущая оценка:
 
-- первые четыре условия выполнены;
-- перед стартом feature-работ нужно зафиксировать extension point для mid-word
-  рядом с `SpaceAutoConversionUseCase` и обновить соответствующий feature plan;
-- после этого можно переходить к `MID_WORD_SYSTEM_DICTIONARY_PLAN.md`.
+- все условия выполнены;
+- можно переходить к `MID_WORD_SYSTEM_DICTIONARY_PLAN.md`.
 
 ## 8. Что делать после модульного ядра
 
