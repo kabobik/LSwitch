@@ -42,6 +42,7 @@ from lswitch.runtime import (
     create_tray_indicator,
     execute_manual_conversion_with_session,
     extract_last_word_events,
+    inject_deferred_space,
     install_reload_signal_handler,
     perform_space_auto_conversion_at_boundary,
     read_mouse_release_selection,
@@ -261,9 +262,9 @@ def test_create_input_router_callbacks_wires_session_callbacks():
         auto_conversion_enabled=lambda: False,
         try_auto_conversion_at_space=lambda: False,
         auto_conversion_session=session,
-        inject_deferred_space=lambda: None,
         request_conversion=lambda: None,
         selection_tracker=MagicMock(),
+        get_virtual_kb=lambda: None,
         get_selection=lambda: None,
         get_platform=lambda: None,
         log=MagicMock(),
@@ -305,9 +306,9 @@ def test_create_input_router_callbacks_late_binds_selection_dependencies():
             clear_sticky_events=lambda: None,
             clear_marker=lambda: None,
         ),
-        inject_deferred_space=lambda: None,
         request_conversion=lambda: None,
         selection_tracker=tracker,
+        get_virtual_kb=lambda: None,
         get_selection=lambda: current["selection"],
         get_platform=lambda: current["platform"],
         log=log,
@@ -320,6 +321,38 @@ def test_create_input_router_callbacks_late_binds_selection_dependencies():
     tracker.on_click_passive_selection.assert_called_once_with("fresh", 7)
     assert info.text == "fresh"
     assert info.owner_id == 7
+
+
+def test_create_input_router_callbacks_late_binds_virtual_keyboard_for_deferred_space():
+    virtual_kb = MagicMock()
+
+    callbacks = create_input_router_callbacks(
+        decode_buffer=lambda: "",
+        auto_conversion_enabled=lambda: False,
+        try_auto_conversion_at_space=lambda: False,
+        auto_conversion_session=types.SimpleNamespace(
+            pending_space=False,
+            set_pending_space=lambda value: None,
+            clear_sticky_events=lambda: None,
+            clear_marker=lambda: None,
+        ),
+        request_conversion=lambda: None,
+        selection_tracker=MagicMock(),
+        get_virtual_kb=lambda: virtual_kb,
+        get_selection=lambda: None,
+        get_platform=lambda: None,
+        log=MagicMock(),
+    )
+
+    callbacks.inject_deferred_space()
+
+    from lswitch.core.event_manager import KEY_SPACE
+
+    virtual_kb.tap_key.assert_called_once_with(KEY_SPACE)
+
+
+def test_inject_deferred_space_ignores_missing_virtual_keyboard():
+    inject_deferred_space(None)
 
 
 def test_wire_runtime_event_bus_subscribes_input_router_and_config_handlers():

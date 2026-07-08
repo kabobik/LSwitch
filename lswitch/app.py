@@ -96,9 +96,9 @@ class LSwitchApp:
                     lambda: self._try_auto_conversion_at_space()
                 ),
                 auto_conversion_session=self.auto_conversion_session,
-                inject_deferred_space=self._inject_deferred_space,
                 request_conversion=lambda: self._do_conversion(),
                 selection_tracker=self.selection_tracker,
+                get_virtual_kb=lambda: self.virtual_kb,
                 get_selection=lambda: self.selection,
                 get_platform=lambda: self._platform,
                 log=logger,
@@ -336,12 +336,6 @@ class LSwitchApp:
 
     def _auto_conversion_enabled(self) -> bool:
         return bool(self.auto_detector and self.config.get('auto_switch'))
-
-    def _inject_deferred_space(self) -> None:
-        from lswitch.core.event_manager import KEY_SPACE
-
-        if self.virtual_kb:
-            self.virtual_kb.tap_key(KEY_SPACE)
 
     # ------------------------------------------------------------------
     # Helpers

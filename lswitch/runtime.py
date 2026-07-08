@@ -279,9 +279,9 @@ def create_input_router_callbacks(
     auto_conversion_enabled,
     try_auto_conversion_at_space,
     auto_conversion_session,
-    inject_deferred_space,
     request_conversion,
     selection_tracker,
+    get_virtual_kb,
     get_selection,
     get_platform,
     log,
@@ -295,7 +295,7 @@ def create_input_router_callbacks(
         set_pending_auto_space=auto_conversion_session.set_pending_space,
         clear_last_retype_events=auto_conversion_session.clear_sticky_events,
         clear_last_auto_marker=auto_conversion_session.clear_marker,
-        inject_deferred_space=inject_deferred_space,
+        inject_deferred_space=lambda: inject_deferred_space(get_virtual_kb()),
         request_conversion=request_conversion,
         prime_selection_baseline_on_click=(
             lambda: update_passive_selection_baseline_on_click(
@@ -312,6 +312,14 @@ def create_input_router_callbacks(
             )
         ),
     )
+
+
+def inject_deferred_space(virtual_kb) -> None:
+    """Inject the deferred Space key after auto-conversion consumes press-time Space."""
+    if virtual_kb:
+        from lswitch.core.event_manager import KEY_SPACE
+
+        virtual_kb.tap_key(KEY_SPACE)
 
 
 def create_input_router(
