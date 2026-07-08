@@ -248,7 +248,9 @@ mid-word режим должен быть optional.
 - `SystemDictionaryLoader` добавлен как optional Hunspell/MySpell loader;
 - config keys добавлены с безопасным `auto_switch_mid_word = false` по умолчанию;
 - `MidWordAutoConversionUseCase` добавлен рядом со space auto-conversion flow;
-- runtime/input wiring еще не подключен;
+- runtime/input wiring подключен через `ConversionRuntimeFacade` и
+  `InputEventRouter`, feature остается выключенной по умолчанию;
+- runtime config reload еще не пересобирает prefix dictionary / detector;
 - diagnostics для системных словарей еще не подключены.
 
 1. Добавить `PrefixDictionary` со встроенными `en_words.py` / `ru_words.py`.

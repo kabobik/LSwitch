@@ -34,6 +34,15 @@ def test_auto_conversion_session_normalizes_pending_space():
     assert session.pending_space is True
 
 
+def test_auto_conversion_session_sets_marker():
+    marker = object()
+    session = AutoConversionSessionState()
+
+    session.set_marker(marker)
+
+    assert session.last_marker is marker
+
+
 def test_auto_conversion_session_applies_space_state():
     marker = object()
     state = type(

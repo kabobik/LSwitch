@@ -88,6 +88,7 @@ class LSwitchApp:
             config=self.config,
             learning_service=self.learning_service,
             get_auto_detector=lambda: self.auto_detector,
+            get_mid_word_detector=lambda: self.mid_word_detector,
             get_conversion_engine=lambda: self.conversion_engine,
             get_virtual_kb=lambda: self.virtual_kb,
             get_xkb=lambda: self.xkb,
@@ -123,6 +124,7 @@ class LSwitchApp:
         self.event_manager = None
         self._udev_monitor = None
         self.auto_detector = None
+        self.mid_word_detector = None
         self.user_dict = None
         self._platform = None
         self._selection_poller: SelectionPollerThread | None = None
@@ -155,6 +157,10 @@ class LSwitchApp:
             event_bus=self.event_bus,
             user_dict=self.user_dict,
             user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
+            mid_word_min_prefix_len=self.config.get('mid_word_min_prefix_len', 4),
+            system_dict_enabled=self.config.get('system_dict_enabled', True),
+            system_dict_en_path=self.config.get('system_dict_en_path', ''),
+            system_dict_ru_path=self.config.get('system_dict_ru_path', ''),
         )
         self._platform = platform_runtime.platform
         self.system = self._platform.system
@@ -164,6 +170,7 @@ class LSwitchApp:
 
         conversion_runtime = platform_runtime.conversion
         self.auto_detector = conversion_runtime.auto_detector
+        self.mid_word_detector = conversion_runtime.mid_word_detector
         self.conversion_engine = conversion_runtime.conversion_engine
         sync_user_dictionary_components(
             user_dict=self.user_dict,

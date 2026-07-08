@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import lswitch.runtime as runtime_module
 import lswitch.runtime_conversion as runtime_conversion_module
 from lswitch.core.event_bus import EventBus
+from lswitch.core.auto_conversion_session import AutoConversionSessionState
 from lswitch.core.event_manager import EventManager
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.conversion_engine import ConversionEngine
@@ -40,11 +41,13 @@ from lswitch.runtime import (
     apply_space_auto_conversion_result,
     apply_user_dictionary_config,
     auto_conversion_enabled,
+    mid_word_auto_conversion_enabled,
     create_conversion_runtime,
     create_core_components,
     create_input_device_runtime,
     create_input_router,
     create_input_router_callbacks,
+    create_mid_word_auto_conversion_use_case,
     create_manual_conversion_controller,
     create_platform_runtime_components,
     create_qt_runtime_bootstrap,
@@ -78,6 +81,7 @@ from lswitch.runtime import (
     sync_user_dictionary_components,
     set_selection_valid_with_logging,
     try_space_auto_conversion_at_boundary,
+    try_mid_word_auto_conversion,
     update_passive_selection_baseline_on_click,
     update_selection_baseline,
     wire_runtime_event_bus,
@@ -122,6 +126,7 @@ def test_conversion_runtime_facade_requests_manual_conversion(monkeypatch):
     config.get.return_value = 5
     dependencies = {
         "auto_detector": object(),
+        "mid_word_detector": object(),
         "conversion_engine": object(),
         "virtual_kb": object(),
         "xkb": object(),
@@ -138,6 +143,7 @@ def test_conversion_runtime_facade_requests_manual_conversion(monkeypatch):
         config=config,
         learning_service=LearningService(None),
         get_auto_detector=lambda: dependencies["auto_detector"],
+        get_mid_word_detector=lambda: dependencies["mid_word_detector"],
         get_conversion_engine=lambda: dependencies["conversion_engine"],
         get_virtual_kb=lambda: dependencies["virtual_kb"],
         get_xkb=lambda: dependencies["xkb"],
@@ -190,6 +196,7 @@ def test_conversion_runtime_facade_tries_space_auto_conversion(monkeypatch):
         config=config,
         learning_service=LearningService(None),
         get_auto_detector=lambda: object(),
+        get_mid_word_detector=lambda: object(),
         get_conversion_engine=lambda: object(),
         get_virtual_kb=lambda: object(),
         get_xkb=lambda: object(),
@@ -213,6 +220,49 @@ def test_conversion_runtime_facade_tries_space_auto_conversion(monkeypatch):
         context=state_manager.context,
         threshold=3,
         auto_confirm_enabled=True,
+    )
+
+
+def test_conversion_runtime_facade_tries_mid_word_auto_conversion(monkeypatch):
+    use_case = object()
+    run_mid_word = MagicMock(return_value=True)
+    monkeypatch.setattr(
+        runtime_conversion_module,
+        "try_mid_word_auto_conversion",
+        run_mid_word,
+    )
+    session = object()
+    state_manager = StateManager()
+    facade = ConversionRuntimeFacade(
+        state_manager=state_manager,
+        selection_tracker=SelectionFreshnessTracker(),
+        typed_buffer=TypedBufferService(),
+        auto_conversion_session=session,
+        config=MagicMock(),
+        learning_service=LearningService(None),
+        get_auto_detector=lambda: object(),
+        get_mid_word_detector=lambda: object(),
+        get_conversion_engine=lambda: object(),
+        get_virtual_kb=lambda: object(),
+        get_xkb=lambda: object(),
+        get_selection=lambda: object(),
+        get_platform=lambda: object(),
+        get_user_dict=lambda: object(),
+        get_timing=lambda: {},
+        debug=False,
+        manual_weight_step=2,
+    )
+    monkeypatch.setattr(
+        facade,
+        "create_mid_word_auto_conversion_use_case",
+        MagicMock(return_value=use_case),
+    )
+
+    assert facade.try_mid_word_auto_conversion() is True
+    run_mid_word.assert_called_once_with(
+        use_case=use_case,
+        session=session,
+        context=state_manager.context,
     )
 
 
@@ -358,6 +408,8 @@ def test_create_input_router_wires_core_components_and_callbacks():
                 decode_buffer=lambda: "",
                 auto_conversion_enabled=lambda: False,
                 try_auto_conversion_at_space=lambda: False,
+                mid_word_auto_conversion_enabled=lambda: False,
+                try_mid_word_auto_conversion=lambda: False,
                 get_pending_auto_space=lambda: True,
                 set_pending_auto_space=set_pending_auto_space,
                 clear_last_retype_events=clear_last_retype_events,
@@ -391,12 +443,16 @@ def _conversion_runtime(
     session,
     decode_buffer=None,
     try_space_auto_conversion=None,
+    try_mid_word_auto_conversion=None,
     request_manual_conversion=None,
+    mid_word_detector=None,
 ):
     return types.SimpleNamespace(
         auto_conversion_session=session,
         decode_buffer=decode_buffer or (lambda: ""),
         try_space_auto_conversion=try_space_auto_conversion or (lambda: False),
+        try_mid_word_auto_conversion=try_mid_word_auto_conversion or (lambda: False),
+        get_mid_word_detector=lambda: mid_word_detector,
         request_manual_conversion=request_manual_conversion or (lambda: None),
     )
 
@@ -461,6 +517,38 @@ def test_create_input_router_callbacks_late_binds_auto_conversion_enabled():
 
     assert callbacks.conversion.auto_conversion_enabled() is True
     config.get.assert_called_once_with("auto_switch")
+
+
+def test_create_input_router_callbacks_late_binds_mid_word_conversion_enabled():
+    config = MagicMock()
+    config.get.return_value = True
+    detector = object()
+    try_mid_word = MagicMock(return_value=True)
+
+    callbacks = create_input_router_callbacks(
+        conversion_runtime=_conversion_runtime(
+            session=types.SimpleNamespace(
+                pending_space=False,
+                set_pending_space=lambda value: None,
+                clear_sticky_events=lambda: None,
+                clear_marker=lambda: None,
+            ),
+            mid_word_detector=detector,
+            try_mid_word_auto_conversion=try_mid_word,
+        ),
+        selection_tracker=MagicMock(),
+        config=config,
+        get_auto_detector=lambda: None,
+        get_virtual_kb=lambda: None,
+        get_selection=lambda: None,
+        get_platform=lambda: None,
+        log=MagicMock(),
+    )
+
+    assert callbacks.conversion.mid_word_auto_conversion_enabled() is True
+    assert callbacks.conversion.try_mid_word_auto_conversion() is True
+    config.get.assert_called_once_with("auto_switch_mid_word")
+    try_mid_word.assert_called_once()
 
 
 def test_create_input_router_callbacks_late_binds_selection_dependencies():
@@ -545,6 +633,35 @@ def test_auto_conversion_enabled_requires_detector_and_config_flag():
 
     config.get.return_value = False
     assert auto_conversion_enabled(config=config, auto_detector=object()) is False
+
+
+def test_mid_word_auto_conversion_enabled_requires_detector_and_config_flag():
+    config = MagicMock()
+    config.get.return_value = True
+
+    assert (
+        mid_word_auto_conversion_enabled(
+            config=config,
+            mid_word_detector=object(),
+        )
+        is True
+    )
+    assert (
+        mid_word_auto_conversion_enabled(
+            config=config,
+            mid_word_detector=None,
+        )
+        is False
+    )
+
+    config.get.return_value = False
+    assert (
+        mid_word_auto_conversion_enabled(
+            config=config,
+            mid_word_detector=object(),
+        )
+        is False
+    )
 
 
 def test_wire_runtime_event_bus_subscribes_input_router_and_config_handlers():
@@ -945,6 +1062,95 @@ def test_create_synced_space_auto_conversion_use_case_syncs_learning_service(
     assert learning_service.user_dict is user_dict
     assert learning_service.debug is True
     assert learning_service.manual_weight_step == 6
+
+
+def test_create_mid_word_auto_conversion_use_case_wires_retype_service(monkeypatch):
+    created = {}
+
+    class FakeRetypeService:
+        def __init__(self, virtual_kb, xkb, debug):
+            self.virtual_kb = virtual_kb
+            self.xkb = xkb
+            self.debug = debug
+            created["retype_service"] = self
+
+    class FakeMidWordAutoConversionUseCase:
+        def __init__(
+            self,
+            *,
+            mid_word_detector,
+            typed_buffer,
+            xkb,
+            retype_service,
+            timing,
+            debug,
+        ):
+            self.mid_word_detector = mid_word_detector
+            self.typed_buffer = typed_buffer
+            self.xkb = xkb
+            self.retype_service = retype_service
+            self.timing = timing
+            self.debug = debug
+
+    conversion_module = types.ModuleType("lswitch.core.conversion_use_cases")
+    conversion_module.MidWordAutoConversionUseCase = FakeMidWordAutoConversionUseCase
+    retype_module = types.ModuleType("lswitch.core.retype_service")
+    retype_module.RetypeService = FakeRetypeService
+    monkeypatch.setitem(
+        sys.modules,
+        "lswitch.core.conversion_use_cases",
+        conversion_module,
+    )
+    monkeypatch.setitem(sys.modules, "lswitch.core.retype_service", retype_module)
+    detector = object()
+    typed_buffer = object()
+    xkb = object()
+    virtual_kb = object()
+    timing = {"mid_word_before_replay_delay": 0.01}
+
+    use_case = create_mid_word_auto_conversion_use_case(
+        mid_word_detector=detector,
+        typed_buffer=typed_buffer,
+        xkb=xkb,
+        virtual_kb=virtual_kb,
+        timing=timing,
+        debug=True,
+    )
+
+    assert isinstance(use_case, FakeMidWordAutoConversionUseCase)
+    assert use_case.mid_word_detector is detector
+    assert use_case.typed_buffer is typed_buffer
+    assert use_case.xkb is xkb
+    assert use_case.timing is timing
+    assert use_case.debug is True
+    assert use_case.retype_service is created["retype_service"]
+    assert use_case.retype_service.virtual_kb is virtual_kb
+    assert use_case.retype_service.xkb is xkb
+    assert use_case.retype_service.debug is True
+
+
+def test_try_mid_word_auto_conversion_applies_marker_to_session():
+    marker = object()
+    result = types.SimpleNamespace(
+        switched=True,
+        marker=marker,
+        marker_changed=True,
+    )
+    use_case = MagicMock()
+    use_case.execute.return_value = result
+    session = AutoConversionSessionState()
+    context = object()
+
+    assert (
+        try_mid_word_auto_conversion(
+            use_case=use_case,
+            session=session,
+            context=context,
+        )
+        is True
+    )
+    use_case.execute.assert_called_once_with(context=context)
+    assert session.last_marker is marker
 
 
 def test_create_manual_conversion_controller_wires_dependencies(monkeypatch):
@@ -1517,6 +1723,8 @@ def test_create_conversion_runtime_wires_detector_and_engine():
     assert isinstance(components.conversion_engine, ConversionEngine)
     assert components.auto_detector.dictionary is components.dictionary
     assert components.auto_detector.ngrams is components.ngrams
+    assert components.prefix_dictionary.in_lang("en", "hello") is True
+    assert components.mid_word_detector.prefix_dictionary is components.prefix_dictionary
     assert components.auto_detector.user_dict is user_dict
     assert components.auto_detector.user_dict_min_weight == 4
     assert components.conversion_engine.dictionary is components.dictionary
@@ -1596,6 +1804,8 @@ def test_create_platform_runtime_components_wires_platform_conversion_and_input(
         dictionary=object(),
         ngrams=object(),
         auto_detector=object(),
+        prefix_dictionary=object(),
+        mid_word_detector=object(),
         conversion_engine=object(),
     )
     input_devices = InputDeviceRuntimeComponents(
@@ -1631,6 +1841,10 @@ def test_create_platform_runtime_components_wires_platform_conversion_and_input(
         event_bus=event_bus,
         user_dict=user_dict,
         user_dict_min_weight=7,
+        mid_word_min_prefix_len=5,
+        system_dict_enabled=True,
+        system_dict_en_path="/tmp/en_US.dic",
+        system_dict_ru_path="/tmp/ru_RU.dic",
     )
 
     assert isinstance(components, PlatformRuntimeComponents)
@@ -1655,6 +1869,10 @@ def test_create_platform_runtime_components_wires_platform_conversion_and_input(
         user_dict_min_weight=7,
         debug=True,
         timing=timing,
+        mid_word_min_prefix_len=5,
+        system_dict_enabled=True,
+        system_dict_en_path="/tmp/en_US.dic",
+        system_dict_ru_path="/tmp/ru_RU.dic",
     )
     create_input.assert_called_once_with(
         event_bus=event_bus,

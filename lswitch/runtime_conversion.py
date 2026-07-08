@@ -43,6 +43,33 @@ def create_space_auto_conversion_use_case(
     )
 
 
+def create_mid_word_auto_conversion_use_case(
+    *,
+    mid_word_detector,
+    typed_buffer,
+    xkb,
+    virtual_kb,
+    timing: dict,
+    debug: bool,
+):
+    """Create the mid-word auto-conversion use case."""
+    from lswitch.core.conversion_use_cases import MidWordAutoConversionUseCase
+    from lswitch.core.retype_service import RetypeService
+
+    return MidWordAutoConversionUseCase(
+        mid_word_detector=mid_word_detector,
+        typed_buffer=typed_buffer,
+        xkb=xkb,
+        retype_service=RetypeService(
+            virtual_kb,
+            xkb,
+            debug=debug,
+        ),
+        timing=timing,
+        debug=debug,
+    )
+
+
 def create_synced_space_auto_conversion_use_case(
     *,
     auto_detector,
@@ -254,6 +281,14 @@ def perform_space_auto_conversion_at_boundary(
     session.apply_space_state(state)
 
 
+def try_mid_word_auto_conversion(*, use_case, session, context) -> bool:
+    """Execute mid-word auto-conversion and apply transient session updates."""
+    result = use_case.execute(context=context)
+    if result.marker_changed:
+        session.set_marker(result.marker)
+    return result.switched
+
+
 class ConversionRuntimeFacade:
     """Runtime facade for manual and space-triggered conversion flows."""
 
@@ -267,6 +302,7 @@ class ConversionRuntimeFacade:
         config,
         learning_service,
         get_auto_detector,
+        get_mid_word_detector,
         get_conversion_engine,
         get_virtual_kb,
         get_xkb,
@@ -284,6 +320,7 @@ class ConversionRuntimeFacade:
         self.config = config
         self.learning_service = learning_service
         self.get_auto_detector = get_auto_detector
+        self.get_mid_word_detector = get_mid_word_detector
         self.get_conversion_engine = get_conversion_engine
         self.get_virtual_kb = get_virtual_kb
         self.get_xkb = get_xkb
@@ -329,6 +366,14 @@ class ConversionRuntimeFacade:
                 "user_dict_auto_confirm",
                 False,
             ),
+        )
+
+    def try_mid_word_auto_conversion(self) -> bool:
+        """Try mid-word auto conversion for the current unfinished token."""
+        return try_mid_word_auto_conversion(
+            use_case=self.create_mid_word_auto_conversion_use_case(),
+            session=self.auto_conversion_session,
+            context=self.state_manager.context,
         )
 
     def perform_space_auto_conversion(
@@ -390,4 +435,15 @@ class ConversionRuntimeFacade:
             timing=self.get_timing(),
             debug=self.debug,
             manual_weight_step=self.manual_weight_step,
+        )
+
+    def create_mid_word_auto_conversion_use_case(self):
+        """Create a mid-word auto-conversion use case for current adapters."""
+        return create_mid_word_auto_conversion_use_case(
+            mid_word_detector=self.get_mid_word_detector(),
+            typed_buffer=self.typed_buffer,
+            xkb=self.get_xkb(),
+            virtual_kb=self.get_virtual_kb(),
+            timing=self.get_timing(),
+            debug=self.debug,
         )

@@ -31,6 +31,8 @@ class InputConversionPort:
     decode_buffer: Callable[[], str]
     auto_conversion_enabled: Callable[[], bool]
     try_auto_conversion_at_space: Callable[[], bool]
+    mid_word_auto_conversion_enabled: Callable[[], bool]
+    try_mid_word_auto_conversion: Callable[[], bool]
     get_pending_auto_space: Callable[[], bool]
     set_pending_auto_space: Callable[[bool], None]
     clear_last_retype_events: Callable[[], None]
@@ -105,9 +107,9 @@ class InputEventRouter:
                 if self.conversion.try_auto_conversion_at_space():
                     self.selection_tracker.clear_repeat()
                     return
-            self._append_text_event(data)
+            self._append_text_event(data, allow_mid_word=False)
         else:
-            self._append_text_event(data)
+            self._append_text_event(data, allow_mid_word=True)
 
     def on_key_release(self, event: Event) -> None:
         data = event.data
@@ -191,7 +193,7 @@ class InputEventRouter:
         except Exception:
             pass
 
-    def _append_text_event(self, data) -> None:
+    def _append_text_event(self, data, *, allow_mid_word: bool = False) -> None:
         self.state_manager.on_key_press(data.code)
         self.typed_buffer.append_event(
             self.state_manager.context,
@@ -207,6 +209,9 @@ class InputEventRouter:
         )
         self.state_manager.context.backspace_repeats = 0
         self._clear_selection_state()
+        if allow_mid_word and self.conversion.mid_word_auto_conversion_enabled():
+            if self.conversion.try_mid_word_auto_conversion():
+                self.selection_tracker.clear_repeat()
 
     def _clear_selection_state(self) -> None:
         self.selection_tracker.set_valid(False)

@@ -32,6 +32,8 @@ def _router(
     *,
     auto_conversion_enabled=None,
     try_auto_conversion_at_space=None,
+    mid_word_auto_conversion_enabled=None,
+    try_mid_word_auto_conversion=None,
     get_pending_auto_space=None,
     set_pending_auto_space=None,
     clear_last_retype_events=None,
@@ -55,6 +57,12 @@ def _router(
             auto_conversion_enabled=auto_conversion_enabled or (lambda: False),
             try_auto_conversion_at_space=(
                 try_auto_conversion_at_space or (lambda: False)
+            ),
+            mid_word_auto_conversion_enabled=(
+                mid_word_auto_conversion_enabled or (lambda: False)
+            ),
+            try_mid_word_auto_conversion=(
+                try_mid_word_auto_conversion or (lambda: False)
             ),
             get_pending_auto_space=get_pending_auto_space or (lambda: False),
             set_pending_auto_space=set_pending_auto_space or (lambda value: None),
@@ -88,6 +96,20 @@ def test_input_router_handles_regular_key_press():
     assert selection_tracker.valid is False
     assert selection_tracker.repeat_valid is False
     clear_last_retype_events.assert_called_once()
+
+
+def test_input_router_tries_mid_word_auto_conversion_after_regular_key_press():
+    try_mid_word_auto_conversion = MagicMock(return_value=True)
+    router, state_manager, selection_tracker = _router(
+        mid_word_auto_conversion_enabled=lambda: True,
+        try_mid_word_auto_conversion=try_mid_word_auto_conversion,
+    )
+
+    router.on_key_press(_event(EventType.KEY_PRESS))
+
+    try_mid_word_auto_conversion.assert_called_once()
+    assert state_manager.context.chars_in_buffer == 1
+    assert selection_tracker.repeat_valid is False
 
 
 def test_input_router_handles_backspace_press():
@@ -125,6 +147,25 @@ def test_input_router_consumes_space_on_auto_conversion():
     try_auto_conversion_at_space.assert_called_once()
     assert state_manager.context.event_buffer == []
     assert selection_tracker.repeat_valid is False
+
+
+def test_input_router_does_not_try_mid_word_auto_conversion_after_space_fallback():
+    try_mid_word_auto_conversion = MagicMock(return_value=False)
+    router, state_manager, _selection_tracker = _router(
+        auto_conversion_enabled=lambda: False,
+        mid_word_auto_conversion_enabled=lambda: True,
+        try_mid_word_auto_conversion=try_mid_word_auto_conversion,
+    )
+    space = Event(
+        type=EventType.KEY_PRESS,
+        data=KeyEventData(code=KEY_SPACE, value=1, device_name="test"),
+        timestamp=0.0,
+    )
+
+    router.on_key_press(space)
+
+    try_mid_word_auto_conversion.assert_not_called()
+    assert state_manager.context.event_buffer[0].code == KEY_SPACE
 
 
 def test_input_router_cancels_pending_auto_space_on_rollover():

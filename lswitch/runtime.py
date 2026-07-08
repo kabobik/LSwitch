@@ -33,6 +33,7 @@ from lswitch.runtime_conversion import (
     ConversionRuntimeFacade,
     SpaceAutoConversionState,
     apply_space_auto_conversion_result,
+    create_mid_word_auto_conversion_use_case,
     create_manual_conversion_controller,
     create_space_auto_conversion_use_case,
     create_synced_manual_conversion_controller,
@@ -41,6 +42,7 @@ from lswitch.runtime_conversion import (
     execute_manual_conversion_with_session,
     extract_last_word_events,
     perform_space_auto_conversion_at_boundary,
+    try_mid_word_auto_conversion,
     try_space_auto_conversion_at_boundary,
 )
 from lswitch.runtime_selection import (
@@ -95,6 +97,8 @@ class ConversionRuntimeComponents:
     dictionary: DictionaryService
     ngrams: NgramAnalyzer
     auto_detector: AutoDetector
+    prefix_dictionary: object
+    mid_word_detector: object
     conversion_engine: ConversionEngine
 
 
@@ -158,6 +162,13 @@ def create_input_router_callbacks(
             try_auto_conversion_at_space=(
                 conversion_runtime.try_space_auto_conversion
             ),
+            mid_word_auto_conversion_enabled=lambda: mid_word_auto_conversion_enabled(
+                config=config,
+                mid_word_detector=conversion_runtime.get_mid_word_detector(),
+            ),
+            try_mid_word_auto_conversion=(
+                conversion_runtime.try_mid_word_auto_conversion
+            ),
             get_pending_auto_space=lambda: auto_conversion_session.pending_space,
             set_pending_auto_space=auto_conversion_session.set_pending_space,
             clear_last_retype_events=auto_conversion_session.clear_sticky_events,
@@ -183,6 +194,11 @@ def create_input_router_callbacks(
 def auto_conversion_enabled(*, config, auto_detector) -> bool:
     """Return whether space-triggered auto-conversion is currently available."""
     return bool(auto_detector and config.get("auto_switch"))
+
+
+def mid_word_auto_conversion_enabled(*, config, mid_word_detector) -> bool:
+    """Return whether mid-word auto-conversion is currently available."""
+    return bool(mid_word_detector and config.get("auto_switch_mid_word"))
 
 
 def inject_deferred_space(virtual_kb) -> None:
@@ -230,10 +246,30 @@ def create_conversion_runtime(
     user_dict_min_weight: int,
     debug: bool,
     timing: dict,
+    mid_word_min_prefix_len: int = 4,
+    system_dict_enabled: bool = False,
+    system_dict_en_path: str = "",
+    system_dict_ru_path: str = "",
 ) -> ConversionRuntimeComponents:
     """Create dictionary, auto-detection, and conversion executor services."""
+    from lswitch.intelligence.mid_word_detector import MidWordDetector
+    from lswitch.intelligence.prefix_dictionary import PrefixDictionary
+    from lswitch.intelligence.system_dictionary_loader import SystemDictionaryLoader
+
     dictionary = DictionaryService()
     ngrams = NgramAnalyzer()
+    system_loader = SystemDictionaryLoader(
+        explicit_paths={
+            "en": system_dict_en_path,
+            "ru": system_dict_ru_path,
+        },
+    )
+    prefix_dictionary = PrefixDictionary.from_dictionary_service(
+        dictionary,
+        min_prefix_len=mid_word_min_prefix_len,
+        system_loader=system_loader,
+        include_system=system_dict_enabled,
+    )
     return ConversionRuntimeComponents(
         dictionary=dictionary,
         ngrams=ngrams,
@@ -242,6 +278,11 @@ def create_conversion_runtime(
             ngrams=ngrams,
             user_dict=user_dict,
             user_dict_min_weight=user_dict_min_weight,
+        ),
+        prefix_dictionary=prefix_dictionary,
+        mid_word_detector=MidWordDetector(
+            prefix_dictionary,
+            min_prefix_len=mid_word_min_prefix_len,
         ),
         conversion_engine=ConversionEngine(
             xkb=xkb,
@@ -294,6 +335,10 @@ def create_platform_runtime_components(
     event_bus: EventBus,
     user_dict,
     user_dict_min_weight: int,
+    mid_word_min_prefix_len: int = 4,
+    system_dict_enabled: bool = False,
+    system_dict_en_path: str = "",
+    system_dict_ru_path: str = "",
 ) -> PlatformRuntimeComponents:
     """Create platform adapters plus dependent conversion and input runtimes."""
     from lswitch.platform.platform_factory import create_platform_adapters
@@ -316,6 +361,10 @@ def create_platform_runtime_components(
         user_dict_min_weight=user_dict_min_weight,
         debug=debug,
         timing=timing,
+        mid_word_min_prefix_len=mid_word_min_prefix_len,
+        system_dict_enabled=system_dict_enabled,
+        system_dict_en_path=system_dict_en_path,
+        system_dict_ru_path=system_dict_ru_path,
     )
     input_devices = create_input_device_runtime(
         event_bus=event_bus,

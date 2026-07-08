@@ -170,6 +170,10 @@ class TestDoConversion:
             app.input_router.conversion.try_auto_conversion_at_space
             == app.conversion_runtime.try_space_auto_conversion
         )
+        assert (
+            app.input_router.conversion.try_mid_word_auto_conversion
+            == app.conversion_runtime.try_mid_word_auto_conversion
+        )
 
 
 class TestOnMouseClick:

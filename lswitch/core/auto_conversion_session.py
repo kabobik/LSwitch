@@ -16,6 +16,9 @@ class AutoConversionSessionState:
     def clear_marker(self) -> None:
         self.last_marker = None
 
+    def set_marker(self, marker) -> None:
+        self.last_marker = marker
+
     def clear_sticky_events(self) -> None:
         self.sticky_events = []
 
