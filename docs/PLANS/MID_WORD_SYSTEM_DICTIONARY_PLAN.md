@@ -253,17 +253,72 @@ mid-word режим должен быть optional.
 - runtime config reload пересобирает prefix dictionary / detector;
 - Wayland diagnostics показывают наличие EN/RU системных словарей и word counts.
 
-1. Добавить `PrefixDictionary` со встроенными `en_words.py` / `ru_words.py`.
-2. Добавить unit tests на prefix lookup и неоднозначные префиксы.
-3. Добавить `SystemDictionaryLoader`, который optional подмешивает Hunspell `.dic`.
-4. Добавить `MidWordDetector.should_switch(prefix, current_lang)`.
-5. Добавить config/runtime wiring для `auto_switch_mid_word = false`.
-6. Добавить `MidWordAutoConversionUseCase` рядом со
+- [x] Добавить `PrefixDictionary` со встроенными `en_words.py` / `ru_words.py`.
+- [x] Добавить unit tests на prefix lookup и неоднозначные префиксы.
+- [x] Добавить `SystemDictionaryLoader`, который optional подмешивает Hunspell `.dic`.
+- [x] Добавить `MidWordDetector.should_switch(prefix, current_lang)`.
+- [x] Добавить config/runtime wiring для `auto_switch_mid_word = false`.
+- [x] Добавить `MidWordAutoConversionUseCase` рядом со
    `SpaceAutoConversionUseCase`, используя общий candidate/prefix provider.
-7. Подключить use case через `ConversionRuntimeFacade` и input router typing
+- [x] Подключить use case через `ConversionRuntimeFacade` и input router typing
    flow после обновления `event_buffer`.
-8. Реализовать mid-word switch replay и undo marker.
-9. Добавить diagnostics и manual QA сценарии.
+- [x] Реализовать mid-word switch replay и undo marker.
+- [x] Добавить diagnostics и manual QA сценарии.
 
 MVP лучше сначала сделать на встроенных словарях, затем подключать системные.
 Так проще отделить алгоритм от проблем наличия пакетов на конкретной системе.
+
+## 11. Manual QA сценарии
+
+Перед ручной проверкой включить режим явно:
+
+```toml
+auto_switch_mid_word = true
+mid_word_min_prefix_len = 4
+system_dict_enabled = true
+```
+
+Проверить diagnostics:
+
+```bash
+lswitch --diagnose-wayland
+```
+
+Ожидаемо:
+
+- отчет содержит `system dictionary en` и `system dictionary ru`;
+- отсутствие системных словарей отображается как `warn`, а не `fail`;
+- Wayland/KDE layout diagnostics остаются read-only без
+  `--diagnose-wayland-switch-test`.
+
+Проверить EN -> RU mid-word:
+
+1. Установить текущую раскладку EN.
+2. В текстовом поле набрать `ghbd`.
+3. Ожидаемо: введенный префикс переигран как `прив`, раскладка переключена на RU.
+4. Продолжить набор `ет`.
+5. Ожидаемо: получается `привет`, лишний пробел не добавляется.
+
+Проверить RU -> EN mid-word:
+
+1. Установить текущую раскладку RU.
+2. В текстовом поле набрать `рудд`.
+3. Ожидаемо: введенный префикс переигран как `hell`, раскладка переключена на EN.
+4. Продолжить набор `o`.
+5. Ожидаемо: получается `hello`, лишний пробел не добавляется.
+
+Проверить защиту от ложных срабатываний:
+
+- `hell` в EN не переключается, потому что source prefix существует;
+- `ghb` в EN не переключается при `mid_word_min_prefix_len = 4`;
+- `GhbD`, `abc1`, URL/path-like ввод не переключаются;
+- обычная space-triggered auto-conversion продолжает работать при
+  `auto_switch = true`.
+
+Проверить откат:
+
+1. Включить mid-word режим.
+2. Ввести префикс, который вызывает mid-word switch.
+3. Сразу нажать `Shift+Shift`.
+4. Ожидаемо: переигранный префикс удален, исходные events восстановлены в
+   исходной раскладке, пробел не добавляется.
