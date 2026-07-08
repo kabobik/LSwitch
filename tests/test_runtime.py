@@ -7,6 +7,7 @@ import types
 from unittest.mock import MagicMock
 
 import lswitch.runtime as runtime_module
+import lswitch.runtime_conversion as runtime_conversion_module
 from lswitch.core.event_bus import EventBus
 from lswitch.core.event_manager import EventManager
 from lswitch.core.events import Event, EventType, KeyEventData
@@ -103,12 +104,12 @@ def test_conversion_runtime_facade_requests_manual_conversion(monkeypatch):
     execute = MagicMock()
     create_controller = MagicMock(return_value=controller)
     monkeypatch.setattr(
-        runtime_module,
+        runtime_conversion_module,
         "create_synced_manual_conversion_controller",
         create_controller,
     )
     monkeypatch.setattr(
-        runtime_module,
+        runtime_conversion_module,
         "execute_manual_conversion_with_session",
         execute,
     )
@@ -166,7 +167,7 @@ def test_conversion_runtime_facade_tries_space_auto_conversion(monkeypatch):
     use_case = object()
     run_boundary = MagicMock(return_value=True)
     monkeypatch.setattr(
-        runtime_module,
+        runtime_conversion_module,
         "try_space_auto_conversion_at_boundary",
         run_boundary,
     )
