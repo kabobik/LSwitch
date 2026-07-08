@@ -259,13 +259,13 @@ def _wired_app() -> LSwitchApp:
 
 class TestOnKeyPress:
     def test_cancels_pending_auto_space_on_rollover(self):
-        """If user presses another key while waiting for space release, _pending_auto_space is canceled."""
+        """If another key arrives before Space release, pending auto-space is canceled."""
         app = _wired_app()
-        app._pending_auto_space = True
+        app.auto_conversion_session.set_pending_space(True)
         app.virtual_kb = MagicMock()
         event = _make_event(EventType.KEY_PRESS, KEY_A)
         app.input_router.on_key_press(event)
-        assert app._pending_auto_space is False
+        assert app.auto_conversion_session.pending_space is False
         app.virtual_kb.tap_key.assert_not_called()
 
     def test_shift_calls_shift_down(self):
@@ -303,14 +303,14 @@ class TestOnKeyPress:
 
 class TestOnKeyRelease:
     def test_deferred_auto_space_on_release(self):
-        """If _pending_auto_space is True, space release injects virtual space."""
+        """If pending auto-space is true, space release injects virtual space."""
         app = _wired_app()
-        app._pending_auto_space = True
+        app.auto_conversion_session.set_pending_space(True)
         app.virtual_kb = MagicMock()
         event = _make_event(EventType.KEY_RELEASE, KEY_SPACE, value=0)
         app.input_router.on_key_release(event)
         app.virtual_kb.tap_key.assert_called_once_with(KEY_SPACE)
-        assert app._pending_auto_space is False
+        assert app.auto_conversion_session.pending_space is False
 
     def test_shift_double_triggers_conversion(self):
         """Shift release with double-shift → conversion runtime called."""
