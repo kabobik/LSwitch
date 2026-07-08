@@ -61,6 +61,7 @@ from lswitch.runtime import (
     stop_runtime_resources,
     synced_learning_service,
     sync_user_dictionary_components,
+    set_selection_valid_with_logging,
     try_space_auto_conversion_at_boundary,
     update_passive_selection_baseline_on_click,
     update_selection_baseline,
@@ -1057,6 +1058,40 @@ def test_handle_poller_selection_changed_marks_tracker_and_logs():
         "x" * 50,
         42,
     )
+
+
+def test_set_selection_valid_with_logging_updates_tracker_and_debug_logs_change():
+    tracker = types.SimpleNamespace(valid=False, set_valid=MagicMock())
+    tracker.set_valid.side_effect = lambda value: setattr(tracker, "valid", value)
+    log = MagicMock()
+    log.isEnabledFor.return_value = False
+
+    set_selection_valid_with_logging(
+        selection_tracker=tracker,
+        value=True,
+        log=log,
+    )
+
+    tracker.set_valid.assert_called_once_with(True)
+    log.debug.assert_called_once_with("fresh=%s → %s", False, True)
+    log.trace.assert_not_called()
+
+
+def test_set_selection_valid_with_logging_traces_assignment_when_enabled():
+    tracker = types.SimpleNamespace(valid=False, set_valid=MagicMock())
+    tracker.set_valid.side_effect = lambda value: setattr(tracker, "valid", value)
+    log = MagicMock()
+    log.isEnabledFor.return_value = True
+
+    set_selection_valid_with_logging(
+        selection_tracker=tracker,
+        value=False,
+        log=log,
+    )
+
+    tracker.set_valid.assert_called_once_with(False)
+    log.debug.assert_not_called()
+    log.trace.assert_called_once()
 
 
 def test_update_passive_selection_baseline_on_click_updates_tracker_and_logs_fresh():

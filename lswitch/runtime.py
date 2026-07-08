@@ -699,6 +699,29 @@ def handle_poller_selection_changed(
     )
 
 
+def set_selection_valid_with_logging(*, selection_tracker, value: bool, log) -> None:
+    """Set selection freshness and preserve legacy debug/trace logging."""
+    old_value = selection_tracker.valid
+    if value != old_value:
+        log.debug(
+            "fresh=%s → %s",
+            old_value,
+            value,
+        )
+    selection_tracker.set_valid(value)
+
+    if log.isEnabledFor(5):  # TRACE = 5
+        import traceback as _tb
+
+        caller = _tb.extract_stack(limit=3)[-2]
+        log.trace(  # type: ignore[attr-defined]
+            "fresh=%s (set by %s:%d)",
+            selection_tracker.valid,
+            caller.name,
+            caller.lineno,
+        )
+
+
 def update_passive_selection_baseline_on_click(
     *,
     selection_tracker,

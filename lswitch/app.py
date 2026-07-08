@@ -34,6 +34,7 @@ from lswitch.runtime import (
     stop_runtime_resources,
     synced_learning_service,
     sync_user_dictionary_components,
+    set_selection_valid_with_logging,
     try_space_auto_conversion_at_boundary,
     update_selection_baseline,
     wire_runtime_event_bus,
@@ -235,23 +236,11 @@ class LSwitchApp:
 
     @_selection_valid.setter
     def _selection_valid(self, value: bool) -> None:
-        old_value = self.selection_tracker.valid
-        if value != old_value:
-            logger.debug(
-                "fresh=%s → %s",
-                old_value, value,
-            )
-            self.selection_tracker.set_valid(value)
-        else:
-            self.selection_tracker.set_valid(value)
-        # Log at TRACE every assignment and its source (guarded to avoid extract_stack overhead)
-        if logger.isEnabledFor(5):  # TRACE = 5
-            import traceback as _tb
-            caller = _tb.extract_stack(limit=3)[-2]
-            logger.trace(  # type: ignore[attr-defined]
-                "fresh=%s (set by %s:%d)",
-                self.selection_tracker.valid, caller.name, caller.lineno,
-            )
+        set_selection_valid_with_logging(
+            selection_tracker=self.selection_tracker,
+            value=value,
+            log=logger,
+        )
 
     @property
     def _selection_generation(self) -> int:
