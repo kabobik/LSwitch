@@ -423,6 +423,16 @@ def synced_learning_service(
     return learning_service
 
 
+def read_runtime_config_snapshot(*, config) -> RuntimeConfigSnapshot:
+    """Read runtime timing-related config tables without mutating services."""
+    return RuntimeConfigSnapshot(
+        timing=config.get("timing", {}),
+        x11_selection_timing=config.get("x11_selection_timing", {}),
+        wayland_timing=config.get("wayland_timing", {}),
+        wayland_selection_timing=config.get("wayland_selection_timing", {}),
+    )
+
+
 def apply_runtime_timing_config(
     *,
     config,
@@ -430,24 +440,16 @@ def apply_runtime_timing_config(
     conversion_engine,
 ) -> RuntimeConfigSnapshot:
     """Apply runtime timing config and return the current timing tables."""
-    timing = config.get("timing", {})
-    x11_selection_timing = config.get("x11_selection_timing", {})
-    wayland_timing = config.get("wayland_timing", {})
-    wayland_selection_timing = config.get("wayland_selection_timing", {})
+    snapshot = read_runtime_config_snapshot(config=config)
 
     state_manager.double_click_timeout = config.get(
         "double_click_timeout",
         state_manager.double_click_timeout,
     )
     if conversion_engine is not None:
-        conversion_engine.timing = timing
+        conversion_engine.timing = snapshot.timing
 
-    return RuntimeConfigSnapshot(
-        timing=timing,
-        x11_selection_timing=x11_selection_timing,
-        wayland_timing=wayland_timing,
-        wayland_selection_timing=wayland_selection_timing,
-    )
+    return snapshot
 
 
 def apply_user_dictionary_config(

@@ -25,6 +25,7 @@ from lswitch.runtime import (
     handle_poller_selection_changed,
     install_reload_signal_handler,
     perform_space_auto_conversion_at_boundary,
+    read_runtime_config_snapshot,
     run_evdev_runtime_until_stopped,
     run_qt_app_runtime,
     run_selected_runtime_loop,
@@ -68,13 +69,11 @@ class LSwitchApp:
 
         # Configuration
         self.config = ConfigManager(config_path=config_path, debug=debug)
-        self.timing = self.config.get('timing', {})
-        self.x11_selection_timing = self.config.get('x11_selection_timing', {})
-        self.wayland_timing = self.config.get('wayland_timing', {})
-        self.wayland_selection_timing = self.config.get(
-            'wayland_selection_timing',
-            {},
-        )
+        runtime_config = read_runtime_config_snapshot(config=self.config)
+        self.timing = runtime_config.timing
+        self.x11_selection_timing = runtime_config.x11_selection_timing
+        self.wayland_timing = runtime_config.wayland_timing
+        self.wayland_selection_timing = runtime_config.wayland_selection_timing
 
         core = create_core_components(
             double_click_timeout=self.config.get('double_click_timeout', 0.3),

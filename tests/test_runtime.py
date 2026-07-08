@@ -53,6 +53,7 @@ from lswitch.runtime import (
     install_reload_signal_handler,
     perform_space_auto_conversion_at_boundary,
     read_mouse_release_selection,
+    read_runtime_config_snapshot,
     run_evdev_event_loop,
     run_evdev_runtime_until_stopped,
     run_qt_app_runtime,
@@ -484,6 +485,29 @@ def test_synced_learning_service_updates_and_returns_learning_service():
     assert learning_service.user_dict is user_dict
     assert learning_service.debug is True
     assert learning_service.manual_weight_step == 4
+
+
+def test_read_runtime_config_snapshot_reads_timing_tables():
+    timing = {"retype": 0.1}
+    x11_selection_timing = {"poll_interval": 0.2}
+    wayland_timing = {"wl_clipboard_timeout": 1.5}
+    wayland_selection_timing = {"copy_wait_timeout": 0.7}
+    values = {
+        "timing": timing,
+        "x11_selection_timing": x11_selection_timing,
+        "wayland_timing": wayland_timing,
+        "wayland_selection_timing": wayland_selection_timing,
+    }
+    config = MagicMock()
+    config.get.side_effect = lambda key, default=None: values.get(key, default)
+
+    snapshot = read_runtime_config_snapshot(config=config)
+
+    assert isinstance(snapshot, RuntimeConfigSnapshot)
+    assert snapshot.timing is timing
+    assert snapshot.x11_selection_timing is x11_selection_timing
+    assert snapshot.wayland_timing is wayland_timing
+    assert snapshot.wayland_selection_timing is wayland_selection_timing
 
 
 def test_apply_runtime_timing_config_updates_state_and_conversion_engine():
