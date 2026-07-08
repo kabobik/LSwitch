@@ -26,7 +26,6 @@ from lswitch.runtime import (
     run_evdev_event_loop,
     run_qt_runtime_loop,
     run_selected_runtime_loop,
-    selection_baseline_tracking_enabled,
     start_runtime_resources,
     stop_runtime_resources,
     sync_user_dictionary_components,
@@ -373,12 +372,6 @@ class LSwitchApp:
         logger.debug(
             "Poller: selection changed, fresh=True — text=%r owner=0x%x",
             text[:50] if text else "", owner_id,
-        )
-
-    def _selection_baseline_tracking_enabled(self) -> bool:
-        """Return whether passive selection baseline reads are safe/useful."""
-        return selection_baseline_tracking_enabled(
-            platform=self._platform,
         )
 
     def _update_selection_baseline(self) -> None:
