@@ -32,7 +32,6 @@ from lswitch.runtime import (
     run_selected_runtime_loop,
     start_runtime_resources,
     stop_runtime_resources,
-    synced_learning_service,
     sync_user_dictionary_components,
     set_selection_valid_with_logging,
     try_space_auto_conversion_at_boundary,
