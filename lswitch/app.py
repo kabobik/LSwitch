@@ -435,8 +435,7 @@ class LSwitchApp:
             last_auto_marker=self.auto_conversion_session.last_marker,
             sticky_events=self.auto_conversion_session.sticky_events,
         )
-        self.auto_conversion_session.last_marker = result.last_auto_marker
-        self.auto_conversion_session.sticky_events = result.sticky_events
+        self.auto_conversion_session.apply_manual_result(result)
 
     # ------------------------------------------------------------------
     # Auto-conversion (space-triggered, AutoDetector)

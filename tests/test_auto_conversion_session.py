@@ -50,3 +50,22 @@ def test_auto_conversion_session_applies_space_state():
 
     assert session.last_marker is marker
     assert session.pending_space is True
+
+
+def test_auto_conversion_session_applies_manual_result():
+    marker = object()
+    sticky_events = [object()]
+    result = type(
+        "Result",
+        (),
+        {
+            "last_auto_marker": marker,
+            "sticky_events": sticky_events,
+        },
+    )()
+    session = AutoConversionSessionState()
+
+    session.apply_manual_result(result)
+
+    assert session.last_marker is marker
+    assert session.sticky_events is sticky_events
