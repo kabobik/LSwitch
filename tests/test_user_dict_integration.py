@@ -110,7 +110,7 @@ def _do_double_shift(app: LSwitchApp):
 
 
 class TestAutoConversionSavesMarker:
-    """After auto-conversion at space, _last_auto_marker is set."""
+    """After auto-conversion at space, session marker is set."""
 
     def test_marker_saved_after_auto_conversion(self):
         app = _make_app(auto_switch=True)
@@ -120,11 +120,12 @@ class TestAutoConversionSavesMarker:
         _fill_buffer(app, WORD_GHBDTN)
         app.input_router.on_key_press(_event(KEY_SPACE))
 
-        assert app._last_auto_marker is not None
-        assert app._last_auto_marker.original_word == 'ghbdtn'
-        assert app._last_auto_marker.original_lang == 'en'
-        assert app._last_auto_marker.direction == 'en_to_ru'
-        assert 'time' in app._last_auto_marker
+        marker = app.auto_conversion_session.last_marker
+        assert marker is not None
+        assert marker.original_word == 'ghbdtn'
+        assert marker.original_lang == 'en'
+        assert marker.direction == 'en_to_ru'
+        assert 'time' in marker
 
     def test_marker_none_when_no_conversion(self):
         app = _make_app(auto_switch=True)
@@ -134,7 +135,7 @@ class TestAutoConversionSavesMarker:
         _fill_buffer(app, WORD_GHBDTN)
         app.input_router.on_key_press(_event(KEY_SPACE))
 
-        assert app._last_auto_marker is None
+        assert app.auto_conversion_session.last_marker is None
 
 
 class TestDoubleShiftAfterAutoCallsCorrection:
@@ -150,18 +151,18 @@ class TestDoubleShiftAfterAutoCallsCorrection:
         # Trigger auto-conversion
         _fill_buffer(app, WORD_GHBDTN)
         app.input_router.on_key_press(_event(KEY_SPACE))
-        assert app._last_auto_marker is not None
+        assert app.auto_conversion_session.last_marker is not None
 
         # Now simulate double-Shift (manual undo)
-        # Set state to CONVERTING so _do_conversion proceeds
+        # Set state to CONVERTING so manual conversion proceeds
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
         # Correction should have been called
         assert ud.get_weight('ghbdtn', 'en') == -2
         # Marker cleared
-        assert app._last_auto_marker is None
+        assert app.auto_conversion_session.last_marker is None
 
     def test_correction_fires_after_long_delay(self):
         """Marker fires even if user returns after a long time (no TTL)."""
@@ -175,15 +176,15 @@ class TestDoubleShiftAfterAutoCallsCorrection:
         app.input_router.on_key_press(_event(KEY_SPACE))
 
         # Simulate user returning after a very long time
-        app._last_auto_marker.created_at -= 3600.0
+        app.auto_conversion_session.last_marker.created_at -= 3600.0
 
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
         # Correction must still fire — no timeout
         assert ud.get_weight('ghbdtn', 'en') == -2
-        assert app._last_auto_marker is None
+        assert app.auto_conversion_session.last_marker is None
 
     def test_no_correction_when_no_user_dict(self):
         """user_dict is None → marker is cleared but no crash."""
@@ -197,9 +198,9 @@ class TestDoubleShiftAfterAutoCallsCorrection:
 
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
-        assert app._last_auto_marker is None
+        assert app.auto_conversion_session.last_marker is None
 
 
         ud = _make_user_dict_in_memory()
@@ -232,11 +233,11 @@ class TestSelectionExpandLearning:
             debug=True,
         )
         app.selection.set_selection("ghbdtn")
-        app._selection_valid = False
+        app.selection_tracker.set_valid(False)
         app.state_manager.context.state = State.CONVERTING
         app.state_manager.context.chars_in_buffer = 0
 
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
         assert app.selection.get_selection().text == "привет"
         assert ud.data["keep"]["ru"]["привет"] == 2
@@ -287,9 +288,10 @@ class TestContinuedTypingConfirmsPrevious:
         # First word: triggers auto-conversion, sets marker
         _fill_buffer(app, WORD_GHBDTN)
         app.input_router.on_key_press(_event(KEY_SPACE))
-        assert app._last_auto_marker is not None
-        old_word = app._last_auto_marker.original_word
-        old_lang = app._last_auto_marker.original_lang
+        marker = app.auto_conversion_session.last_marker
+        assert marker is not None
+        old_word = marker.original_word
+        old_lang = marker.original_lang
 
         # Second word: another auto-conversion → previous should be confirmed
         _fill_buffer(app, [KEY_A, KEY_B, KEY_D])
@@ -298,8 +300,9 @@ class TestContinuedTypingConfirmsPrevious:
         # Auto-confirmation is disabled by default; the old marker is consumed
         # without writing an implicit confirmation.
         assert ud.get_weight(old_word, old_lang) == 0
-        assert app._last_auto_marker is not None
-        assert app._last_auto_marker.original_word != old_word
+        marker = app.auto_conversion_session.last_marker
+        assert marker is not None
+        assert marker.original_word != old_word
 
     def test_confirmation_called_on_next_space_when_enabled(self):
         app = _make_app(auto_switch=True)
@@ -312,9 +315,10 @@ class TestContinuedTypingConfirmsPrevious:
         # First word: triggers auto-conversion, sets marker
         _fill_buffer(app, WORD_GHBDTN)
         app.input_router.on_key_press(_event(KEY_SPACE))
-        assert app._last_auto_marker is not None
-        old_word = app._last_auto_marker.original_word
-        old_lang = app._last_auto_marker.original_lang
+        marker = app.auto_conversion_session.last_marker
+        assert marker is not None
+        old_word = marker.original_word
+        old_lang = marker.original_lang
 
         # Second word: another auto-conversion → previous should be confirmed
         _fill_buffer(app, [KEY_A, KEY_B, KEY_D])
@@ -364,7 +368,7 @@ class TestUserDictDisabledNoEffect:
         _fill_buffer(app, WORD_GHBDTN)
         app.input_router.on_key_press(_event(KEY_SPACE))
 
-        assert app._last_auto_marker is not None
+        assert app.auto_conversion_session.last_marker is not None
 
     def test_double_shift_clears_marker_without_crash(self):
         """Double-shift with no user_dict → marker cleared, no error."""
@@ -378,6 +382,6 @@ class TestUserDictDisabledNoEffect:
 
         app.state_manager.context.state = State.CONVERTING
         app.state_manager._state = State.CONVERTING
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
-        assert app._last_auto_marker is None
+        assert app.auto_conversion_session.last_marker is None
