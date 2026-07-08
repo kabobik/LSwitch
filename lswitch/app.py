@@ -20,6 +20,7 @@ from lswitch.runtime import (
     create_synced_manual_conversion_controller,
     create_synced_space_auto_conversion_use_case,
     decode_buffer_events,
+    enable_user_dictionary_if_needed,
     execute_manual_conversion_with_session,
     extract_last_word_events,
     handle_poller_selection_changed,
@@ -187,12 +188,10 @@ class LSwitchApp:
 
     def _enable_user_dictionary(self):
         """Create the user dictionary object when runtime config enables it."""
-        if self.user_dict is not None:
-            return self.user_dict
-        from lswitch.intelligence.user_dictionary import UserDictionary
-
-        self.user_dict = UserDictionary()
-        logger.info("User dictionary enabled: %s", self.user_dict.path)
+        self.user_dict = enable_user_dictionary_if_needed(
+            user_dict=self.user_dict,
+            log=logger,
+        )
         return self.user_dict
 
     def _apply_runtime_config(self) -> None:

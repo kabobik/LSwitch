@@ -46,6 +46,7 @@ from lswitch.runtime import (
     create_synced_space_auto_conversion_use_case,
     create_tray_indicator,
     decode_buffer_events,
+    enable_user_dictionary_if_needed,
     execute_manual_conversion_with_session,
     extract_last_word_events,
     handle_poller_selection_changed,
@@ -614,6 +615,33 @@ def test_apply_user_dictionary_config_disables_existing_dictionary():
     assert result is None
     enable_user_dictionary.assert_not_called()
     log.info.assert_called_once_with("User dictionary disabled")
+
+
+def test_enable_user_dictionary_if_needed_returns_existing_dictionary():
+    user_dict = object()
+
+    result = enable_user_dictionary_if_needed(user_dict=user_dict, log=MagicMock())
+
+    assert result is user_dict
+
+
+def test_enable_user_dictionary_if_needed_creates_and_logs_dictionary(monkeypatch):
+    class FakeUserDictionary:
+        path = "/tmp/user.json"
+
+    user_dictionary_module = types.ModuleType("lswitch.intelligence.user_dictionary")
+    user_dictionary_module.UserDictionary = FakeUserDictionary
+    monkeypatch.setitem(
+        sys.modules,
+        "lswitch.intelligence.user_dictionary",
+        user_dictionary_module,
+    )
+    log = MagicMock()
+
+    result = enable_user_dictionary_if_needed(user_dict=None, log=log)
+
+    assert isinstance(result, FakeUserDictionary)
+    log.info.assert_called_once_with("User dictionary enabled: %s", "/tmp/user.json")
 
 
 def test_apply_runtime_config_update_applies_timing_user_dict_and_syncs_services():

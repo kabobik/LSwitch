@@ -472,6 +472,18 @@ def apply_user_dictionary_config(
     return None
 
 
+def enable_user_dictionary_if_needed(*, user_dict, log):
+    """Return existing or newly-created runtime user dictionary."""
+    if user_dict is not None:
+        return user_dict
+
+    from lswitch.intelligence.user_dictionary import UserDictionary
+
+    user_dict = UserDictionary()
+    log.info("User dictionary enabled: %s", user_dict.path)
+    return user_dict
+
+
 def apply_runtime_config_update(
     *,
     config,
