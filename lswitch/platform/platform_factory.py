@@ -32,9 +32,7 @@ class PlatformAdapters:
 class PlatformRuntimePlan:
     """Runtime requirements for the detected desktop session."""
 
-    uses_qt_event_loop: bool
     requires_qt_before_platform: bool
-    show_tray: bool
 
 
 def detect_session_type(env: Mapping[str, str] | None = None) -> str:
@@ -77,7 +75,6 @@ def detect_compositor(env: Mapping[str, str] | None = None) -> str:
 
 
 def create_runtime_plan(
-    headless: bool,
     env: Mapping[str, str] | None = None,
 ) -> PlatformRuntimePlan:
     """Return neutral runtime requirements for app startup.
@@ -88,9 +85,7 @@ def create_runtime_plan(
     session_type = detect_session_type(env)
     requires_qt_before_platform = session_type == "wayland"
     return PlatformRuntimePlan(
-        uses_qt_event_loop=(not headless) or requires_qt_before_platform,
         requires_qt_before_platform=requires_qt_before_platform,
-        show_tray=not headless,
     )
 
 

@@ -12,15 +12,21 @@ from lswitch.cli import main, parse_args
 class TestParseArgs:
     """parse_args() returns expected Namespace for various flags."""
 
-    def test_headless_flag(self, monkeypatch):
+    def test_headless_flag_is_rejected(self, monkeypatch):
         monkeypatch.setattr("sys.argv", ["lswitch", "--headless"])
-        args = parse_args()
-        assert args.headless is True
+        with pytest.raises(SystemExit) as exc_info:
+            parse_args()
+        assert exc_info.value.code == 2
 
     def test_debug_flag(self, monkeypatch):
         monkeypatch.setattr("sys.argv", ["lswitch", "--debug"])
         args = parse_args()
         assert args.debug is True
+
+    def test_replace_flag_remains_accepted(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["lswitch", "--replace"])
+        args = parse_args()
+        assert args.replace is True
 
     def test_version_flag(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["lswitch", "--version"])
@@ -33,7 +39,6 @@ class TestParseArgs:
     def test_defaults_no_args(self, monkeypatch):
         monkeypatch.setattr("sys.argv", ["lswitch"])
         args = parse_args()
-        assert args.headless is False
         assert args.debug is False
 
     def test_diagnose_wayland_flag(self, monkeypatch):

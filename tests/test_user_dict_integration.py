@@ -61,7 +61,7 @@ class _MockAutoDetector:
 
 def _make_app(auto_switch: bool = True, user_dict_enabled: bool = False,
               threshold: int = 0) -> LSwitchApp:
-    app = LSwitchApp(headless=True, debug=True)
+    app = LSwitchApp(debug=True)
     app.xkb = MockXKBAdapter(layouts=["en", "ru"])
     app.selection = MockSelectionAdapter()
     app.system = MockSystemAdapter()

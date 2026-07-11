@@ -20,7 +20,7 @@ from lswitch.platform.selection_adapter import SelectionInfo
 
 def _make_app() -> LSwitchApp:
     """Create LSwitchApp with mocked platform components (no real X11)."""
-    app = LSwitchApp(headless=True, debug=True)
+    app = LSwitchApp(debug=True)
 
     # Inject mocks instead of calling _init_platform()
     app.xkb = MagicMock()

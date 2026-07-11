@@ -58,7 +58,7 @@ class _MockAutoDetector:
 
 def _make_app(auto_switch: bool = True, threshold: int = 0) -> LSwitchApp:
     """App with all mocks and auto_switch configured."""
-    app = LSwitchApp(headless=True, debug=True)
+    app = LSwitchApp(debug=True)
     app.xkb = MockXKBAdapter(layouts=["en", "ru"])
     app.selection = MockSelectionAdapter()
     app.system = MockSystemAdapter()
@@ -420,7 +420,7 @@ class TestSpaceKeyHandling:
 
     def test_auto_detector_initialized_to_none_at_construction(self):
         """auto_detector is None until _init_platform() is called."""
-        app = LSwitchApp(headless=True)
+        app = LSwitchApp()
         assert app.auto_detector is None
 
 
@@ -653,4 +653,3 @@ class TestAutoConversionGuard:
         # Should reach auto_detector.should_convert (returns False → result False)
         assert result is False
         app.auto_detector.should_convert.assert_called_once()
-

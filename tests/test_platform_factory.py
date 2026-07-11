@@ -63,27 +63,16 @@ class TestDetectCompositor:
 
 
 class TestCreateRuntimePlan:
-    def test_x11_headless_does_not_need_qt_loop(self):
-        plan = create_runtime_plan(headless=True, env={"XDG_SESSION_TYPE": "x11"})
+    def test_x11_does_not_need_qt_before_platform(self):
+        plan = create_runtime_plan(env={"XDG_SESSION_TYPE": "x11"})
 
         assert isinstance(plan, PlatformRuntimePlan)
-        assert plan.uses_qt_event_loop is False
         assert plan.requires_qt_before_platform is False
-        assert plan.show_tray is False
 
-    def test_x11_gui_uses_qt_loop_for_tray(self):
-        plan = create_runtime_plan(headless=False, env={"XDG_SESSION_TYPE": "x11"})
+    def test_wayland_requires_qt_before_platform(self):
+        plan = create_runtime_plan(env={"XDG_SESSION_TYPE": "wayland"})
 
-        assert plan.uses_qt_event_loop is True
-        assert plan.requires_qt_before_platform is False
-        assert plan.show_tray is True
-
-    def test_wayland_headless_requires_qt_before_platform(self):
-        plan = create_runtime_plan(headless=True, env={"XDG_SESSION_TYPE": "wayland"})
-
-        assert plan.uses_qt_event_loop is True
         assert plan.requires_qt_before_platform is True
-        assert plan.show_tray is False
 
 
 class TestCreatePlatformAdapters:

@@ -287,7 +287,7 @@ ENTRY
     info "Установка systemd сервиса..."
     mkdir -p "$SYSTEMD_DIR"
     cp "$PROJECT_DIR/config/lswitch.service" "$SYSTEMD_DIR/$APP_NAME.service"
-    sed -i "s|^ExecStart=.*|ExecStart=$BIN_DIR/$APP_NAME --headless|" "$SYSTEMD_DIR/$APP_NAME.service"
+    sed -i "s|^ExecStart=.*|ExecStart=$BIN_DIR/$APP_NAME --replace|" "$SYSTEMD_DIR/$APP_NAME.service"
     systemctl --user daemon-reload
     ok "Сервис установлен"
 

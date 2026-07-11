@@ -394,24 +394,7 @@ Keyboard selection:
 - VS Code;
 - terminal.
 
-## 12. Headless mode
-
-Запуск:
-
-```bash
-.venv/bin/python -m lswitch --headless --replace --debug
-```
-
-Проверить:
-
-- нет tray icon;
-- приложение все равно стартует с Qt runtime на Wayland;
-- `Auto-conversion на Space` работает;
-- `RetypeMode` работает;
-- `SelectionMode` работает так же, как в GUI;
-- нет Debug Monitor polling, значит не должно быть monitor-induced `ctrl+c`.
-
-## 13. Stop criteria для `ctrl+c` проблемы
+## 12. Stop criteria для `ctrl+c` проблемы
 
 Считать баг подтвержденным, если выполняется хотя бы одно:
 
@@ -433,7 +416,7 @@ Keyboard selection:
 - все `send_combo sequence=ctrl+c`;
 - все `send_combo sequence=ctrl+v`.
 
-## 14. Короткая таблица результатов
+## 13. Короткая таблица результатов
 
 | Сценарий | Ожидание | Статус | Заметки |
 |----------|----------|--------|---------|
@@ -449,4 +432,3 @@ Keyboard selection:
 | Keyboard selection | Selection conversion + clipboard restore |  |  |
 | Backspace hold | Selection mode only while gesture active |  |  |
 | Debug Monitor | Нет idle `ctrl+c` от selection poller |  |  |
-| Headless | Без tray, основные сценарии работают |  |  |

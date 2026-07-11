@@ -27,11 +27,6 @@ def parse_args():
         description="LSwitch — keyboard layout switcher with auto-conversion",
     )
     parser.add_argument(
-        "--headless",
-        action="store_true",
-        help="Run without GUI (daemon mode)",
-    )
-    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug output (state changes, auto-conv decisions)",
@@ -44,7 +39,7 @@ def parse_args():
     parser.add_argument(
         "--replace",
         action="store_true",
-        help="Stop existing instance before starting (safe restart)",
+        help="Stop existing instance before starting (already the default)",
     )
     parser.add_argument(
         "--diagnose-wayland",
@@ -78,5 +73,5 @@ def main():
         raise SystemExit(0 if report.ok else 1)
 
     from lswitch.app import LSwitchApp
-    app = LSwitchApp(headless=args.headless, debug=debug, replace=args.replace)
+    app = LSwitchApp(debug=debug)
     app.run()

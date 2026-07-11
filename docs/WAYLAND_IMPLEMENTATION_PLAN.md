@@ -12,7 +12,7 @@
 - auto-conversion по Space;
 - selection mode: конвертация выделенного текста;
 - selection-expand fallback: двойной Shift без буфера пытается расширить выделение до слова;
-- GUI/tray и headless/service режимы.
+- единый GUI/tray режим, включая запуск через systemd user service.
 
 Первый целевой compositor: KDE Plasma Wayland. Остальные compositors идут после KDE MVP.
 
@@ -52,7 +52,7 @@
 
 ### 3.2. Qt objects вызываются из evdev thread
 
-В GUI-режиме Qt event loop живет в main thread, а evdev loop и conversion вызываются в background thread. В headless-режиме Qt event loop сейчас не создается.
+Qt event loop живет в main thread, а evdev loop и conversion вызываются в background thread.
 
 Wayland clipboard и QtDBus нельзя надежно дергать напрямую из evdev thread.
 
@@ -60,9 +60,7 @@ Wayland clipboard и QtDBus нельзя надежно дергать напр�
 
 - ввести `QtBridge`/`MainThreadInvoker` с синхронным `call()` через Qt queued signal;
 - все `QClipboard` и `QtDBus` операции проводить через этот bridge;
-- для Wayland headless выбрать явную модель:
-  - preferred: минимальный `QGuiApplication`/`QApplication` + evdev worker thread;
-  - fallback: subprocess-only путь для clipboard/layout backend там, где Qt недоступен.
+- всегда создавать `QApplication`, а evdev обрабатывать в worker thread.
 
 ### 3.3. PyQt6 runtime нужен Wayland/KDE backend-у
 
@@ -158,12 +156,11 @@ LSwitchApp
 
 ## 4.1. Принятые решения для MVP
 
-- Wayland `--headless` использует тот же PyQt6 runtime и Qt event loop, что и GUI-режим, но не создает tray. Headless на Wayland означает "без видимого UI", а не "без Qt".
 - `wl-copy`/`wl-paste` остаются fallback/diagnostic path, но не default implementation.
 - Вводим нейтральный adapter API `send_key_sequence(sequence)`. Старый `xdotool_key(sequence)` остается deprecated alias на время миграции и для совместимости тестов/старого кода.
 - KDE Wayland MVP гарантирует `us`/`ru` first. Backend может видеть больше layouts, но arbitrary XKB layouts не являются обещанием первого релиза.
 - Добавляем advanced config `wayland_selection_strategy`, default `"auto"`. Для MVP `"auto"` фактически выбирает безопасный Clipboard copy/paste flow. Возможные значения: `"auto"`, `"clipboard_copy"`, `"primary_selection"`, `"disabled"`.
-- Основной запуск на Wayland: один процесс `lswitch` с Qt loop, tray и evdev worker. `lswitch --headless` - optional service/tiling-WM mode того же процесса. Service не является отдельным обязательным backend-daemon.
+- Запуск на Wayland и через systemd использует один процесс `lswitch` с Qt loop, tray и evdev worker.
 
 ## 5. Небезопасные предположения из research notes
 
@@ -171,7 +168,7 @@ LSwitchApp
 
 - `QClipboard.Selection` на Wayland работает всегда. Нужен feature detection и fallback.
 - `selectionChanged()` достаточно для freshness. На Wayland freshness лучше завязать на явный `Ctrl+C` flow или compositor-specific primary support.
-- Headless может пользоваться `QClipboard` без Qt event loop. Нужен Qt loop или subprocess fallback.
+- `QClipboard` можно использовать без Qt event loop. Это неверно: для clipboard всегда нужен работающий Qt loop.
 - KDE D-Bus API можно зашить без проверки. Backend должен валидировать service/object/interface/method at startup и логировать понятную ошибку.
 - `libxkbcommon` сам знает текущую compositor раскладку. Он умеет keymap/state, но актуальную раскладку все равно надо получать из compositor backend.
 
@@ -224,7 +221,7 @@ LSwitchApp
 - [x] Добавить neutral `PlatformRuntimePlan`, чтобы `LSwitchApp` не ветвился по X11/Wayland.
 - [x] Создать Qt app до инициализации Wayland adapters.
 - [x] Ввести `QtBridge.call()`.
-- [x] Wayland headless всегда запускает Qt loop в main thread, но не создает tray.
+- [x] Wayland всегда запускает Qt loop в main thread и создает tray.
 - Перевести clipboard/DBus access на main thread.
 - Subprocess clipboard path оставлять только fallback/diagnostic mode.
 
@@ -290,7 +287,7 @@ LSwitchApp
 - `lswitch --diagnose-wayland-switch-test` переключает раскладку, показывает
   использованный backend method и возвращает исходную;
 - запуск GUI/tray;
-- запуск headless/service;
+- запуск через systemd user service;
 - double Shift retype EN->RU и RU->EN;
 - auto-conversion на Space;
 - repeat double Shift/sticky buffer;
@@ -308,13 +305,13 @@ LSwitchApp
 - GNOME backend через GSettings/DBus.
 - Sway backend через IPC.
 - Hyprland backend через IPC.
-- Headless CI на weston/sway, если реалистично.
+- CI на виртуальном weston/sway, если реалистично.
 - Документация по compositor-specific limitations.
 
 ## 7. Definition of done для KDE Wayland MVP
 
 - `lswitch` стартует в KDE Wayland без X11/XWayland requirements.
-- `lswitch --headless` имеет понятный поддержанный путь.
+- systemd user service запускает тот же GUI/tray runtime, что и `lswitch`.
 - retype mode работает для EN/RU.
 - auto-conversion работает для EN/RU.
 - selection mode работает хотя бы через Clipboard copy/paste flow.

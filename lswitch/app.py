@@ -73,22 +73,19 @@ class _PidLock:
     because the OS closes all file descriptors.
     """
 
-    def __init__(self, replace: bool = False):
+    def __init__(self):
         self._path = _pid_lock_path()
         self._fd: int | None = None
-        self._replace = replace
 
     def acquire(self) -> None:
         """Acquire the lock or raise SystemExit if another instance is running."""
-        # If --replace, kill existing instance first
-        if self._replace:
-            existing_pid = _read_existing_pid()
-            if existing_pid and _is_process_alive(existing_pid) and existing_pid != os.getpid():
-                if not _kill_existing(existing_pid):
-                    raise SystemExit(
-                        f"Не удалось остановить предыдущий экземпляр (PID {existing_pid}). "
-                        f"Остановите его вручную: kill {existing_pid}"
-                    )
+        existing_pid = _read_existing_pid()
+        if existing_pid and _is_process_alive(existing_pid) and existing_pid != os.getpid():
+            if not _kill_existing(existing_pid):
+                raise SystemExit(
+                    f"Не удалось остановить предыдущий экземпляр (PID {existing_pid}). "
+                    f"Остановите его вручную: kill {existing_pid}"
+                )
 
         # Open (create if needed) the lock file
         self._fd = os.open(self._path, os.O_RDWR | os.O_CREAT, 0o644)
@@ -100,8 +97,8 @@ class _PidLock:
             existing_pid = _read_existing_pid()
             msg = (
                 f"LSwitch уже запущен (PID {existing_pid}). "
-                f"Для замены: lswitch --replace\n"
-                f"Для остановки: kill {existing_pid}  или  "
+                f"Не удалось заменить экземпляр автоматически.\n"
+                f"Для остановки вручную: kill {existing_pid}  или  "
                 f"systemctl --user stop lswitch"
             )
             raise SystemExit(msg)
@@ -171,11 +168,7 @@ class _SelectionPollerThread(threading.Thread):
 
 
 class LSwitchApp:
-    """Single-process application combining input daemon and tray GUI.
-
-    Modes:
-        headless=True  — no GUI, runs as a background service
-        headless=False — with tray icon (default)
+    """Single-process application combining input handling and tray GUI.
 
     ``_init_platform()`` is separated from ``__init__`` so that tests
     can inject mocks without touching real platform / evdev resources.
@@ -185,15 +178,11 @@ class LSwitchApp:
 
     def __init__(
         self,
-        headless: bool = False,
         debug: bool = False,
         config_path: str | None = None,
-        replace: bool = False,
     ):
-        self.headless = headless
         self.debug = debug
         self._running = False
-        self._replace = replace
         self._pid_lock: _PidLock | None = None
 
         # Configuration
@@ -1025,12 +1014,12 @@ class LSwitchApp:
         """Blocking main event loop."""
         from lswitch.platform.platform_factory import create_runtime_plan
 
-        runtime_plan = create_runtime_plan(headless=self.headless)
+        runtime_plan = create_runtime_plan()
         qt_app = None
         main_thread = None
 
         # Защита от двойного запуска
-        self._pid_lock = _PidLock(replace=self._replace)
+        self._pid_lock = _PidLock()
         self._pid_lock.acquire()
 
         try:
@@ -1060,7 +1049,7 @@ class LSwitchApp:
 
         self._running = True
 
-        logger.info("LSwitch 2.0 запущен (headless=%s, %d устройств)", self.headless, count)
+        logger.info("LSwitch 2.0 запущен (%d устройств)", count)
 
         def _reload_handler(signum, frame):
             self.config.reload()
@@ -1068,59 +1057,33 @@ class LSwitchApp:
                 logger.debug("Config reloaded via SIGHUP")
         signal.signal(signal.SIGHUP, _reload_handler)
 
-        if runtime_plan.uses_qt_event_loop:
-            if qt_app is None:
-                from lswitch.ui.qt_bridge import ensure_qt_application
+        if qt_app is None:
+            from lswitch.ui.qt_bridge import ensure_qt_application
 
-                qt_app = ensure_qt_application(sys.argv)
-            self._run_with_qt_loop(qt_app, show_tray=runtime_plan.show_tray)
-        elif self.headless:
-            self._run_evdev_loop()
-        else:
-            self._run_with_gui()
+            qt_app = ensure_qt_application(sys.argv)
+        self._run_with_qt_loop(qt_app)
 
-    def _run_evdev_loop(self):
-        """Evdev event loop (blocking, main thread)."""
-        try:
-            while self._running:
-                for device, event in self.device_manager.get_events(timeout=0.1):
-                    self.event_manager.handle_raw_event(event, device.name)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            self.stop()
-
-    def _run_with_gui(self):
-        """Run evdev in background thread + Qt event loop in main thread."""
-        from lswitch.ui.qt_bridge import ensure_qt_application
-
-        qt_app = ensure_qt_application(sys.argv)
-        self._run_with_qt_loop(qt_app, show_tray=True)
-
-    def _run_with_qt_loop(self, qt_app, show_tray: bool):
-        """Run evdev in a worker thread while the main thread runs Qt."""
+    def _run_with_qt_loop(self, qt_app):
+        """Run evdev in a worker thread with the tray in the Qt main loop."""
         from lswitch.core.events import EventType
+        from lswitch.ui.context_menu import ContextMenu
+        from lswitch.ui.tray_icon import TrayIcon
 
         qt_app.setQuitOnLastWindowClosed(False)
 
-        tray = None
-        if show_tray:
-            from lswitch.ui.tray_icon import TrayIcon
-            from lswitch.ui.context_menu import ContextMenu
+        tray = TrayIcon(event_bus=self.event_bus, config=self.config, app=qt_app)
 
-            tray = TrayIcon(event_bus=self.event_bus, config=self.config, app=qt_app)
+        menu_obj = ContextMenu(config=self.config, event_bus=self.event_bus, app=self)
+        menu = menu_obj.build()
+        tray.set_context_menu(menu)
 
-            menu_obj = ContextMenu(config=self.config, event_bus=self.event_bus, app=self)
-            menu = menu_obj.build()
-            tray.set_context_menu(menu)
+        try:
+            current = self.xkb.get_current_layout() if self.xkb else None
+            tray.set_layout(current.name if current else "")
+        except Exception:
+            pass
 
-            try:
-                current = self.xkb.get_current_layout() if self.xkb else None
-                tray.set_layout(current.name if current else "")
-            except Exception:
-                pass
-
-            tray.show()
+        tray.show()
 
         # APP_QUIT → exit Qt event loop
         def _on_quit(event):
@@ -1159,8 +1122,7 @@ class LSwitchApp:
             
             qt_app.exec()
         finally:
-            if tray is not None:
-                tray.cleanup()
+            tray.cleanup()
             self.stop()
             t.join(timeout=2.0)
 

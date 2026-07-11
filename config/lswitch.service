@@ -7,7 +7,7 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
-ExecStart=/bin/sh -c 'exec $(command -v lswitch || echo /usr/local/bin/lswitch) --headless'
+ExecStart=/bin/sh -c 'exec $(command -v lswitch || echo /usr/local/bin/lswitch) --replace'
 Restart=on-failure
 RestartSec=5s
 Environment="PYTHONUNBUFFERED=1"

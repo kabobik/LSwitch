@@ -40,7 +40,7 @@ def _make_app(tmp_path=None) -> LSwitchApp:
     config_path = None
     if tmp_path is not None:
         config_path = str(tmp_path / "config.toml")
-    app = LSwitchApp(headless=True, debug=True, config_path=config_path)
+    app = LSwitchApp(debug=True, config_path=config_path)
     # Inject mocks instead of calling _init_platform()
     app.xkb = MockXKBAdapter()
     app.selection = MockSelectionAdapter()

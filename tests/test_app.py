@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lswitch.app import LSwitchApp
+from lswitch.app import LSwitchApp, _PidLock
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.states import State
 
@@ -20,7 +20,7 @@ from tests.conftest import MockXKBAdapter, MockSelectionAdapter, MockSystemAdapt
 
 def _make_app(**kwargs) -> LSwitchApp:
     """Create an LSwitchApp with mocked platform components."""
-    app = LSwitchApp(headless=True, debug=True, **kwargs)
+    app = LSwitchApp(debug=True, **kwargs)
     # Replace platform components with mocks
     app.xkb = MockXKBAdapter()
     app.selection = MockSelectionAdapter()
@@ -41,13 +41,11 @@ class TestLSwitchAppInit:
 
     def test_default_parameters(self):
         app = LSwitchApp()
-        assert app.headless is False
         assert app.debug is False
         assert app._running is False
 
     def test_custom_parameters(self):
-        app = LSwitchApp(headless=True, debug=True)
-        assert app.headless is True
+        app = LSwitchApp(debug=True)
         assert app.debug is True
 
     def test_has_event_bus_and_state_manager(self):
@@ -64,6 +62,21 @@ class TestLSwitchAppInit:
         assert app.device_manager is None
         assert app.conversion_engine is None
         assert app.event_manager is None
+
+
+class TestPidLock:
+    def test_replaces_existing_instance_by_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("lswitch.app._pid_lock_path", lambda: str(tmp_path / "lswitch.pid"))
+        monkeypatch.setattr("lswitch.app._read_existing_pid", lambda: 1234)
+        monkeypatch.setattr("lswitch.app._is_process_alive", lambda pid: True)
+        kill_existing = MagicMock(return_value=True)
+        monkeypatch.setattr("lswitch.app._kill_existing", kill_existing)
+
+        lock = _PidLock()
+        lock.acquire()
+        lock.release()
+
+        kill_existing.assert_called_once_with(1234)
 
 
 class TestWireEventBus:
