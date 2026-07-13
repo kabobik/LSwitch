@@ -24,6 +24,11 @@ ICON_DIR="$ICON_THEME_DIR/scalable/apps"
 LEGACY_ICON_DIR="$HOME/.icons"
 UDEV_RULES="/etc/udev/rules.d/99-lswitch.rules"
 CURRENT_USER="${USER:-$(id -un)}"
+SYSTEM_DICTIONARY_DIRS=(
+    "/usr/share/hunspell"
+    "/usr/share/myspell/dicts"
+    "/usr/share/myspell"
+)
 
 # Определяем корень проекта
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +68,8 @@ package_for_dependency() {
         apt:pyqt6_qtdbus)   echo "python3-pyqt6" ;;
         apt:wl_clipboard)   echo "wl-clipboard" ;;
         apt:qt6_wayland)    echo "qt6-wayland" ;;
+        apt:dictionary_en)  echo "hunspell-en-us" ;;
+        apt:dictionary_ru)  echo "hunspell-ru" ;;
 
         pacman:evdev)        echo "python-evdev" ;;
         pacman:xlib)         echo "python-xlib" ;;
@@ -70,6 +77,8 @@ package_for_dependency() {
         pacman:pyqt6_qtdbus) echo "python-pyqt6" ;;
         pacman:wl_clipboard) echo "wl-clipboard" ;;
         pacman:qt6_wayland)  echo "qt6-wayland" ;;
+        pacman:dictionary_en) echo "hunspell-en_us" ;;
+        pacman:dictionary_ru) echo "hunspell-ru" ;;
     esac
 }
 
@@ -115,6 +124,99 @@ install_system_packages() {
             exit 1
             ;;
     esac
+}
+
+find_system_dictionary() {
+    local lang="$1"
+    local prefixes=()
+    local prefix directory candidate
+
+    case "$lang" in
+        en) prefixes=("en_US" "en_GB" "en") ;;
+        ru) prefixes=("ru_RU" "ru") ;;
+        *) return 1 ;;
+    esac
+
+    # Keep the same exact-name preference order as SystemDictionaryLoader.
+    for prefix in "${prefixes[@]}"; do
+        for directory in "${SYSTEM_DICTIONARY_DIRS[@]}"; do
+            [ -d "$directory" ] || continue
+            candidate="$directory/$prefix.dic"
+            if [ -f "$candidate" ] && [ -r "$candidate" ]; then
+                printf '%s\n' "$candidate"
+                return 0
+            fi
+        done
+    done
+
+    # Only after exact candidates, consider variants such as en_US-large.
+    for prefix in "${prefixes[@]}"; do
+        for directory in "${SYSTEM_DICTIONARY_DIRS[@]}"; do
+            [ -d "$directory" ] || continue
+            for candidate in "$directory/$prefix"*.dic; do
+                [ "$candidate" != "$directory/$prefix.dic" ] || continue
+                if [ -f "$candidate" ] && [ -r "$candidate" ]; then
+                    printf '%s\n' "$candidate"
+                    return 0
+                fi
+            done
+        done
+    done
+    return 1
+}
+
+offer_system_dictionaries() {
+    local manager en_path ru_path answer
+    local packages=()
+    local missing_languages=()
+
+    en_path="$(find_system_dictionary en || true)"
+    ru_path="$(find_system_dictionary ru || true)"
+
+    if [ -n "$en_path" ] && [ -n "$ru_path" ]; then
+        ok "Системные словари найдены: EN — $en_path; RU — $ru_path"
+        return 0
+    fi
+
+    [ -n "$en_path" ] || missing_languages+=("EN")
+    [ -n "$ru_path" ] || missing_languages+=("RU")
+    warn "Не найдены системные словари: ${missing_languages[*]}"
+    info "Они улучшают определение раскладки при автоконвертации во время набора."
+
+    manager="$(detect_pkg_manager)"
+    if [ -z "$manager" ]; then
+        warn "Автоматическая установка словарей поддерживается через apt и pacman."
+        warn "Установите EN/RU Hunspell-словари вручную, если они нужны."
+        return 0
+    fi
+
+    if ! read -rp "Установить недостающие системные словари EN/RU? [Y/n] " answer; then
+        warn "Ввод недоступен — установка словарей пропущена"
+        return 0
+    fi
+    answer="${answer:-y}"
+    if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+        info "Установка словарей пропущена; будут использоваться встроенные словари."
+        return 0
+    fi
+
+    [ -n "$en_path" ] || add_dep_pkg packages "$manager" "dictionary_en"
+    [ -n "$ru_path" ] || add_dep_pkg packages "$manager" "dictionary_ru"
+    if ! install_system_packages "$manager" "${packages[@]}"; then
+        warn "Не удалось установить системные словари; установка LSwitch продолжится."
+        return 0
+    fi
+
+    en_path="$(find_system_dictionary en || true)"
+    ru_path="$(find_system_dictionary ru || true)"
+    if [ -z "$en_path" ] || [ -z "$ru_path" ]; then
+        warn "Пакеты установлены, но не все EN/RU .dic-файлы удалось обнаружить."
+        [ -n "$en_path" ] || warn "Английский словарь не найден."
+        [ -n "$ru_path" ] || warn "Русский словарь не найден."
+        return 0
+    fi
+
+    ok "Системные словари установлены: EN — $en_path; RU — $ru_path"
 }
 
 is_wayland_session() {
@@ -402,6 +504,9 @@ install() {
     info "Окружение рабочего стола: $(detect_desktop_environment)"
     check_deps
 
+    # Системные словари полезны для mid-word режима, но не обязательны.
+    offer_system_dictionaries
+
     # 2. Копирование приложения
     info "Копирование файлов в $INSTALL_DIR..."
     info "Источник установки: $PROJECT_DIR"
@@ -516,17 +621,23 @@ ENTRY
 }
 
 # ─── Точка входа ───────────────────────────────────────────────
-case "${1:-}" in
-    --remove|--uninstall|remove|uninstall)
-        remove
-        ;;
-    --help|-h)
-        echo "Использование: bash $0 [--remove]"
-        echo ""
-        echo "  (без аргументов)  — установить LSwitch"
-        echo "  --remove          — полностью удалить LSwitch"
-        ;;
-    *)
-        install
-        ;;
-esac
+main() {
+    case "${1:-}" in
+        --remove|--uninstall|remove|uninstall)
+            remove
+            ;;
+        --help|-h)
+            echo "Использование: bash $0 [--remove]"
+            echo ""
+            echo "  (без аргументов)  — установить LSwitch"
+            echo "  --remove          — полностью удалить LSwitch"
+            ;;
+        *)
+            install
+            ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

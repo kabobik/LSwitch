@@ -40,6 +40,7 @@ git clone https://github.com/kabobik/lswitch.git && cd lswitch && bash scripts/i
 | PyQt6 + QtDBus | GUI и KDE Wayland layout backend | **Критично для Wayland** |
 | wl-clipboard | Clipboard fallback для Wayland (`wl-copy`/`wl-paste`) | **Критично для Wayland** |
 | qt6-wayland | Qt Wayland platform plugin | **Критично для Wayland** |
+| Hunspell EN/RU `.dic` | Расширенные префиксы для mid-word определения | Опционально |
 
 **Display Server:** X11 и KDE Plasma Wayland
 
@@ -54,6 +55,7 @@ bash scripts/install.sh
 Скрипт автоматически:
 - Проверит Python 3.11+ и все зависимости
 - Установит недостающие пакеты через `apt` на Ubuntu/Debian или `pacman` на Arch Linux
+- Проверит EN/RU Hunspell/MySpell-словари и предложит установить недостающие
 - Скопирует приложение в `~/.local/share/lswitch/`
 - Создаст команду `lswitch` в `~/.local/bin/`
 - Установит udev правила, иконку, ярлык в меню
