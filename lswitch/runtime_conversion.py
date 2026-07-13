@@ -331,6 +331,7 @@ class ConversionRuntimeFacade:
         debug: bool,
         manual_weight_step: int,
         get_layout_switch_controller=None,
+        trace_recorder=None,
     ):
         self.state_manager = state_manager
         self.selection_tracker = selection_tracker
@@ -352,6 +353,7 @@ class ConversionRuntimeFacade:
         )
         self.debug = debug
         self.manual_weight_step = manual_weight_step
+        self.trace_recorder = trace_recorder
 
     def request_manual_conversion(self) -> None:
         """Run manual conversion and apply transient session updates."""
@@ -378,7 +380,7 @@ class ConversionRuntimeFacade:
             session=self.auto_conversion_session,
         )
 
-    def try_space_auto_conversion(self) -> bool:
+    def try_space_auto_conversion(self, correlation_id: int = 0) -> bool:
         """Try space-triggered auto conversion at the current word boundary."""
         return try_space_auto_conversion_at_boundary(
             use_case=self.create_space_auto_conversion_use_case(),
@@ -391,13 +393,18 @@ class ConversionRuntimeFacade:
             ),
         )
 
-    def try_mid_word_auto_conversion(self) -> bool:
+    def try_mid_word_auto_conversion(self, correlation_id: int = 0) -> bool:
         """Try mid-word auto conversion for the current unfinished token."""
         return try_mid_word_auto_conversion(
             use_case=self.create_mid_word_auto_conversion_use_case(),
             session=self.auto_conversion_session,
             context=self.state_manager.context,
         )
+
+    def close_trace_session(self, correlation_id: int) -> None:
+        """Close recorder aggregation for a completed typed word."""
+        if self.trace_recorder is not None:
+            self.trace_recorder.close_session(correlation_id)
 
     def perform_space_auto_conversion(
         self,

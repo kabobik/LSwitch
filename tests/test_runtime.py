@@ -414,9 +414,9 @@ def test_create_input_router_wires_core_components_and_callbacks():
             conversion=InputConversionPort(
                 decode_buffer=lambda: "",
                 auto_conversion_enabled=lambda: False,
-                try_auto_conversion_at_space=lambda: False,
+                try_auto_conversion_at_space=lambda correlation_id: False,
                 mid_word_auto_conversion_enabled=lambda: False,
-                try_mid_word_auto_conversion=lambda: False,
+                try_mid_word_auto_conversion=lambda correlation_id: False,
                 get_pending_auto_space=lambda: True,
                 set_pending_auto_space=set_pending_auto_space,
                 clear_last_retype_events=clear_last_retype_events,
@@ -457,10 +457,17 @@ def _conversion_runtime(
     return types.SimpleNamespace(
         auto_conversion_session=session,
         decode_buffer=decode_buffer or (lambda: ""),
-        try_space_auto_conversion=try_space_auto_conversion or (lambda: False),
-        try_mid_word_auto_conversion=try_mid_word_auto_conversion or (lambda: False),
+        try_space_auto_conversion=(
+            try_space_auto_conversion
+            or (lambda correlation_id=0: False)
+        ),
+        try_mid_word_auto_conversion=(
+            try_mid_word_auto_conversion
+            or (lambda correlation_id=0: False)
+        ),
         get_mid_word_detector=lambda: mid_word_detector,
         request_manual_conversion=request_manual_conversion or (lambda: None),
+        close_trace_session=lambda correlation_id: None,
     )
 
 

@@ -195,6 +195,7 @@ def create_input_router_callbacks(
             clear_last_auto_marker=auto_conversion_session.clear_marker,
             inject_deferred_space=lambda: inject_deferred_space(get_virtual_kb()),
             request_conversion=conversion_runtime.request_manual_conversion,
+            close_trace_session=conversion_runtime.close_trace_session,
         ),
         selection=InputSelectionPort(
             prime_baseline_on_click=lambda: update_passive_selection_baseline_on_click(

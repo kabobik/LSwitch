@@ -41,6 +41,7 @@ def _router(
     clear_last_auto_marker=None,
     inject_deferred_space=None,
     request_conversion=None,
+    close_trace_session=None,
     prime_selection_baseline_on_click=None,
     read_mouse_release_selection=None,
 ):
@@ -57,13 +58,15 @@ def _router(
             ),
             auto_conversion_enabled=auto_conversion_enabled or (lambda: False),
             try_auto_conversion_at_space=(
-                try_auto_conversion_at_space or (lambda: False)
+                try_auto_conversion_at_space
+                or (lambda correlation_id: False)
             ),
             mid_word_auto_conversion_enabled=(
                 mid_word_auto_conversion_enabled or (lambda: False)
             ),
             try_mid_word_auto_conversion=(
-                try_mid_word_auto_conversion or (lambda: False)
+                try_mid_word_auto_conversion
+                or (lambda correlation_id: False)
             ),
             get_pending_auto_space=get_pending_auto_space or (lambda: False),
             set_pending_auto_space=set_pending_auto_space or (lambda value: None),
@@ -71,6 +74,9 @@ def _router(
             clear_last_auto_marker=clear_last_auto_marker or (lambda: None),
             inject_deferred_space=inject_deferred_space or (lambda: None),
             request_conversion=request_conversion or (lambda: None),
+            close_trace_session=(
+                close_trace_session or (lambda correlation_id: None)
+            ),
         ),
         selection=InputSelectionPort(
             prime_baseline_on_click=(
@@ -111,7 +117,7 @@ def test_input_router_tries_mid_word_auto_conversion_after_regular_key_release()
     try_mid_word_auto_conversion.assert_not_called()
     router.on_key_release(_event(EventType.KEY_RELEASE))
 
-    try_mid_word_auto_conversion.assert_called_once()
+    try_mid_word_auto_conversion.assert_called_once_with(1)
     assert state_manager.context.chars_in_buffer == 1
     assert selection_tracker.repeat_valid is False
 
@@ -132,7 +138,79 @@ def test_input_router_waits_until_all_pressed_text_keys_are_released():
 
     router.on_key_release(_event(EventType.KEY_RELEASE, key_b))
 
-    try_mid_word_auto_conversion.assert_called_once()
+    try_mid_word_auto_conversion.assert_called_once_with(1)
+
+
+def test_input_router_reuses_word_session_for_prefix_attempts():
+    try_mid_word_auto_conversion = MagicMock(return_value=False)
+    router, _state_manager, _selection_tracker = _router(
+        mid_word_auto_conversion_enabled=lambda: True,
+        try_mid_word_auto_conversion=try_mid_word_auto_conversion,
+    )
+    key_b = 48
+
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
+    router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
+    router.on_key_press(_event(EventType.KEY_PRESS, key_b))
+    router.on_key_release(_event(EventType.KEY_RELEASE, key_b))
+
+    assert [call.args[0] for call in try_mid_word_auto_conversion.call_args_list] == [
+        1,
+        1,
+    ]
+    assert router.active_word_session_id == 1
+
+
+def test_space_flow_uses_and_closes_current_word_session():
+    try_auto_conversion_at_space = MagicMock(return_value=False)
+    close_trace_session = MagicMock()
+    router, _state_manager, _selection_tracker = _router(
+        auto_conversion_enabled=lambda: True,
+        try_auto_conversion_at_space=try_auto_conversion_at_space,
+        close_trace_session=close_trace_session,
+    )
+
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_SPACE))
+
+    try_auto_conversion_at_space.assert_called_once_with(1)
+    close_trace_session.assert_called_once_with(1)
+    assert router.active_word_session_id is None
+
+
+def test_next_word_gets_a_new_session_after_space_boundary():
+    try_mid_word_auto_conversion = MagicMock(return_value=False)
+    router, _state_manager, _selection_tracker = _router(
+        mid_word_auto_conversion_enabled=lambda: True,
+        try_mid_word_auto_conversion=try_mid_word_auto_conversion,
+    )
+
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
+    router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_SPACE))
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
+    router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
+
+    assert [call.args[0] for call in try_mid_word_auto_conversion.call_args_list] == [
+        1,
+        2,
+    ]
+
+
+def test_successful_mid_word_switch_closes_session():
+    try_mid_word_auto_conversion = MagicMock(return_value=True)
+    close_trace_session = MagicMock()
+    router, _state_manager, _selection_tracker = _router(
+        mid_word_auto_conversion_enabled=lambda: True,
+        try_mid_word_auto_conversion=try_mid_word_auto_conversion,
+        close_trace_session=close_trace_session,
+    )
+
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
+    router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
+
+    close_trace_session.assert_called_once_with(1)
+    assert router.active_word_session_id is None
 
 
 def test_input_router_cancels_deferred_mid_word_check_at_space_boundary():
@@ -205,7 +283,7 @@ def test_input_router_consumes_space_on_auto_conversion():
 
     router.on_key_press(space)
 
-    try_auto_conversion_at_space.assert_called_once()
+    try_auto_conversion_at_space.assert_called_once_with(0)
     assert state_manager.context.event_buffer == []
     assert selection_tracker.repeat_valid is False
 

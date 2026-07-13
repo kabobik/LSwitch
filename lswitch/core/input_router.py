@@ -30,15 +30,16 @@ logger = logging.getLogger(__name__)
 class InputConversionPort:
     decode_buffer: Callable[[], str]
     auto_conversion_enabled: Callable[[], bool]
-    try_auto_conversion_at_space: Callable[[], bool]
+    try_auto_conversion_at_space: Callable[[int], bool]
     mid_word_auto_conversion_enabled: Callable[[], bool]
-    try_mid_word_auto_conversion: Callable[[], bool]
+    try_mid_word_auto_conversion: Callable[[int], bool]
     get_pending_auto_space: Callable[[], bool]
     set_pending_auto_space: Callable[[bool], None]
     clear_last_retype_events: Callable[[], None]
     clear_last_auto_marker: Callable[[], None]
     inject_deferred_space: Callable[[], None]
     request_conversion: Callable[[], None]
+    close_trace_session: Callable[[int], None] = lambda correlation_id: None
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,12 @@ class InputEventRouter:
         self.conversion = conversion
         self.selection = selection
         self._pressed_text_keys: set[int] = set()
+        self._active_word_session_id: int | None = None
+        self._next_word_session_id = 1
+
+    @property
+    def active_word_session_id(self) -> int | None:
+        return self._active_word_session_id
 
     def on_key_press(self, event: Event) -> None:
         data = event.data
@@ -106,10 +113,19 @@ class InputEventRouter:
             self._clear_selection_state()
         elif data.code == KEY_SPACE:
             self._pressed_text_keys.clear()
-            if self.conversion.auto_conversion_enabled():
-                if self.conversion.try_auto_conversion_at_space():
-                    self.selection_tracker.clear_repeat()
-                    return
+            correlation_id = self._word_session_for_boundary()
+            try:
+                consumed = (
+                    self.conversion.auto_conversion_enabled()
+                    and self.conversion.try_auto_conversion_at_space(
+                        correlation_id,
+                    )
+                )
+            finally:
+                self._close_word_session()
+            if consumed:
+                self.selection_tracker.clear_repeat()
+                return
             self._append_text_event(data, allow_mid_word=False)
         else:
             self._append_text_event(data, allow_mid_word=True)
@@ -133,7 +149,10 @@ class InputEventRouter:
                     self.selection_tracker.repeat_valid,
                     self.state_manager.context.chars_in_buffer,
                 )
-                self.conversion.request_conversion()
+                try:
+                    self.conversion.request_conversion()
+                finally:
+                    self._close_word_session()
         elif data.code in NAVIGATION_KEYS:
             self._handle_navigation()
         elif data.code == KEY_ENTER:
@@ -152,8 +171,10 @@ class InputEventRouter:
                     data.code,
                     self.state_manager.context.chars_in_buffer,
                 )
-                if self.conversion.try_mid_word_auto_conversion():
+                correlation_id = self._ensure_word_session()
+                if self.conversion.try_mid_word_auto_conversion(correlation_id):
                     self.selection_tracker.clear_repeat()
+                    self._close_word_session()
 
     def on_key_repeat(self, event: Event) -> None:
         data = event.data
@@ -177,6 +198,7 @@ class InputEventRouter:
 
     def on_mouse_click(self, event: Event) -> None:
         self._pressed_text_keys.clear()
+        self._close_word_session()
         self.conversion.clear_last_auto_marker()
         self._clear_selection_state()
         self.selection.prime_baseline_on_click()
@@ -216,6 +238,11 @@ class InputEventRouter:
             pass
 
     def _append_text_event(self, data, *, allow_mid_word: bool = False) -> None:
+        if allow_mid_word and keycode_to_char(
+            data.code,
+            shift=self.state_manager.context.shift_pressed,
+        ):
+            self._ensure_word_session()
         self.state_manager.on_key_press(data.code)
         self.typed_buffer.append_event(
             self.state_manager.context,
@@ -241,6 +268,28 @@ class InputEventRouter:
 
     def _handle_navigation(self) -> None:
         self._pressed_text_keys.clear()
+        self._close_word_session()
         self.conversion.clear_last_auto_marker()
         self._clear_selection_state()
         self.state_manager.on_navigation()
+
+    def _ensure_word_session(self) -> int:
+        if self._active_word_session_id is None:
+            self._active_word_session_id = self._next_word_session_id
+            self._next_word_session_id += 1
+        return self._active_word_session_id
+
+    def _word_session_for_boundary(self) -> int:
+        if (
+            self._active_word_session_id is None
+            and self.state_manager.context.chars_in_buffer > 0
+        ):
+            return self._ensure_word_session()
+        return self._active_word_session_id or 0
+
+    def _close_word_session(self) -> None:
+        correlation_id = self._active_word_session_id
+        if correlation_id is None:
+            return
+        self._active_word_session_id = None
+        self.conversion.close_trace_session(correlation_id)
