@@ -58,7 +58,7 @@ _STRATEGY_LABEL_KEYS = {
     "disabled": "settings_strategy_disabled",
 }
 _HELP_TOOLTIP_WIDTH_PX = 260
-_HELP_TOOLTIP_FONT_SIZE_PX = 11
+_HELP_TOOLTIP_FONT_SIZE_PX = 13
 
 
 class ConfigDialog(QDialog):

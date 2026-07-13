@@ -649,7 +649,7 @@ class TestConfigDialog:
             tooltip = icon.toolTip()
             assert icon.text() == "ⓘ"
             assert 'width="260"' in tooltip
-            assert 'font-size: 11px' in tooltip
+            assert 'font-size: 13px' in tooltip
             assert escape(t(binding.help_key)) in tooltip
             assert binding.help_key not in tooltip
 
