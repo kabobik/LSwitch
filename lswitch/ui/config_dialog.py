@@ -39,6 +39,7 @@ from lswitch.ui.settings_model import (
     SETTINGS_BINDING_BY_PATH,
     SETTINGS_PAGES,
     SettingsDraftModel,
+    platform_visibility,
 )
 
 
@@ -86,10 +87,12 @@ class ConfigDialog(QDialog):
         self._rendered_values: dict[str, object] = {}
         self._page_widgets: dict[str, object] = {}
         self._dictionary_status_labels: dict[str, QLabel] = {}
+        self._platform_warning_label = None
         self._loading = False
         self._applying = False
         self._last_error: str | None = None
         self._subscribed = False
+        self._session_type = self._current_session_type()
 
         self.setWindowTitle(t("settings_title"))
         if hasattr(self, "setMinimumSize"):
@@ -98,6 +101,7 @@ class ConfigDialog(QDialog):
             self.setMinimumWidth(720)
 
         self._build_ui()
+        self._apply_platform_visibility()
         self._auto_switch_cb = self._widgets["auto_switch"]
         self._threshold_spin = self._widgets["auto_switch_threshold"]
         self._user_dict_cb = self._widgets["user_dict_enabled"]
@@ -197,11 +201,19 @@ class ConfigDialog(QDialog):
                 QLabel(t("settings_platform")),
                 QLabel(self._platform_description()),
             )
+            if self._session_type == "unknown":
+                self._platform_warning_label = QLabel(
+                    t("settings_platform_unknown_warning")
+                )
+                if hasattr(self._platform_warning_label, "setWordWrap"):
+                    self._platform_warning_label.setWordWrap(True)
+                form.addRow(QLabel(""), self._platform_warning_label)
         elif page == PAGE_SELECTION:
+            self._strategy_help_label = QLabel("")
             self._strategy_help = QLabel("")
             if hasattr(self._strategy_help, "setWordWrap"):
                 self._strategy_help.setWordWrap(True)
-            form.addRow(QLabel(""), self._strategy_help)
+            form.addRow(self._strategy_help_label, self._strategy_help)
         elif page == PAGE_ADVANCED:
             path = self.config.config_path if self.config is not None else ""
             path_widget = QLineEdit(path)
@@ -370,6 +382,25 @@ class ConfigDialog(QDialog):
             self._strategy_help.setText(
                 t(f"settings_strategy_help_{strategy}")
             )
+
+    def _apply_platform_visibility(self) -> None:
+        visible_paths = platform_visibility(self._session_type)
+        for path, group in self._control_groups.items():
+            visible = visible_paths[path]
+            for item in group:
+                if hasattr(item, "setVisible"):
+                    item.setVisible(visible)
+                elif visible and hasattr(item, "show"):
+                    item.show()
+                elif not visible and hasattr(item, "hide"):
+                    item.hide()
+        wayland_visible = visible_paths["wayland_selection_strategy"]
+        for item in (
+            getattr(self, "_strategy_help_label", None),
+            getattr(self, "_strategy_help", None),
+        ):
+            if item is not None and hasattr(item, "setVisible"):
+                item.setVisible(wayland_visible)
 
     def _update_dirty_state(self) -> None:
         if hasattr(self._apply_btn, "setEnabled"):
@@ -549,11 +580,23 @@ class ConfigDialog(QDialog):
 
     def _platform_description(self) -> str:
         platform = getattr(self.app, "_platform", None)
-        session = getattr(platform, "session_type", "")
         compositor = getattr(platform, "compositor", "")
-        if session:
-            return f"{session} / {compositor or 'unknown'}"
-        return os.environ.get("XDG_SESSION_TYPE", "unknown") or "unknown"
+        if self._session_type != "unknown":
+            return f"{self._session_type} / {compositor or 'unknown'}"
+        return "unknown"
+
+    def _current_session_type(self) -> str:
+        platform = getattr(self.app, "_platform", None)
+        session = getattr(platform, "session_type", "")
+        if isinstance(session, str):
+            normalized = session.strip().lower()
+            if normalized in {"x11", "wayland"}:
+                return normalized
+
+        from lswitch.platform.platform_factory import detect_session_type
+
+        detected = detect_session_type()
+        return detected if detected in {"x11", "wayland"} else "unknown"
 
     def _trace_override_active(self) -> bool:
         logging_controller = getattr(self.app, "logging_controller", None)

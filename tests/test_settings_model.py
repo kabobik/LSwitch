@@ -15,6 +15,7 @@ from lswitch.ui.settings_model import (
     dotted_get,
     dotted_set,
     merge_dirty_paths,
+    platform_visibility,
 )
 
 
@@ -177,6 +178,34 @@ def test_dependency_matrix(updates, path, expected):
     values.update(updates)
 
     assert dependency_enabled(values)[path] is expected
+
+
+@pytest.mark.parametrize(
+    ("session_type", "visible_platform", "hidden_platform"),
+    [
+        ("x11", "x11", "wayland"),
+        ("wayland", "wayland", "x11"),
+    ],
+)
+def test_platform_visibility_hides_only_inactive_environment(
+    session_type,
+    visible_platform,
+    hidden_platform,
+):
+    visibility = platform_visibility(session_type)
+
+    for binding in SETTINGS_BINDINGS:
+        if binding.platforms == (visible_platform,):
+            assert visibility[binding.path] is True
+        elif binding.platforms == (hidden_platform,):
+            assert visibility[binding.path] is False
+        elif not binding.platforms:
+            assert visibility[binding.path] is True
+
+
+@pytest.mark.parametrize("session_type", [None, "", "unknown", "other"])
+def test_unknown_platform_keeps_every_setting_visible(session_type):
+    assert all(platform_visibility(session_type).values())
 
 
 def test_dotted_helpers_and_merge_do_not_alias_nested_values():

@@ -33,6 +33,7 @@ class SettingsBinding:
     maximum: float | int | None = None
     decimals: int | None = None
     options: tuple[str, ...] = ()
+    platforms: tuple[str, ...] = ()
 
 
 def _binding(
@@ -44,6 +45,7 @@ def _binding(
     maximum=None,
     decimals=None,
     options=(),
+    platforms=(),
 ) -> SettingsBinding:
     return SettingsBinding(
         path=path,
@@ -54,6 +56,7 @@ def _binding(
         maximum=maximum,
         decimals=decimals,
         options=tuple(options),
+        platforms=tuple(platforms),
     )
 
 
@@ -76,18 +79,19 @@ SETTINGS_BINDINGS: tuple[SettingsBinding, ...] = (
         PAGE_SELECTION,
         "choice",
         options=("auto", "clipboard_copy", "primary_selection", "disabled"),
+        platforms=("wayland",),
     ),
-    _binding("x11_selection_timing.poll_interval", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
-    _binding("x11_selection_timing.paste_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
-    _binding("x11_selection_timing.restore_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
-    _binding("x11_selection_timing.expand_selection_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
-    _binding("wayland_timing.wl_clipboard_timeout", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
-    _binding("wayland_selection_timing.copy_wait_timeout", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
-    _binding("wayland_selection_timing.copy_poll_interval", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
-    _binding("wayland_selection_timing.copy_retry_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
-    _binding("wayland_selection_timing.paste_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
-    _binding("wayland_selection_timing.restore_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
-    _binding("wayland_selection_timing.expand_selection_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6),
+    _binding("x11_selection_timing.poll_interval", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("x11",)),
+    _binding("x11_selection_timing.paste_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("x11",)),
+    _binding("x11_selection_timing.restore_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("x11",)),
+    _binding("x11_selection_timing.expand_selection_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("x11",)),
+    _binding("wayland_timing.wl_clipboard_timeout", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("wayland",)),
+    _binding("wayland_selection_timing.copy_wait_timeout", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("wayland",)),
+    _binding("wayland_selection_timing.copy_poll_interval", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("wayland",)),
+    _binding("wayland_selection_timing.copy_retry_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("wayland",)),
+    _binding("wayland_selection_timing.paste_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("wayland",)),
+    _binding("wayland_selection_timing.restore_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("wayland",)),
+    _binding("wayland_selection_timing.expand_selection_delay", PAGE_SELECTION, "float", minimum=0.0, maximum=30.0, decimals=6, platforms=("wayland",)),
     _binding("debug", PAGE_ADVANCED, "bool"),
     _binding("timing.key_press_delay", PAGE_ADVANCED, "float", minimum=0.0, maximum=30.0, decimals=6),
     _binding("timing.key_repeat_delay", PAGE_ADVANCED, "float", minimum=0.0, maximum=30.0, decimals=6),
@@ -100,6 +104,25 @@ SETTINGS_BINDINGS: tuple[SettingsBinding, ...] = (
 SETTINGS_BINDING_BY_PATH = {
     binding.path: binding for binding in SETTINGS_BINDINGS
 }
+
+
+def platform_visibility(session_type: str | None) -> dict[str, bool]:
+    """Return visible settings for x11/wayland; unknown keeps all visible."""
+    normalized = (
+        session_type.strip().lower()
+        if isinstance(session_type, str)
+        else "unknown"
+    )
+    if normalized not in {"x11", "wayland"}:
+        normalized = "unknown"
+    return {
+        binding.path: (
+            not binding.platforms
+            or normalized == "unknown"
+            or normalized in binding.platforms
+        )
+        for binding in SETTINGS_BINDINGS
+    }
 
 
 def dotted_get(values: dict, path: str, default=None):

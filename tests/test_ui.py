@@ -63,6 +63,7 @@ def _build_pyqt6_mocks():
             self._visible = True
         def setEnabled(self, value): self._enabled = bool(value)
         def isEnabled(self): return self._enabled
+        def setVisible(self, value): self._visible = bool(value)
         def setToolTip(self, value): self._tooltip = value
         def toolTip(self): return self._tooltip
         def show(self): self._visible = True
@@ -630,6 +631,100 @@ class TestConfigDialog:
 
         assert dlg._stack.count() == 5
         assert len(dlg._widgets) == 33
+
+    def test_x11_hides_wayland_settings(self, config_mgr, event_bus_ui):
+        owner = types.SimpleNamespace(
+            _platform=types.SimpleNamespace(
+                session_type="x11",
+                compositor="test",
+            ),
+            system_dictionary_statuses=(),
+        )
+
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui, app=owner)
+
+        for path, group in dlg._control_groups.items():
+            if path == "wayland_selection_strategy" or path.startswith(
+                ("wayland_timing.", "wayland_selection_timing.")
+            ):
+                assert all(not item.isVisible() for item in group)
+            elif path.startswith("x11_selection_timing."):
+                assert all(item.isVisible() for item in group)
+        assert dlg._strategy_help.isVisible() is False
+        assert dlg._platform_warning_label is None
+
+    def test_wayland_hides_x11_settings(self, config_mgr, event_bus_ui):
+        owner = types.SimpleNamespace(
+            _platform=types.SimpleNamespace(
+                session_type="wayland",
+                compositor="kde",
+            ),
+            system_dictionary_statuses=(),
+        )
+
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui, app=owner)
+
+        for path, group in dlg._control_groups.items():
+            if path.startswith("x11_selection_timing."):
+                assert all(not item.isVisible() for item in group)
+            elif path == "wayland_selection_strategy" or path.startswith(
+                ("wayland_timing.", "wayland_selection_timing.")
+            ):
+                assert all(item.isVisible() for item in group)
+        assert dlg._strategy_help.isVisible() is True
+        assert dlg._platform_warning_label is None
+
+    def test_unknown_session_shows_all_settings_and_warning(
+        self,
+        config_mgr,
+        event_bus_ui,
+        monkeypatch,
+    ):
+        from lswitch.i18n import t
+
+        for key in ("XDG_SESSION_TYPE", "WAYLAND_DISPLAY", "DISPLAY"):
+            monkeypatch.delenv(key, raising=False)
+        owner = types.SimpleNamespace(
+            _platform=None,
+            system_dictionary_statuses=(),
+        )
+
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui, app=owner)
+
+        assert dlg._session_type == "unknown"
+        assert all(
+            item.isVisible()
+            for group in dlg._control_groups.values()
+            for item in group
+        )
+        assert dlg._platform_warning_label is not None
+        assert (
+            dlg._platform_warning_label.text()
+            == t("settings_platform_unknown_warning")
+        )
+
+    def test_hidden_platform_values_are_preserved_on_apply(
+        self,
+        config_mgr,
+        event_bus_ui,
+    ):
+        config_mgr.set(
+            "wayland_timing",
+            {"wl_clipboard_timeout": 2.75},
+        )
+        owner = types.SimpleNamespace(
+            _platform=types.SimpleNamespace(
+                session_type="x11",
+                compositor="test",
+            ),
+            system_dictionary_statuses=(),
+        )
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui, app=owner)
+        dlg._widgets["debug"].setChecked(True)
+
+        assert dlg.apply() is True
+
+        assert config_mgr.get("wayland_timing")["wl_clipboard_timeout"] == 2.75
 
     def test_shows_effective_system_dictionary_paths_and_counts(
         self,
