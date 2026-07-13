@@ -8,17 +8,25 @@ from typing import TYPE_CHECKING
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSplitter, QPushButton,
+    QSplitter, QPushButton, QTabWidget,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QFont
 
 from lswitch.core.events import Event, EventType
+from lswitch.i18n import t
 from lswitch.input.key_mapper import keycode_to_char
+from lswitch.ui.conversion_trace_tab import ConversionTraceTab
 
 if TYPE_CHECKING:
     from lswitch.app import LSwitchApp
+    from lswitch.core.decision_trace import DecisionTraceRecorder
     from lswitch.core.event_bus import EventBus
+
+
+def _localized(key: str, fallback: str) -> str:
+    value = t(key)
+    return fallback if value == key else value
 
 
 class DebugMonitorWindow(QWidget):
@@ -33,10 +41,20 @@ class DebugMonitorWindow(QWidget):
 
     MAX_LOG_LINES = 200
 
-    def __init__(self, app: "LSwitchApp", event_bus: "EventBus"):
+    def __init__(
+        self,
+        app: "LSwitchApp",
+        event_bus: "EventBus",
+        trace_recorder: "DecisionTraceRecorder | None" = None,
+    ):
         super().__init__()
         self._app = app
         self._event_bus = event_bus
+        self._trace_recorder = trace_recorder or getattr(
+            app,
+            "trace_recorder",
+            None,
+        )
         self._log_lines = 0
         self._selection_display_text = ""
         self._selection_display_owner_id = 0
@@ -65,6 +83,18 @@ class DebugMonitorWindow(QWidget):
         mono_font.setStyleHint(QFont.StyleHint.Monospace)
 
         main_layout = QVBoxLayout(self)
+        self._tabs = QTabWidget()
+        self._conversion_trace_tab = ConversionTraceTab(
+            trace_recorder=self._trace_recorder,
+            event_bus=self._event_bus,
+        )
+        self._tabs.addTab(
+            self._conversion_trace_tab,
+            _localized("debug_monitor_tab_conversions", "Conversions"),
+        )
+
+        self._state_tab = QWidget()
+        state_tab_layout = QVBoxLayout(self._state_tab)
 
         # Use splitter for resizable sections
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -207,7 +237,13 @@ class DebugMonitorWindow(QWidget):
         splitter.setStretchFactor(4, 1)  # selection
         splitter.setStretchFactor(5, 3)  # log
 
-        main_layout.addWidget(splitter)
+        state_tab_layout.addWidget(splitter)
+        self._tabs.addTab(
+            self._state_tab,
+            _localized("debug_monitor_tab_state", "State"),
+        )
+        self._tabs.setCurrentIndex(0)
+        main_layout.addWidget(self._tabs)
 
     def _connect_signals(self):
         """Connect internal signals to slots."""
@@ -541,11 +577,13 @@ class DebugMonitorWindow(QWidget):
 
     def closeEvent(self, event):
         """Handle window close — cleanup subscriptions."""
+        self._conversion_trace_tab.cleanup()
         self._age_timer.stop()
         self._unsubscribe_events()
         super().closeEvent(event)
 
     def cleanup(self):
         """Manual cleanup for external use."""
+        self._conversion_trace_tab.cleanup()
         self._age_timer.stop()
         self._unsubscribe_events()

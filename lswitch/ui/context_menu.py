@@ -221,6 +221,11 @@ class ContextMenu:
                 self._debug_monitor = DebugMonitorWindow(
                     app=self._app,
                     event_bus=self.event_bus,
+                    trace_recorder=getattr(
+                        self._app,
+                        "trace_recorder",
+                        None,
+                    ),
                 )
             self._debug_monitor.show()
             self._debug_monitor.raise_()
