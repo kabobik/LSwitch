@@ -1759,6 +1759,62 @@ def test_create_mid_word_detection_runtime_uses_configured_prefix_len():
     assert runtime.mid_word_detector.prefix_dictionary is runtime.prefix_dictionary
 
 
+def test_disabled_mid_word_runtime_does_not_load_system_dictionaries(monkeypatch):
+    dictionary = MagicMock()
+    dictionary.words_for_lang.side_effect = lambda lang: {
+        "en": {"hello"},
+        "ru": {"привет"},
+    }.get(lang, set())
+    loader = MagicMock()
+    monkeypatch.setattr(
+        "lswitch.intelligence.system_dictionary_loader.SystemDictionaryLoader",
+        MagicMock(return_value=loader),
+    )
+
+    runtime = create_mid_word_detection_runtime(
+        dictionary=dictionary,
+        auto_switch_mid_word=False,
+        system_dict_enabled=True,
+    )
+
+    loader.load.assert_not_called()
+    assert runtime.prefix_dictionary.in_lang("en", "hello") is True
+
+
+def test_enabled_mid_word_runtime_loads_system_dictionaries_and_user_protection(
+    monkeypatch,
+):
+    dictionary = MagicMock()
+    dictionary.words_for_lang.side_effect = lambda lang: {
+        "en": {"hello"},
+        "ru": {"привет"},
+    }.get(lang, set())
+    loader = MagicMock()
+    loader.load.side_effect = lambda lang: types.SimpleNamespace(
+        words={"world"} if lang == "en" else {"пример"},
+    )
+    loader_factory = MagicMock(return_value=loader)
+    monkeypatch.setattr(
+        "lswitch.intelligence.system_dictionary_loader.SystemDictionaryLoader",
+        loader_factory,
+    )
+    user_dict = object()
+
+    runtime = create_mid_word_detection_runtime(
+        dictionary=dictionary,
+        auto_switch_mid_word=True,
+        system_dict_enabled=True,
+        user_dict=user_dict,
+        user_dict_min_weight=5,
+    )
+
+    assert [call.args for call in loader.load.call_args_list] == [("en",), ("ru",)]
+    assert runtime.prefix_dictionary.in_lang("en", "world") is True
+    assert runtime.prefix_dictionary.in_lang("ru", "пример") is True
+    assert runtime.mid_word_detector.user_dict is user_dict
+    assert runtime.mid_word_detector.user_dict_min_weight == 5
+
+
 def test_create_input_device_runtime_wires_device_services():
     fake_evdev = types.ModuleType("evdev")
     fake_ecodes = types.ModuleType("evdev.ecodes")
@@ -1863,6 +1919,7 @@ def test_create_platform_runtime_components_wires_platform_conversion_and_input(
         event_bus=event_bus,
         user_dict=user_dict,
         user_dict_min_weight=7,
+        auto_switch_mid_word=True,
         mid_word_min_prefix_len=5,
         system_dict_enabled=True,
         system_dict_en_path="/tmp/en_US.dic",
@@ -1891,6 +1948,7 @@ def test_create_platform_runtime_components_wires_platform_conversion_and_input(
         user_dict_min_weight=7,
         debug=True,
         timing=timing,
+        auto_switch_mid_word=True,
         mid_word_min_prefix_len=5,
         system_dict_enabled=True,
         system_dict_en_path="/tmp/en_US.dic",

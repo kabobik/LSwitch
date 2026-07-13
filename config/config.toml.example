@@ -8,6 +8,14 @@ layout_switch_key = "Alt_L+Shift_L"
 auto_switch = true
 auto_switch_threshold = 10
 
+# Aggressive opt-in mode: switch layout before the current word is finished.
+auto_switch_mid_word = false
+mid_word_min_prefix_len = 4
+# System dictionaries are loaded only while mid-word switching is enabled.
+system_dict_enabled = true
+system_dict_en_path = ""
+system_dict_ru_path = ""
+
 user_dict_enabled = true
 user_dict_auto_confirm = false
 user_dict_min_weight = 2

@@ -20,10 +20,11 @@ KEY_A = 30
 KEY_LEFTSHIFT = 42
 
 
-def _event(event_type: EventType) -> Event:
+def _event(event_type: EventType, code: int = KEY_A) -> Event:
+    value = 0 if event_type == EventType.KEY_RELEASE else 1
     return Event(
         type=event_type,
-        data=KeyEventData(code=30, value=1, device_name="test"),
+        data=KeyEventData(code=code, value=value, device_name="test"),
         timestamp=0.0,
     )
 
@@ -98,7 +99,7 @@ def test_input_router_handles_regular_key_press():
     clear_last_retype_events.assert_called_once()
 
 
-def test_input_router_tries_mid_word_auto_conversion_after_regular_key_press():
+def test_input_router_tries_mid_word_auto_conversion_after_regular_key_release():
     try_mid_word_auto_conversion = MagicMock(return_value=True)
     router, state_manager, selection_tracker = _router(
         mid_word_auto_conversion_enabled=lambda: True,
@@ -107,9 +108,69 @@ def test_input_router_tries_mid_word_auto_conversion_after_regular_key_press():
 
     router.on_key_press(_event(EventType.KEY_PRESS))
 
+    try_mid_word_auto_conversion.assert_not_called()
+    router.on_key_release(_event(EventType.KEY_RELEASE))
+
     try_mid_word_auto_conversion.assert_called_once()
     assert state_manager.context.chars_in_buffer == 1
     assert selection_tracker.repeat_valid is False
+
+
+def test_input_router_waits_until_all_pressed_text_keys_are_released():
+    try_mid_word_auto_conversion = MagicMock(return_value=False)
+    router, _state_manager, _selection_tracker = _router(
+        mid_word_auto_conversion_enabled=lambda: True,
+        try_mid_word_auto_conversion=try_mid_word_auto_conversion,
+    )
+    key_b = 48
+
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
+    router.on_key_press(_event(EventType.KEY_PRESS, key_b))
+    router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
+
+    try_mid_word_auto_conversion.assert_not_called()
+
+    router.on_key_release(_event(EventType.KEY_RELEASE, key_b))
+
+    try_mid_word_auto_conversion.assert_called_once()
+
+
+def test_input_router_cancels_deferred_mid_word_check_at_space_boundary():
+    try_mid_word_auto_conversion = MagicMock(return_value=False)
+    router, _state_manager, _selection_tracker = _router(
+        mid_word_auto_conversion_enabled=lambda: True,
+        try_mid_word_auto_conversion=try_mid_word_auto_conversion,
+    )
+    space = Event(
+        type=EventType.KEY_PRESS,
+        data=KeyEventData(code=KEY_SPACE, value=1, device_name="test"),
+        timestamp=0.0,
+    )
+
+    router.on_key_press(_event(EventType.KEY_PRESS))
+    router.on_key_press(space)
+    router.on_key_release(_event(EventType.KEY_RELEASE))
+
+    try_mid_word_auto_conversion.assert_not_called()
+
+
+def test_input_router_cancels_deferred_mid_word_check_after_key_repeat():
+    try_mid_word_auto_conversion = MagicMock(return_value=False)
+    router, _state_manager, _selection_tracker = _router(
+        mid_word_auto_conversion_enabled=lambda: True,
+        try_mid_word_auto_conversion=try_mid_word_auto_conversion,
+    )
+    repeat = Event(
+        type=EventType.KEY_REPEAT,
+        data=KeyEventData(code=KEY_A, value=2, device_name="test"),
+        timestamp=0.0,
+    )
+
+    router.on_key_press(_event(EventType.KEY_PRESS))
+    router.on_key_repeat(repeat)
+    router.on_key_release(_event(EventType.KEY_RELEASE))
+
+    try_mid_word_auto_conversion.assert_not_called()
 
 
 def test_input_router_handles_backspace_press():

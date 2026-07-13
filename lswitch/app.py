@@ -129,6 +129,7 @@ class LSwitchApp:
         self.auto_detector = None
         self.mid_word_detector = None
         self.user_dict = None
+        self._mid_word_runtime_signature = None
         self._platform = None
         self._selection_poller: SelectionPollerThread | None = None
 
@@ -160,6 +161,10 @@ class LSwitchApp:
             event_bus=self.event_bus,
             user_dict=self.user_dict,
             user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
+            auto_switch_mid_word=self.config.get(
+                'auto_switch_mid_word',
+                False,
+            ),
             mid_word_min_prefix_len=self.config.get('mid_word_min_prefix_len', 4),
             system_dict_enabled=self.config.get('system_dict_enabled', True),
             system_dict_en_path=self.config.get('system_dict_en_path', ''),
@@ -177,6 +182,9 @@ class LSwitchApp:
         self.auto_detector = conversion_runtime.auto_detector
         self.mid_word_detector = conversion_runtime.mid_word_detector
         self.conversion_engine = conversion_runtime.conversion_engine
+        self._mid_word_runtime_signature = (
+            self._current_mid_word_runtime_signature()
+        )
         sync_user_dictionary_components(
             user_dict=self.user_dict,
             user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
@@ -238,15 +246,38 @@ class LSwitchApp:
         """Rebuild mid-word detection runtime after relevant config changes."""
         if self.dictionary is None:
             return
+        signature = self._current_mid_word_runtime_signature()
+        if signature == self._mid_word_runtime_signature:
+            return
         mid_word_runtime = create_mid_word_detection_runtime(
             dictionary=self.dictionary,
+            auto_switch_mid_word=self.config.get('auto_switch_mid_word', False),
             mid_word_min_prefix_len=self.config.get('mid_word_min_prefix_len', 4),
             system_dict_enabled=self.config.get('system_dict_enabled', True),
             system_dict_en_path=self.config.get('system_dict_en_path', ''),
             system_dict_ru_path=self.config.get('system_dict_ru_path', ''),
+            user_dict=self.user_dict,
+            user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
         )
         self.prefix_dictionary = mid_word_runtime.prefix_dictionary
         self.mid_word_detector = mid_word_runtime.mid_word_detector
+        self._mid_word_runtime_signature = signature
+
+    def _current_mid_word_runtime_signature(self) -> tuple:
+        """Return config inputs that require rebuilding the prefix detector."""
+        enabled = bool(self.config.get('auto_switch_mid_word', False))
+        include_system = enabled and bool(
+            self.config.get('system_dict_enabled', True)
+        )
+        return (
+            enabled,
+            self.config.get('mid_word_min_prefix_len', 4),
+            include_system,
+            self.config.get('system_dict_en_path', '') if include_system else '',
+            self.config.get('system_dict_ru_path', '') if include_system else '',
+            id(self.user_dict),
+            self.config.get('user_dict_min_weight', 2),
+        )
 
     # ------------------------------------------------------------------
     # Event callbacks

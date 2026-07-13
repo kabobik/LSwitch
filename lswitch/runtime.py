@@ -252,6 +252,7 @@ def create_conversion_runtime(
     user_dict_min_weight: int,
     debug: bool,
     timing: dict,
+    auto_switch_mid_word: bool = False,
     mid_word_min_prefix_len: int = 4,
     system_dict_enabled: bool = False,
     system_dict_en_path: str = "",
@@ -262,10 +263,13 @@ def create_conversion_runtime(
     ngrams = NgramAnalyzer()
     mid_word_runtime = create_mid_word_detection_runtime(
         dictionary=dictionary,
+        auto_switch_mid_word=auto_switch_mid_word,
         mid_word_min_prefix_len=mid_word_min_prefix_len,
         system_dict_enabled=system_dict_enabled,
         system_dict_en_path=system_dict_en_path,
         system_dict_ru_path=system_dict_ru_path,
+        user_dict=user_dict,
+        user_dict_min_weight=user_dict_min_weight,
     )
     return ConversionRuntimeComponents(
         dictionary=dictionary,
@@ -294,10 +298,13 @@ def create_conversion_runtime(
 def create_mid_word_detection_runtime(
     *,
     dictionary,
+    auto_switch_mid_word: bool = True,
     mid_word_min_prefix_len: int = 4,
     system_dict_enabled: bool = False,
     system_dict_en_path: str = "",
     system_dict_ru_path: str = "",
+    user_dict=None,
+    user_dict_min_weight: int = 2,
 ) -> MidWordDetectionRuntime:
     """Create prefix dictionary and mid-word detector for current config."""
     from lswitch.intelligence.mid_word_detector import MidWordDetector
@@ -314,13 +321,15 @@ def create_mid_word_detection_runtime(
         dictionary,
         min_prefix_len=mid_word_min_prefix_len,
         system_loader=system_loader,
-        include_system=system_dict_enabled,
+        include_system=bool(auto_switch_mid_word and system_dict_enabled),
     )
     return MidWordDetectionRuntime(
         prefix_dictionary=prefix_dictionary,
         mid_word_detector=MidWordDetector(
             prefix_dictionary,
             min_prefix_len=mid_word_min_prefix_len,
+            user_dict=user_dict,
+            user_dict_min_weight=user_dict_min_weight,
         ),
     )
 
@@ -363,6 +372,7 @@ def create_platform_runtime_components(
     event_bus: EventBus,
     user_dict,
     user_dict_min_weight: int,
+    auto_switch_mid_word: bool = False,
     mid_word_min_prefix_len: int = 4,
     system_dict_enabled: bool = False,
     system_dict_en_path: str = "",
@@ -389,6 +399,7 @@ def create_platform_runtime_components(
         user_dict_min_weight=user_dict_min_weight,
         debug=debug,
         timing=timing,
+        auto_switch_mid_word=auto_switch_mid_word,
         mid_word_min_prefix_len=mid_word_min_prefix_len,
         system_dict_enabled=system_dict_enabled,
         system_dict_en_path=system_dict_en_path,

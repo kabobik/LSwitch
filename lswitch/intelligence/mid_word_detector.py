@@ -29,10 +29,14 @@ class MidWordDetector:
         *,
         min_prefix_len: int = 4,
         min_target_prefix_count: int = 1,
+        user_dict=None,
+        user_dict_min_weight: int = 2,
     ):
         self.prefix_dictionary = prefix_dictionary
         self.min_prefix_len = min_prefix_len
         self.min_target_prefix_count = min_target_prefix_count
+        self.user_dict = user_dict
+        self.user_dict_min_weight = max(1, int(user_dict_min_weight))
 
     def should_switch(
         self,
@@ -114,6 +118,23 @@ class MidWordDetector:
                 target_prefix_count=target_count,
             )
 
+        protected = self._find_protected_prefix(typed_prefix, current_lang)
+        if protected is not None:
+            protected_prefix, weight = protected
+            return MidWordDecision(
+                False,
+                (
+                    "user dictionary protects prefix "
+                    f"{protected_prefix!r}: weight={weight}"
+                ),
+                current_lang,
+                target_lang=target_lang,
+                typed_prefix=typed_prefix,
+                converted_prefix=converted_prefix,
+                source_prefix_count=source_count,
+                target_prefix_count=target_count,
+            )
+
         return MidWordDecision(
             True,
             "target prefix found and source prefix absent",
@@ -124,6 +145,25 @@ class MidWordDetector:
             source_prefix_count=source_count,
             target_prefix_count=target_count,
         )
+
+    def _find_protected_prefix(
+        self,
+        typed_prefix: str,
+        current_lang: str,
+    ) -> tuple[str, int] | None:
+        """Return a user-rejected prefix that protects this input subtree."""
+        if self.user_dict is None:
+            return None
+
+        for end in range(self.min_prefix_len, len(typed_prefix) + 1):
+            candidate = typed_prefix[:end]
+            try:
+                weight = int(self.user_dict.get_weight(candidate, current_lang))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if weight <= -self.user_dict_min_weight:
+                return candidate, weight
+        return None
 
     @staticmethod
     def _valid_en_layout_prefix(prefix: str) -> bool:

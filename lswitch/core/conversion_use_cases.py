@@ -580,6 +580,12 @@ class MidWordAutoConversionUseCase:
             )
 
         direction = "en_to_ru" if candidate.current_lang == "en" else "ru_to_en"
+        logger.info(
+            "Mid-word auto-convert: %r → %s (%s)",
+            candidate.text,
+            direction,
+            decision.reason,
+        )
         target = self.layout_service.find_available_layout_for_lang(
             decision.target_lang
         )

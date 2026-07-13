@@ -158,6 +158,15 @@ layout_switch_key = "Alt_L+Shift_L"
 auto_switch = false
 # Minimum detector confidence for automatic conversion.
 auto_switch_threshold = 40
+# Enable layout switching before the current word is finished.
+auto_switch_mid_word = false
+# Minimum prefix length before mid-word detection starts.
+mid_word_min_prefix_len = 4
+# Use system Hunspell/MySpell dictionaries while mid-word mode is enabled.
+system_dict_enabled = true
+# Optional explicit .dic paths; empty values enable auto-discovery.
+system_dict_en_path = ""
+system_dict_ru_path = ""
 # Enable the self-learning user dictionary.
 user_dict_enabled = true
 # Automatically confirm accepted auto-conversions in the user dictionary.
@@ -223,6 +232,13 @@ expand_selection_delay = 0.2
 - `debug` — отладочные сообщения + пункт Debug Monitor в трее
 - `auto_switch` — автоматически определять и конвертировать раскладку
 - `auto_switch_threshold` — порог уверенности авто-детектора (%)
+- `auto_switch_mid_word` — переключать раскладку до завершения слова; агрессивный
+  opt-in режим, по умолчанию выключен
+- `mid_word_min_prefix_len` — минимальная длина префикса для mid-word проверки
+- `system_dict_enabled` — подмешивать системные Hunspell/MySpell словари только
+  при включенном mid-word режиме
+- `system_dict_en_path`, `system_dict_ru_path` — необязательные явные пути к
+  английскому и русскому `.dic`; пустые значения включают автоопределение
 - `user_dict_enabled` — самообучающийся словарь
 - `user_dict_auto_confirm` — записывать в словарь молчаливое принятие авто-конвертации на следующем пробеле; по умолчанию выключено
 - `wayland_selection_strategy` — стратегия selection-конвертации на Wayland:
@@ -234,6 +250,14 @@ expand_selection_delay = 0.2
 - `[x11_selection_timing]` — X11-only задержки polling, expand, paste и restore для selection
 - `[wayland_timing]` — Wayland-only системные задержки clipboard backend-а
 - `[wayland_selection_timing]` — Wayland-only задержки copy/paste/restore и expand для selection
+
+Для первой проверки mid-word режима включите `auto_switch_mid_word = true`.
+Он работает независимо от `auto_switch`, который отвечает за конвертацию после
+нажатия пробела.
+LSwitch использует встроенный EN/RU словарь и, если доступно и разрешено,
+добавляет `/usr/share/hunspell/*.dic` или MySpell-словари. Большие системные
+индексы не загружаются, пока mid-word режим выключен. Сценарии проверки описаны
+в `docs/PLANS/MID_WORD_SYSTEM_DICTIONARY_PLAN.md`.
 
 Пользовательский словарь хранится отдельно: `~/.config/lswitch/user_dict.toml`.
 Он запоминает не "правильные слова", а решения для текста, набранного в конкретной раскладке:

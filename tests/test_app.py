@@ -159,6 +159,28 @@ class TestRuntimeConfig:
         assert app.prefix_dictionary.has_prefix("en", "hello") is True
         assert app.mid_word_detector.min_prefix_len == 5
 
+    def test_unrelated_config_change_does_not_rebuild_mid_word_runtime(self):
+        app = _make_app()
+        app.dictionary = MagicMock()
+        app._mid_word_runtime_signature = app._current_mid_word_runtime_signature()
+
+        with patch("lswitch.app.create_mid_word_detection_runtime") as create_runtime:
+            app._apply_mid_word_runtime_config()
+
+        create_runtime.assert_not_called()
+
+    def test_mid_word_runtime_receives_current_user_dictionary(self):
+        app = _make_app()
+        app.dictionary = MagicMock()
+        app.user_dict = object()
+        app.config.set("auto_switch_mid_word", True)
+        app.config.set("user_dict_min_weight", 4)
+
+        app._apply_mid_word_runtime_config()
+
+        assert app.mid_word_detector.user_dict is app.user_dict
+        assert app.mid_word_detector.user_dict_min_weight == 4
+
 
 class TestDoConversion:
     """_do_conversion calls ConversionEngine.convert()."""

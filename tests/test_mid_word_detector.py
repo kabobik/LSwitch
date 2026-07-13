@@ -83,3 +83,41 @@ def test_mid_word_detector_requires_target_prefix_count_threshold():
     assert decision.should_switch is False
     assert decision.reason == "target prefix not found"
     assert decision.target_prefix_count == 1
+
+
+class _UserDictionary:
+    def __init__(self, weights: dict[tuple[str, str], int]):
+        self.weights = weights
+
+    def get_weight(self, word: str, lang: str) -> int:
+        return self.weights.get((word, lang), 0)
+
+
+def test_mid_word_detector_respects_user_rejected_prefix():
+    dictionary = PrefixDictionary(ru_words={"привет"})
+    detector = MidWordDetector(
+        dictionary,
+        min_prefix_len=4,
+        user_dict=_UserDictionary({("ghbd", "en"): -2}),
+        user_dict_min_weight=2,
+    )
+
+    decision = detector.should_switch("ghbd", "en")
+
+    assert decision.should_switch is False
+    assert decision.reason == "user dictionary protects prefix 'ghbd': weight=-2"
+
+
+def test_mid_word_detector_protects_continuation_of_user_rejected_prefix():
+    dictionary = PrefixDictionary(ru_words={"приветик"})
+    detector = MidWordDetector(
+        dictionary,
+        min_prefix_len=4,
+        user_dict=_UserDictionary({("ghbd", "en"): -2}),
+        user_dict_min_weight=2,
+    )
+
+    decision = detector.should_switch("ghbdtn", "en")
+
+    assert decision.should_switch is False
+    assert decision.reason == "user dictionary protects prefix 'ghbd': weight=-2"

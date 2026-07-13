@@ -252,6 +252,13 @@ mid-word режим должен быть optional.
   `InputEventRouter`, feature остается выключенной по умолчанию;
 - runtime config reload пересобирает prefix dictionary / detector;
 - Wayland diagnostics показывают наличие EN/RU системных словарей и word counts.
+- системные prefix indexes загружаются только при включенном mid-word режиме;
+- prefix lookup использует компактный sorted-word index без материализации всех
+  возможных строк-префиксов;
+- retype запускается после release всех удерживаемых текстовых клавиш, чтобы
+  compositor не подавлял replay trigger-клавиши как повторный key press;
+- `Shift+Shift` correction защищает сохраненный префикс и его продолжения через
+  user dictionary.
 
 - [x] Добавить `PrefixDictionary` со встроенными `en_words.py` / `ru_words.py`.
 - [x] Добавить unit tests на prefix lookup и неоднозначные префиксы.
@@ -264,9 +271,13 @@ mid-word режим должен быть optional.
    flow после обновления `event_buffer`.
 - [x] Реализовать mid-word switch replay и undo marker.
 - [x] Добавить diagnostics и manual QA сценарии.
+- [x] Не загружать большие системные словари при выключенном mid-word режиме.
+- [x] Убрать memory-heavy `Counter` всех системных префиксов.
+- [x] Не терять trigger-клавишу при mid-word replay.
+- [x] Учитывать user-dictionary protection после ручной отмены.
 
-MVP лучше сначала сделать на встроенных словарях, затем подключать системные.
-Так проще отделить алгоритм от проблем наличия пакетов на конкретной системе.
+Автоматизированная часть MVP готова к ручной KDE/Wayland проверке. Системные
+словари подключаются поверх встроенных только после явного включения feature.
 
 ## 11. Manual QA сценарии
 
@@ -276,6 +287,7 @@ MVP лучше сначала сделать на встроенных слов�
 auto_switch_mid_word = true
 mid_word_min_prefix_len = 4
 system_dict_enabled = true
+user_dict_enabled = true
 ```
 
 Проверить diagnostics:
@@ -322,3 +334,6 @@ lswitch --diagnose-wayland
 3. Сразу нажать `Shift+Shift`.
 4. Ожидаемо: переигранный префикс удален, исходные events восстановлены в
    исходной раскладке, пробел не добавляется.
+5. Снова ввести тот же префикс и продолжить слово.
+6. Ожидаемо: сохраненный correction защищает префикс и его продолжение от
+   повторного mid-word переключения.

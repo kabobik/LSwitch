@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections import Counter
+from bisect import bisect_left
 from collections.abc import Iterable
 
 
 class PrefixDictionary:
-    """Stores full-word and prefix indexes per language."""
+    """Provides full-word and prefix lookup over compact sorted word indexes."""
 
     def __init__(
         self,
@@ -18,12 +18,8 @@ class PrefixDictionary:
     ):
         self.min_prefix_len = max(1, min_prefix_len)
         self._words = {
-            "en": self._normalize_words(en_words or ()),
-            "ru": self._normalize_words(ru_words or ()),
-        }
-        self._prefix_counts = {
-            lang: self._build_prefix_counts(words)
-            for lang, words in self._words.items()
+            "en": tuple(sorted(self._normalize_words(en_words or ()))),
+            "ru": tuple(sorted(self._normalize_words(ru_words or ()))),
         }
 
     @classmethod
@@ -50,7 +46,9 @@ class PrefixDictionary:
         normalized = self._normalize_token(word)
         if not normalized:
             return False
-        return normalized in self._words.get(lang, set())
+        words = self._words.get(lang, ())
+        index = bisect_left(words, normalized)
+        return index < len(words) and words[index] == normalized
 
     def has_prefix(self, lang: str, prefix: str | None) -> bool:
         return self.prefix_count(lang, prefix) > 0
@@ -59,7 +57,10 @@ class PrefixDictionary:
         normalized = self._normalize_token(prefix)
         if not normalized or len(normalized) < self.min_prefix_len:
             return 0
-        return self._prefix_counts.get(lang, Counter()).get(normalized, 0)
+        words = self._words.get(lang, ())
+        start = bisect_left(words, normalized)
+        end = bisect_left(words, normalized + "\U0010ffff")
+        return end - start
 
     @staticmethod
     def _normalize_token(token: str | None) -> str:
@@ -74,13 +75,6 @@ class PrefixDictionary:
             if isinstance(word, str) and word.strip()
         }
         return normalized
-
-    def _build_prefix_counts(self, words: set[str]) -> Counter:
-        counts: Counter[str] = Counter()
-        for word in words:
-            for end in range(self.min_prefix_len, len(word) + 1):
-                counts[word[:end]] += 1
-        return counts
 
     @staticmethod
     def _merge_system_words(words: set[str], system_loader, lang: str) -> set[str]:

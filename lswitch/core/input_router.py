@@ -69,6 +69,7 @@ class InputEventRouter:
         self.selection_tracker = selection_tracker
         self.conversion = conversion
         self.selection = selection
+        self._pressed_text_keys: set[int] = set()
 
     def on_key_press(self, event: Event) -> None:
         data = event.data
@@ -93,6 +94,7 @@ class InputEventRouter:
         elif data.code in MODIFIER_KEYS:
             pass
         elif data.code == KEY_BACKSPACE:
+            self._pressed_text_keys.clear()
             ctx = self.state_manager.context
             self.typed_buffer.pop_event(ctx)
             logger.trace(  # type: ignore[attr-defined]
@@ -103,6 +105,7 @@ class InputEventRouter:
             ctx.backspace_repeats = 0
             self._clear_selection_state()
         elif data.code == KEY_SPACE:
+            self._pressed_text_keys.clear()
             if self.conversion.auto_conversion_enabled():
                 if self.conversion.try_auto_conversion_at_space():
                     self.selection_tracker.clear_repeat()
@@ -138,6 +141,19 @@ class InputEventRouter:
         elif data.code == KEY_BACKSPACE:
             self.state_manager.context.backspace_repeats = 0
             self.typed_buffer.decrement_count(self.state_manager.context)
+        elif data.code in self._pressed_text_keys:
+            self._pressed_text_keys.discard(data.code)
+            if (
+                not self._pressed_text_keys
+                and self.conversion.mid_word_auto_conversion_enabled()
+            ):
+                logger.trace(  # type: ignore[attr-defined]
+                    "Mid-word check after key release: code=%d buf=%d",
+                    data.code,
+                    self.state_manager.context.chars_in_buffer,
+                )
+                if self.conversion.try_mid_word_auto_conversion():
+                    self.selection_tracker.clear_repeat()
 
     def on_key_repeat(self, event: Event) -> None:
         data = event.data
@@ -153,8 +169,14 @@ class InputEventRouter:
             self.typed_buffer.decrement_count(ctx)
             if ctx.backspace_repeats >= 3:
                 self.state_manager.on_backspace_hold()
+        elif data.code in self._pressed_text_keys:
+            # The buffer stores one press event, while the focused application
+            # may receive many repeated characters. Retyping that incomplete
+            # buffer would delete/replay the wrong number of characters.
+            self._pressed_text_keys.clear()
 
     def on_mouse_click(self, event: Event) -> None:
+        self._pressed_text_keys.clear()
         self.conversion.clear_last_auto_marker()
         self._clear_selection_state()
         self.selection.prime_baseline_on_click()
@@ -209,9 +231,8 @@ class InputEventRouter:
         )
         self.state_manager.context.backspace_repeats = 0
         self._clear_selection_state()
-        if allow_mid_word and self.conversion.mid_word_auto_conversion_enabled():
-            if self.conversion.try_mid_word_auto_conversion():
-                self.selection_tracker.clear_repeat()
+        if allow_mid_word:
+            self._pressed_text_keys.add(data.code)
 
     def _clear_selection_state(self) -> None:
         self.selection_tracker.set_valid(False)
@@ -219,6 +240,7 @@ class InputEventRouter:
         self.conversion.clear_last_retype_events()
 
     def _handle_navigation(self) -> None:
+        self._pressed_text_keys.clear()
         self.conversion.clear_last_auto_marker()
         self._clear_selection_state()
         self.state_manager.on_navigation()

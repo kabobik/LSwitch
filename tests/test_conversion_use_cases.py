@@ -23,7 +23,9 @@ from lswitch.core.learning_service import PendingManualLearning
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.states import State, StateContext
 from lswitch.core.typed_buffer import TypedBufferService
-from lswitch.intelligence.mid_word_detector import MidWordDecision
+from lswitch.intelligence.mid_word_detector import MidWordDecision, MidWordDetector
+from lswitch.intelligence.prefix_dictionary import PrefixDictionary
+from lswitch.intelligence.user_dictionary import UserDictionary
 from lswitch.input.key_mapper import keycode_to_char
 from lswitch.platform.xkb_adapter import LayoutInfo
 
@@ -92,6 +94,39 @@ def test_undo_auto_conversion_without_space_does_not_readd_space():
     assert ok is True
     virtual_kb.tap_key.assert_called_once_with(KEY_BACKSPACE, n_times=3)
     virtual_kb.replay_events.assert_called_once_with([])
+
+
+def test_mid_word_undo_persists_protection_for_detector(tmp_path):
+    marker = AutoConversionMarker.for_mid_word_conversion(
+        original_word="ghbd",
+        original_lang="en",
+        direction="en_to_ru",
+        word_events=[],
+    )
+    user_dict = UserDictionary(path=str(tmp_path / "user_dict.toml"))
+    virtual_kb = MagicMock()
+    xkb = MagicMock()
+    xkb.get_layouts.return_value = []
+    undo = UndoAutoConversionUseCase(
+        virtual_kb=virtual_kb,
+        xkb=xkb,
+        user_dict=user_dict,
+        timing={"undo_before_replay_delay": 0},
+    )
+
+    assert undo.execute(marker) is True
+
+    detector = MidWordDetector(
+        PrefixDictionary(ru_words={"привет"}),
+        min_prefix_len=4,
+        user_dict=user_dict,
+        user_dict_min_weight=2,
+    )
+    decision = detector.should_switch("ghbd", "en")
+
+    assert user_dict.get_weight("ghbd", "en") == -2
+    assert decision.should_switch is False
+    assert "user dictionary protects prefix" in decision.reason
 
 
 def test_recent_auto_conversion_undo_handles_empty_buffer():
