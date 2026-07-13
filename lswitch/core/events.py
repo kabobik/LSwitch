@@ -21,6 +21,8 @@ class EventType(Enum):
     CONVERSION_START = auto()
     CONVERSION_COMPLETE = auto()
     CONVERSION_CANCELLED = auto()
+    DECISION_TRACE_CHANGED = auto()
+    DECISION_TRACE_CLEARED = auto()
     # Layout
     LAYOUT_CHANGED = auto()
     # Config
