@@ -39,7 +39,6 @@ git clone https://github.com/kabobik/lswitch.git && cd lswitch && bash scripts/i
 | PyQt6 + QtDBus | GUI и KDE Wayland layout backend | **Критично для Wayland** |
 | wl-clipboard | Clipboard fallback для Wayland (`wl-copy`/`wl-paste`) | **Критично для Wayland** |
 | qt6-wayland | Qt Wayland platform plugin | **Критично для Wayland** |
-| systemd | Управление демоном | Рекомендуется |
 
 **Display Server:** X11 и KDE Plasma Wayland
 
@@ -56,8 +55,8 @@ bash scripts/install.sh
 - Установит недостающие пакеты через `apt` на Ubuntu/Debian или `pacman` на Arch Linux
 - Скопирует приложение в `~/.local/share/lswitch/`
 - Создаст команду `lswitch` в `~/.local/bin/`
-- Установит systemd unit, udev правила, иконку, ярлык в меню
-- Предложит включить автозапуск
+- Установит udev правила, иконку, ярлык в меню
+- Предложит включить GUI автозапуск через `~/.config/autostart/`
 
 ⚠️ **После первой установки перелогиньтесь** — права группы `input` применяются только после logout.
 
@@ -88,20 +87,19 @@ sudo apt remove lswitch
 После запуска иконка LSwitch появляется в системном трее. Правая кнопка мыши — меню управления:
 - Переключить авто-конвертацию
 - Переключить самообучающийся словарь
-- Статус systemd сервиса / старт / стоп / рестарт
+- Статус текущего процесса
 - Debug Monitor (если `"debug": true` в конфиге)
 
-### Управление сервисом
+### Автозапуск
 
 ```bash
-systemctl --user enable --now lswitch  # автозапуск + старт
-systemctl --user disable lswitch       # отключить автозапуск
-systemctl --user start lswitch         # запустить
-systemctl --user stop lswitch          # остановить
-systemctl --user restart lswitch       # перезапустить
-systemctl --user status lswitch        # статус
-journalctl --user-unit=lswitch -f      # следить за логами
+mkdir -p ~/.config/autostart
+cp ~/.local/share/applications/lswitch-control.desktop ~/.config/autostart/
+sed -i "s|^Exec=.*|Exec=$HOME/.local/bin/lswitch --replace|" ~/.config/autostart/lswitch-control.desktop
 ```
+
+`scripts/install.sh` делает это автоматически, если согласиться на включение автозапуска.
+Запуск через desktop autostart предпочтителен для X11/Wayland, потому что процесс наследует окружение пользовательской графической сессии.
 
 ### Запуск вручную (для отладки)
 
@@ -118,7 +116,7 @@ lswitch --diagnose-wayland-switch-test # диагностика + тест пе�
 
 ## Как это работает
 
-1. **Перехват:** Демон слушает все события клавиатуры через `/dev/input/` (evdev)
+1. **Перехват:** LSwitch слушает события клавиатуры через `/dev/input/` (evdev)
 2. **Детектор двойного Shift:** При двух нажатиях Shift с интервалом < `double_click_timeout` сек — срабатывание
 3. **Получение текста:** Извлекает последнее слово из внутреннего буфера событий ИЛИ выделение (X11 PRIMARY)
 4. **Конвертация:** Посимвольное преобразование EN ↔ RU через таблицу маппинга
@@ -140,24 +138,90 @@ lswitch --diagnose-wayland-switch-test # диагностика + тест пе�
 
 ```toml
 # LSwitch configuration
-
-double_click_timeout = 0.3
-switch_layout_after_convert = true
-layout_switch_key = "Alt_L+Shift_L"
-debug = false
-
-auto_switch = false
-auto_switch_threshold = 40
-
-user_dict_enabled = true
-user_dict_min_weight = 2
-
+#
 # Wayland selection strategies:
 #   auto              - read PRIMARY selection first, fallback to clipboard copy/paste
 #   clipboard_copy    - always use clipboard copy/paste flow
 #   primary_selection - read PRIMARY and replace selection by direct UInput typing
 #   disabled          - disable Wayland selection conversion
+
+# Maximum interval between two Shift presses, seconds.
+double_click_timeout = 0.3
+# Enable verbose logging and Debug Monitor tray action.
+debug = false
+# Switch keyboard layout after manual conversion.
+switch_layout_after_convert = true
+# Shortcut used by the system to switch keyboard layout.
+layout_switch_key = "Alt_L+Shift_L"
+# Enable automatic wrong-layout detection and conversion.
+auto_switch = false
+# Minimum detector confidence for automatic conversion.
+auto_switch_threshold = 40
+# Enable layout switching before the current word is finished.
+auto_switch_mid_word = false
+# Minimum prefix length before mid-word detection starts.
+mid_word_min_prefix_len = 4
+# Use system Hunspell/MySpell dictionaries while mid-word mode is enabled.
+system_dict_enabled = true
+# Optional explicit .dic paths; empty values enable auto-discovery.
+system_dict_en_path = ""
+system_dict_ru_path = ""
+# Enable the self-learning user dictionary.
+user_dict_enabled = true
+# Automatically confirm accepted auto-conversions in the user dictionary.
+user_dict_auto_confirm = false
+# Minimum user dictionary score required to affect detection.
+user_dict_min_weight = 2
+# Wayland selection conversion mode.
 wayland_selection_strategy = "auto"
+
+# Common input/conversion timings, seconds.
+[timing]
+# Delay between virtual key press and release.
+key_press_delay = 0.001
+# Delay between successive virtual key taps.
+key_repeat_delay = 0.001
+# After layout switch before replaying typed word.
+retype_before_replay_delay = 0.05
+# After layout switch before direct selection typing.
+direct_type_after_layout_switch_delay = 0.03
+# After layout switch before undo replay.
+undo_before_replay_delay = 0.03
+# After layout switch before auto-conversion replay.
+auto_before_replay_delay = 0.03
+# After auto-conversion replay before final Space handling.
+auto_before_space_delay = 0.01
+
+# X11-only selection timings, seconds.
+[x11_selection_timing]
+# PRIMARY selection polling interval.
+poll_interval = 0.5
+# After writing clipboard before Ctrl+V.
+paste_delay = 0.02
+# After Ctrl+V before restoring clipboard.
+restore_delay = 0.05
+# After Ctrl+Shift+Left before reading PRIMARY.
+expand_selection_delay = 0.05
+
+# Wayland-only system timings, seconds.
+[wayland_timing]
+# Timeout for wl-copy/wl-paste helper commands.
+wl_clipboard_timeout = 1.0
+
+# Wayland-only selection timings, seconds.
+[wayland_selection_timing]
+# Maximum wait for Ctrl+C to update clipboard.
+copy_wait_timeout = 1.0
+# Clipboard poll interval after copy shortcut.
+copy_poll_interval = 0.05
+# Delay before trying fallback copy shortcut.
+copy_retry_delay = 0.1
+# After writing clipboard before Ctrl+V.
+paste_delay = 0.12
+# After Ctrl+V before restoring clipboard.
+restore_delay = 0.15
+# After Ctrl+Shift+Left before reading selection.
+expand_selection_delay = 0.2
 ```
 
 **Параметры:**
@@ -167,18 +231,55 @@ wayland_selection_strategy = "auto"
 - `debug` — отладочные сообщения + пункт Debug Monitor в трее
 - `auto_switch` — автоматически определять и конвертировать раскладку
 - `auto_switch_threshold` — порог уверенности авто-детектора (%)
+- `auto_switch_mid_word` — переключать раскладку до завершения слова; агрессивный
+  opt-in режим, по умолчанию выключен
+- `mid_word_min_prefix_len` — минимальная длина префикса для mid-word проверки
+- `system_dict_enabled` — подмешивать системные Hunspell/MySpell словари только
+  при включенном mid-word режиме
+- `system_dict_en_path`, `system_dict_ru_path` — необязательные явные пути к
+  английскому и русскому `.dic`; пустые значения включают автоопределение
 - `user_dict_enabled` — самообучающийся словарь
+- `user_dict_auto_confirm` — записывать в словарь молчаливое принятие авто-конвертации на следующем пробеле; по умолчанию выключено
 - `wayland_selection_strategy` — стратегия selection-конвертации на Wayland:
   `"auto"` сначала читает PRIMARY без `Ctrl+C`, затем использует clipboard fallback;
   `"clipboard_copy"` всегда использует copy/paste flow;
   `"primary_selection"` читает PRIMARY и заменяет выделение прямым набором без `Ctrl+C/Ctrl+V`;
   `"disabled"` отключает selection-конвертацию на Wayland
+- `[timing]` — общие задержки виртуальной клавиатуры и replay после смены раскладки
+- `[x11_selection_timing]` — X11-only задержки polling, expand, paste и restore для selection
+- `[wayland_timing]` — Wayland-only системные задержки clipboard backend-а
+- `[wayland_selection_timing]` — Wayland-only задержки copy/paste/restore и expand для selection
+
+Для первой проверки mid-word режима включите `auto_switch_mid_word = true`.
+Он работает независимо от `auto_switch`, который отвечает за конвертацию после
+нажатия пробела.
+LSwitch использует встроенный EN/RU словарь и, если доступно и разрешено,
+добавляет `/usr/share/hunspell/*.dic` или MySpell-словари. Большие системные
+индексы не загружаются, пока mid-word режим выключен. Сценарии проверки описаны
+в `docs/PLANS/MID_WORD_SYSTEM_DICTIONARY_PLAN.md`.
+
+Пользовательский словарь хранится отдельно: `~/.config/lswitch/user_dict.toml`.
+Он запоминает не "правильные слова", а решения для текста, набранного в конкретной раскладке:
+
+```toml
+[convert.en]
+"ghbdtn" = 2
+
+[keep.en]
+"hello" = 2
+
+[convert.ru]
+"руддщ" = 2
+
+[keep.ru]
+"привет" = 2
+```
+
+Число — это уверенность. Итоговый score считается как `convert - keep`; когда `abs(score)` достигает `user_dict_min_weight`, правило начинает влиять на автоопределение.
 
 После изменения конфига:
 ```bash
-make restart
-# или SIGHUP для перезагрузки без рестарта:
-systemctl --user kill -s HUP lswitch
+lswitch --replace
 ```
 
 ## Архитектура
@@ -238,19 +339,15 @@ sudo usermod -a -G input $USER
 ```
 
 ### Иконка трея не появляется
-
 Убедитесь, что systemd user unit запускается внутри графической сессии и видит `DISPLAY` или `WAYLAND_DISPLAY`, затем перезапустите его:
 
 ```bash
 systemctl --user restart lswitch
 ```
-
 ### Конвертация не работает
 
 ```bash
-make status                          # статус сервиса
-make logs                            # логи в реальном времени
-lswitch --debug                      # запуск с отладкой вручную
+lswitch --replace --debug            # запуск с отладкой вручную
 ```
 
 ## Разработка

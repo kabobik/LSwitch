@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable
 
+from lswitch.intelligence.maps import EN_TO_RU
 from lswitch.platform.system_adapter import ISystemAdapter
 
 
@@ -41,6 +42,24 @@ def get_passive_selection_reader(selection) -> Callable[[], SelectionInfo] | Non
     return reader if callable(reader) else None
 
 
+LAYOUT_WORD_CONTINUATION_CHARS = frozenset(
+    ch for ch, mapped in EN_TO_RU.items()
+    if not ch.isalpha() and mapped.isalpha()
+)
+
+
+def _leading_added_text(previous: str, current: str) -> str:
+    if not previous or not current or current == previous:
+        return ""
+    if current.endswith(previous):
+        return current[: -len(previous)]
+    return ""
+
+
+def _is_layout_word_char(ch: str) -> bool:
+    return bool(ch and (ch.isalpha() or ch in LAYOUT_WORD_CONTINUATION_CHARS))
+
+
 # ---------------------------------------------------------------------------
 # X11SelectionAdapter — concrete implementation
 # ---------------------------------------------------------------------------
@@ -65,9 +84,30 @@ class X11SelectionAdapter(ISelectionAdapter):
     re-selects the same text, a new owner_id marks the selection as fresh.
     """
 
-    def __init__(self, system: ISystemAdapter, debug: bool = False) -> None:
+    PASTE_DELAY = 0.02
+    RESTORE_DELAY = 0.05
+    EXPAND_SELECTION_DELAY = 0.05
+    MAX_LAYOUT_WORD_PROBE_CHARS = 64
+
+    def __init__(
+        self,
+        system: ISystemAdapter,
+        debug: bool = False,
+        timing: dict | None = None,
+    ) -> None:
         self._system = system
         self._debug = debug
+        timing = timing or {}
+        self.PASTE_DELAY = float(timing.get("paste_delay", type(self).PASTE_DELAY))
+        self.RESTORE_DELAY = float(
+            timing.get("restore_delay", type(self).RESTORE_DELAY)
+        )
+        self.EXPAND_SELECTION_DELAY = float(
+            timing.get(
+                "expand_selection_delay",
+                type(self).EXPAND_SELECTION_DELAY,
+            )
+        )
 
         # Cached previous state for freshness comparison
         self._prev_owner_id: int = 0
@@ -114,9 +154,9 @@ class X11SelectionAdapter(ISelectionAdapter):
         try:
             old_clip = self._system.get_clipboard(selection="clipboard")
             self._system.set_clipboard(new_text, selection="clipboard")
-            time.sleep(0.02)
+            time.sleep(self.PASTE_DELAY)
             self._system.send_key_sequence("ctrl+v")
-            time.sleep(0.05)
+            time.sleep(self.RESTORE_DELAY)
             # Restore the original clipboard
             if old_clip is not None:
                 self._system.set_clipboard(old_clip, selection="clipboard")
@@ -128,7 +168,49 @@ class X11SelectionAdapter(ISelectionAdapter):
         """Expand the current selection to the surrounding word via Ctrl+Shift+Left."""
         try:
             self._system.send_key_sequence("ctrl+shift+Left")
-            time.sleep(0.05)
+            time.sleep(self.EXPAND_SELECTION_DELAY)
         except Exception:
             pass
-        return self.get_selection()
+        return self._expand_through_layout_word_boundaries(self.get_selection())
+
+    def _expand_through_layout_word_boundaries(
+        self,
+        initial: SelectionInfo,
+    ) -> SelectionInfo:
+        if not initial.text:
+            return initial
+
+        previous = initial
+        probing = False
+        for _ in range(self.MAX_LAYOUT_WORD_PROBE_CHARS):
+            try:
+                self._system.send_key_sequence("shift+Left")
+                time.sleep(self.EXPAND_SELECTION_DELAY)
+                current = self.get_selection()
+            except Exception:
+                return previous
+
+            added = _leading_added_text(previous.text, current.text)
+            if not added:
+                return previous
+
+            added_char = added[-1]
+            if not probing:
+                if added_char not in LAYOUT_WORD_CONTINUATION_CHARS:
+                    self._shrink_selection_right()
+                    return initial
+                probing = True
+            elif not _is_layout_word_char(added_char):
+                self._shrink_selection_right()
+                return previous
+
+            previous = current
+
+        return previous
+
+    def _shrink_selection_right(self) -> None:
+        try:
+            self._system.send_key_sequence("shift+Right")
+            time.sleep(self.EXPAND_SELECTION_DELAY)
+        except Exception:
+            pass

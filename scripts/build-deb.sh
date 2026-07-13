@@ -51,10 +51,6 @@ sys.exit(main())
 ENTRY
 chmod +x "$PKG_DIR/usr/bin/$PACKAGE"
 
-# systemd user unit → /usr/lib/systemd/user/
-mkdir -p "$PKG_DIR/usr/lib/systemd/user"
-cp "$PROJECT_DIR/config/lswitch.service" "$PKG_DIR/usr/lib/systemd/user/"
-
 # udev rules → /etc/udev/rules.d/
 mkdir -p "$PKG_DIR/etc/udev/rules.d"
 cp "$PROJECT_DIR/config/99-lswitch.rules" "$PKG_DIR/etc/udev/rules.d/"
@@ -103,7 +99,11 @@ echo "LSwitch установлен!"
 echo ""
 echo "  1. Добавьте себя в группу input:  sudo usermod -a -G input \$USER"
 echo "  2. Перелогиньтесь"
-echo "  3. Включите автозапуск: systemctl --user enable --now lswitch"
+echo "  3. Включите GUI автозапуск через настройки вашей среды рабочего стола"
+echo "     или скопируйте ярлык:"
+echo "     mkdir -p ~/.config/autostart"
+echo "     cp /usr/share/applications/lswitch-control.desktop ~/.config/autostart/"
+echo "  4. Запуск вручную: lswitch"
 echo ""
 EOF
 chmod +x "$PKG_DIR/DEBIAN/postinst"

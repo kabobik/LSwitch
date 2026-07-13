@@ -17,7 +17,13 @@ from typing import Callable, Optional
 
 from lswitch.input.virtual_keyboard import VirtualKeyboard
 from lswitch.platform.main_thread import MainThreadInvoker
-from lswitch.platform.selection_adapter import ISelectionAdapter, SelectionInfo
+from lswitch.platform.selection_adapter import (
+    ISelectionAdapter,
+    LAYOUT_WORD_CONTINUATION_CHARS,
+    SelectionInfo,
+    _is_layout_word_char,
+    _leading_added_text,
+)
 from lswitch.platform.system_adapter import CommandResult, ISystemAdapter
 from lswitch.platform.xkb_adapter import IXKBAdapter, LayoutInfo
 
@@ -73,6 +79,7 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         enable_wl_clipboard: bool = True,
         command_lookup: Callable[[str], str | None] | None = None,
         command_runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+        timing: dict | None = None,
     ) -> None:
         super().__init__(compositor=compositor, debug=debug)
         self.virtual_kb = virtual_kb
@@ -81,6 +88,10 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         self._command_lookup = command_lookup or shutil.which
         self._command_runner = command_runner or subprocess.run
         self._wl_clipboard_available: bool | None = None
+        timing = timing or {}
+        self.WL_CLIPBOARD_TIMEOUT = float(
+            timing.get("wl_clipboard_timeout", type(self).WL_CLIPBOARD_TIMEOUT)
+        )
 
     def run_command(self, args: list[str], timeout: float = 1.0) -> CommandResult:
         raise self._unsupported("run_command")
@@ -303,6 +314,7 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
     PASTE_DELAY = 0.12
     RESTORE_DELAY = 0.15
     EXPAND_SELECTION_DELAY = 0.2
+    MAX_LAYOUT_WORD_PROBE_CHARS = 64
     COPY_SENTINEL_PREFIX = "__LSWITCH_COPY_SENTINEL__"
     COPY_SENTINEL_MIME_TYPE = "application/x-lswitch-copy-sentinel"
     COPY_SHORTCUTS = ("ctrl+c", "ctrl+insert")
@@ -314,6 +326,7 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         compositor: str = "unknown",
         debug: bool = False,
         strategy: str = "auto",
+        timing: dict | None = None,
     ) -> None:
         super().__init__(compositor=compositor, debug=debug)
         self.system = system
@@ -321,6 +334,26 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         self.strategy = self._normalize_strategy(strategy)
         self._prev_text: str = ""
         self._saved_clipboard: str | None = None
+        timing = timing or {}
+        self.COPY_WAIT_TIMEOUT = float(
+            timing.get("copy_wait_timeout", type(self).COPY_WAIT_TIMEOUT)
+        )
+        self.COPY_POLL_INTERVAL = float(
+            timing.get("copy_poll_interval", type(self).COPY_POLL_INTERVAL)
+        )
+        self.COPY_RETRY_DELAY = float(
+            timing.get("copy_retry_delay", type(self).COPY_RETRY_DELAY)
+        )
+        self.PASTE_DELAY = float(timing.get("paste_delay", type(self).PASTE_DELAY))
+        self.RESTORE_DELAY = float(
+            timing.get("restore_delay", type(self).RESTORE_DELAY)
+        )
+        self.EXPAND_SELECTION_DELAY = float(
+            timing.get(
+                "expand_selection_delay",
+                type(self).EXPAND_SELECTION_DELAY,
+            )
+        )
 
     def get_selection(self) -> SelectionInfo:
         if self.strategy == "disabled":
@@ -417,8 +450,64 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         if self.strategy in {"auto", "primary_selection"}:
             passive = self.get_passive_selection()
             if passive.text or self.strategy == "primary_selection":
+                return self._expand_through_layout_word_boundaries(passive)
+        return self._expand_through_layout_word_boundaries(self.get_selection())
+
+    def _expand_through_layout_word_boundaries(
+        self,
+        initial: SelectionInfo,
+    ) -> SelectionInfo:
+        if not initial.text:
+            return initial
+
+        saved_clipboard = self._saved_clipboard
+        previous = initial
+        probing = False
+        for _ in range(self.MAX_LAYOUT_WORD_PROBE_CHARS):
+            try:
+                self.system.send_key_sequence("shift+Left")
+                time.sleep(self.EXPAND_SELECTION_DELAY)
+                current = self._read_current_expanded_selection()
+            except Exception:
+                self._saved_clipboard = saved_clipboard
+                return previous
+
+            added = _leading_added_text(previous.text, current.text)
+            if not added:
+                self._saved_clipboard = saved_clipboard
+                return previous
+
+            added_char = added[-1]
+            if not probing:
+                if added_char not in LAYOUT_WORD_CONTINUATION_CHARS:
+                    self._shrink_selection_right()
+                    self._saved_clipboard = saved_clipboard
+                    return initial
+                probing = True
+            elif not _is_layout_word_char(added_char):
+                self._shrink_selection_right()
+                self._saved_clipboard = saved_clipboard
+                return previous
+
+            previous = current
+            self._saved_clipboard = saved_clipboard
+
+        self._saved_clipboard = saved_clipboard
+        return previous
+
+    def _read_current_expanded_selection(self) -> SelectionInfo:
+        if self.strategy in {"auto", "primary_selection"}:
+            passive = self.get_passive_selection()
+            if passive.text or self.strategy == "primary_selection":
                 return passive
         return self.get_selection()
+
+    def _shrink_selection_right(self) -> None:
+        try:
+            self.system.send_key_sequence("shift+Right")
+            time.sleep(self.EXPAND_SELECTION_DELAY)
+        except Exception:
+            pass
 
     @staticmethod
     def empty_selection() -> SelectionInfo:

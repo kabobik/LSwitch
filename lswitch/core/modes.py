@@ -53,11 +53,16 @@ class RetypeMode(BaseMode):
         xkb: "IXKBAdapter",
         system: "ISystemAdapter",
         debug: bool = False,
+        timing: dict | None = None,
     ):
         self.virtual_kb = virtual_kb
         self.xkb = xkb
         self.system = system
         self.debug = debug
+        timing = timing or {}
+        self.before_replay_delay = float(
+            timing.get("retype_before_replay_delay", 0.05)
+        )
 
     def execute(self, context: "StateContext") -> bool:
         if context.chars_in_buffer <= 0:
@@ -76,44 +81,19 @@ class RetypeMode(BaseMode):
                 [getattr(e, 'code', '?') for e in saved_events],
             )
 
-        # 1. Delete typed characters
-        logger.debug("RetypeMode: sending %d backspaces", n_chars)
-        self.virtual_kb.tap_key(KEY_BACKSPACE, n_chars)
+        from lswitch.core.retype_service import RetypeService
 
-        # 2. Switch layout BEFORE replay so events land in the correct layout.
-        # We switch here (not after) so the XKB group is set when UInput events
-        # are processed. The system Shift+Shift shortcut may fire afterwards
-        # (after replay) and switch back — that's a separate desktop keyboard
-        # shortcut users should disable in keyboard preferences.
-        try:
-            new_layout = self.xkb.switch_layout()
-            logger.debug("RetypeMode: switched layout → %s", getattr(new_layout, 'name', new_layout))
-        except Exception as exc:
-            logger.error("RetypeMode: switch_layout failed: %s", exc)
-            return False
-
-        # 3. Brief pause so the application finishes processing the backspaces
-        # before receiving the replayed characters.
-        time.sleep(0.05)
-
-        # 4. Replay saved events.
-        # event_buffer contains KEY_PRESS events only (value=1).
-        # replay_events() automatically appends synthetic releases so that
-        # the kernel does not trigger infinite auto-repeat (value=2).
-        if self.debug:
-            logger.debug(
-                "RetypeMode: replaying %d events (codes=%s)",
-                len(saved_events),
-                [getattr(e, 'code', '?') for e in saved_events],
-            )
-        self.virtual_kb.replay_events(saved_events)
-
-        logger.debug(
-            "RetypeMode: done — deleted=%d, replayed=%d",
-            n_chars,
-            len(saved_events),
+        service = RetypeService(
+            self.virtual_kb,
+            self.xkb,
+            debug=self.debug,
         )
-        return True
+        return service.retype_events(
+            saved_events,
+            delete_count=n_chars,
+            switch_to_next=True,
+            before_replay_delay=self.before_replay_delay,
+        )
 
 
 class SelectionMode(BaseMode):
@@ -126,15 +106,27 @@ class SelectionMode(BaseMode):
         system: "ISystemAdapter",
         debug: bool = False,
         expand: bool = False,
+        timing: dict | None = None,
     ):
         self.selection = selection
         self.xkb = xkb
         self.system = system
         self.debug = debug
         self.expand = expand
+        self.last_original: str = ""
+        self.last_converted: str = ""
+        self.last_target_lang: str | None = None
+        timing = timing or {}
+        self.direct_type_after_layout_switch_delay = float(
+            timing.get("direct_type_after_layout_switch_delay", 0.03)
+        )
 
     def execute(self, context: "StateContext") -> bool:
-        from lswitch.core.text_converter import convert_text, detect_language
+        from lswitch.core.text_converter import invert_layout_runs
+
+        self.last_original = ""
+        self.last_converted = ""
+        self.last_target_lang = None
 
         if self.expand or context.backspace_hold_active:
             logger.debug(f"SelectionMode: expanding selection... (expand={self.expand}, backspace_hold={context.backspace_hold_active})")
@@ -145,19 +137,16 @@ class SelectionMode(BaseMode):
         if not sel.text:
             return False
 
-        # Detect source language to determine conversion direction and
-        # which layout to switch to after replacing the selection.
-        source_lang = detect_language(sel.text)  # 'en' or 'ru'
-        target_lang = "ru" if source_lang == "en" else "en"
-        direction = "en_to_ru" if source_lang == "en" else "ru_to_en"
+        # Selection can contain fragments from both layouts. Convert each
+        # alphabet run independently instead of forcing one global direction
+        # for the whole selection.
+        converted_runs = invert_layout_runs(sel.text)
+        converted = "".join(text for text, _target_lang in converted_runs)
+        target_langs = [lang for _text, lang in converted_runs if lang]
+        final_target_lang = target_langs[-1] if target_langs else None
 
-        converted = convert_text(sel.text, direction=direction)
-        # Switch to the layout that matches the converted text.
         layouts = self.xkb.get_layouts()
-        target_layout = next(
-            (l for l in layouts if l.name == target_lang),
-            None,
-        )
+        target_layout = self._find_layout_for_lang(layouts, final_target_lang)
 
         direct_replacement = None
         if getattr(type(self.selection), "prefers_direct_replacement", None) is not None:
@@ -167,28 +156,41 @@ class SelectionMode(BaseMode):
                 None,
             )
         if callable(direct_replacement) and direct_replacement():
-            if target_layout is None:
-                logger.debug(
-                    "SelectionMode: direct replacement skipped, no target layout for %s",
-                    target_lang,
-                )
-                return False
-            self.xkb.switch_layout(target=target_layout)
-            time.sleep(0.03)
             replace_by_typing = getattr(self.selection, "replace_selection_by_typing")
             if not callable(replace_by_typing):
                 return False
-            if not replace_by_typing(converted, layout_name=target_layout.name):
-                return False
+            fallback_lang = final_target_lang or "en"
+            for run_text, run_lang in converted_runs:
+                layout = self._find_layout_for_lang(layouts, run_lang or fallback_lang)
+                if layout is None:
+                    logger.debug(
+                        "SelectionMode: direct replacement skipped, no target layout for %s",
+                        run_lang or fallback_lang,
+                    )
+                    return False
+                self.xkb.switch_layout(target=layout)
+                time.sleep(self.direct_type_after_layout_switch_delay)
+                if not replace_by_typing(run_text, layout_name=layout.name):
+                    return False
         else:
             if not self.selection.replace_selection(converted):
                 return False
             self.xkb.switch_layout(target=target_layout)  # None = cycle, which is ok as fallback
 
         logger.debug(
-            "SelectionMode: '%s' (%s) → '%s' (%s), switching to layout '%s'",
-            sel.text[:50], source_lang,
-            converted[:50], target_lang,
+            "SelectionMode: '%s' → '%s', target_langs=%s, switching to layout '%s'",
+            sel.text[:50],
+            converted[:50],
+            target_langs,
             target_layout.name if target_layout else "next",
         )
+        self.last_original = sel.text
+        self.last_converted = converted
+        self.last_target_lang = final_target_lang
         return True
+
+    @staticmethod
+    def _find_layout_for_lang(layouts, lang: str | None):
+        from lswitch.core.layout_service import LayoutService
+
+        return LayoutService.find_layout_for_lang(layouts, lang)

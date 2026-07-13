@@ -7,6 +7,10 @@ import pytest
 from lswitch.config import (
     DEFAULT_CONFIG,
     DEFAULT_CONFIG_PATH,
+    DEFAULT_TIMING,
+    DEFAULT_WAYLAND_SELECTION_TIMING,
+    DEFAULT_WAYLAND_TIMING,
+    DEFAULT_X11_SELECTION_TIMING,
     WAYLAND_SELECTION_STRATEGIES,
     ConfigManager,
     load_config,
@@ -28,13 +32,27 @@ class TestDefaultConfig:
         'layout_switch_key',
         'auto_switch',
         'auto_switch_threshold',
+        'auto_switch_mid_word',
+        'mid_word_min_prefix_len',
+        'system_dict_enabled',
+        'system_dict_en_path',
+        'system_dict_ru_path',
         'user_dict_enabled',
+        'user_dict_auto_confirm',
         'user_dict_min_weight',
         'wayland_selection_strategy',
+        'timing',
+        'x11_selection_timing',
+        'wayland_timing',
+        'wayland_selection_timing',
     }
 
     def test_contains_all_expected_keys(self):
         assert set(DEFAULT_CONFIG.keys()) == self.EXPECTED_KEYS
+        assert DEFAULT_CONFIG['timing'] == DEFAULT_TIMING
+        assert DEFAULT_CONFIG['x11_selection_timing'] == DEFAULT_X11_SELECTION_TIMING
+        assert DEFAULT_CONFIG['wayland_timing'] == DEFAULT_WAYLAND_TIMING
+        assert DEFAULT_CONFIG['wayland_selection_timing'] == DEFAULT_WAYLAND_SELECTION_TIMING
 
 
 # ------------------------------------------------------------------
@@ -52,14 +70,35 @@ class TestValidateConfig:
             'layout_switch_key': 'Caps_Lock',
             'auto_switch': True,
             'auto_switch_threshold': 5,
+            'auto_switch_mid_word': True,
+            'mid_word_min_prefix_len': 5,
+            'system_dict_enabled': False,
+            'system_dict_en_path': '/tmp/en_US.dic',
+            'system_dict_ru_path': '/tmp/ru_RU.dic',
             'user_dict_enabled': True,
+            'user_dict_auto_confirm': True,
             'user_dict_min_weight': 3,
             'wayland_selection_strategy': 'clipboard_copy',
+            'timing': {'key_press_delay': 0.002},
+            'x11_selection_timing': {'paste_delay': 0.03},
+            'wayland_timing': {'wl_clipboard_timeout': 2.0},
+            'wayland_selection_timing': {'restore_delay': 0.2},
         })
         assert result['double_click_timeout'] == 0.5
         assert result['debug'] is True
         assert result['auto_switch_threshold'] == 5
+        assert result['auto_switch_mid_word'] is True
+        assert result['mid_word_min_prefix_len'] == 5
+        assert result['system_dict_enabled'] is False
+        assert result['system_dict_en_path'] == '/tmp/en_US.dic'
+        assert result['system_dict_ru_path'] == '/tmp/ru_RU.dic'
+        assert result['user_dict_auto_confirm'] is True
         assert result['wayland_selection_strategy'] == 'clipboard_copy'
+        assert result['timing']['key_press_delay'] == 0.002
+        assert result['timing']['key_repeat_delay'] == DEFAULT_TIMING['key_repeat_delay']
+        assert result['x11_selection_timing']['paste_delay'] == 0.03
+        assert result['wayland_timing']['wl_clipboard_timeout'] == 2.0
+        assert result['wayland_selection_timing']['restore_delay'] == 0.2
 
     def test_invalid_double_click_timeout_type(self):
         with pytest.raises(ValueError, match="double_click_timeout"):
@@ -81,9 +120,37 @@ class TestValidateConfig:
         with pytest.raises(ValueError, match="auto_switch_threshold"):
             validate_config({'auto_switch_threshold': -1})
 
+    def test_invalid_auto_switch_mid_word_type(self):
+        with pytest.raises(ValueError, match="auto_switch_mid_word"):
+            validate_config({'auto_switch_mid_word': 'yes'})
+
+    def test_invalid_mid_word_min_prefix_len_range(self):
+        with pytest.raises(ValueError, match="mid_word_min_prefix_len"):
+            validate_config({'mid_word_min_prefix_len': 0})
+
+    def test_invalid_system_dict_enabled_type(self):
+        with pytest.raises(ValueError, match="system_dict_enabled"):
+            validate_config({'system_dict_enabled': 'yes'})
+
+    def test_invalid_system_dict_path_type(self):
+        with pytest.raises(ValueError, match="system_dict_en_path"):
+            validate_config({'system_dict_en_path': 123})
+
+    def test_invalid_user_dict_auto_confirm_type(self):
+        with pytest.raises(ValueError, match="user_dict_auto_confirm"):
+            validate_config({'user_dict_auto_confirm': 'yes'})
+
     def test_invalid_wayland_selection_strategy(self):
         with pytest.raises(ValueError, match="wayland_selection_strategy"):
             validate_config({'wayland_selection_strategy': 'magic'})
+
+    def test_invalid_timing_negative(self):
+        with pytest.raises(ValueError, match="timing.key_press_delay"):
+            validate_config({'timing': {'key_press_delay': -0.1}})
+
+    def test_invalid_timing_unknown_key(self):
+        with pytest.raises(ValueError, match="unknown keys"):
+            validate_config({'wayland_selection_timing': {'mystery_delay': 1.0}})
 
     def test_wayland_selection_strategy_values_are_documented_set(self):
         assert WAYLAND_SELECTION_STRATEGIES == {
@@ -121,6 +188,23 @@ class TestLoadConfig:
             debug = true
             double_click_timeout = 0.5
             wayland_selection_strategy = "primary_selection"
+            auto_switch_mid_word = true
+            mid_word_min_prefix_len = 5
+            system_dict_enabled = false
+            system_dict_en_path = "/tmp/en_US.dic"
+            system_dict_ru_path = "/tmp/ru_RU.dic"
+
+            [timing]
+            key_press_delay = 0.002
+
+            [x11_selection_timing]
+            poll_interval = 0.25
+
+            [wayland_timing]
+            wl_clipboard_timeout = 2.0
+
+            [wayland_selection_timing]
+            paste_delay = 0.15
             """,
             encoding="utf-8",
         )
@@ -128,6 +212,15 @@ class TestLoadConfig:
         assert result['debug'] is True
         assert result['double_click_timeout'] == 0.5
         assert result['wayland_selection_strategy'] == 'primary_selection'
+        assert result['auto_switch_mid_word'] is True
+        assert result['mid_word_min_prefix_len'] == 5
+        assert result['system_dict_enabled'] is False
+        assert result['system_dict_en_path'] == '/tmp/en_US.dic'
+        assert result['system_dict_ru_path'] == '/tmp/ru_RU.dic'
+        assert result['timing']['key_press_delay'] == 0.002
+        assert result['x11_selection_timing']['poll_interval'] == 0.25
+        assert result['wayland_timing']['wl_clipboard_timeout'] == 2.0
+        assert result['wayland_selection_timing']['paste_delay'] == 0.15
         # Other keys remain default
         assert result['auto_switch'] is False
 
@@ -188,13 +281,56 @@ class TestConfigManager:
 
         saved = (tmp_path / "cfg.toml").read_text(encoding="utf-8")
         assert "# Wayland selection strategies:" in saved
+        assert "# Common input/conversion timings, seconds." in saved
+        assert "[timing]" in saved
+        assert "[x11_selection_timing]" in saved
+        assert "[wayland_timing]" in saved
+        assert "[wayland_selection_timing]" in saved
         assert 'debug = true' in saved
         assert 'double_click_timeout = 0.7' in saved
+        assert 'auto_switch_mid_word = false' in saved
+        assert 'mid_word_min_prefix_len = 4' in saved
 
         # Reload
         mgr2 = ConfigManager(config_path=cfg_path)
         assert mgr2.get('debug') is True
         assert mgr2.get('double_click_timeout') == 0.7
+
+    def test_existing_config_is_migrated_with_missing_defaults(self, tmp_path):
+        cfg_path = tmp_path / "cfg.toml"
+        cfg_path.write_text(
+            """
+            debug = true
+            auto_switch = true
+            user_dict_enabled = true
+            user_dict_min_weight = 2
+            """,
+            encoding="utf-8",
+        )
+
+        mgr = ConfigManager(config_path=str(cfg_path))
+
+        assert mgr.get("debug") is True
+        assert mgr.get("user_dict_auto_confirm") is False
+        saved = cfg_path.read_text(encoding="utf-8")
+        assert "user_dict_auto_confirm = false" in saved
+        assert "auto_switch = true" in saved
+
+    def test_saved_config_documents_every_setting(self, tmp_path):
+        cfg_path = str(tmp_path / "cfg.toml")
+        mgr = ConfigManager(config_path=cfg_path)
+
+        assert mgr.save() is True
+
+        lines = (tmp_path / "cfg.toml").read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("["):
+                continue
+
+            assert "=" in stripped
+            assert index > 0
+            assert lines[index - 1].strip().startswith("#"), stripped
 
     def test_reload_restores_from_file(self, tmp_path):
         cfg_path = str(tmp_path / "cfg.toml")
@@ -230,3 +366,16 @@ class TestConfigManager:
         path = str(tmp_path / "cfg.toml")
         mgr = ConfigManager(config_path=path)
         assert mgr.config_path == path
+
+    def test_legacy_config_json_path_is_normalized_to_toml(self, tmp_path):
+        legacy_path = tmp_path / "config.json"
+        mgr = ConfigManager(config_path=str(legacy_path))
+        mgr.set("auto_switch", True)
+
+        assert mgr.config_path == str(tmp_path / "config.toml")
+        assert mgr.save() is True
+        assert not legacy_path.exists()
+        assert (tmp_path / "config.toml").exists()
+
+        loaded = load_config(config_path=str(legacy_path))
+        assert loaded["auto_switch"] is True

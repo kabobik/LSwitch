@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -66,6 +66,20 @@ class TestSelectionModeConvert:
         assert result is True
         sel.replace_selection.assert_called_once_with("привет")
 
+    def test_converts_mixed_selected_text_by_fragment(self):
+        mode, sel, xkb, _ = _make_selection_mode()
+        sel.get_selection.return_value = SelectionInfo(
+            text="Ghbdtn\nПривет",
+            owner_id=1,
+            timestamp=time.time(),
+        )
+        ctx = StateContext()
+
+        result = mode.execute(ctx)
+
+        assert result is True
+        sel.replace_selection.assert_called_once_with("Привет\nGhbdtn")
+
     def test_switches_layout(self):
         mode, sel, xkb, _ = _make_selection_mode()
         sel.get_selection.return_value = SelectionInfo(text="ghbdtn", owner_id=1, timestamp=time.time())
@@ -93,6 +107,31 @@ class TestSelectionModeConvert:
         assert sel.replace_calls == []
         assert sel.typed_calls == [("привет", "ru")]
         xkb.switch_layout.assert_called_once_with(target=xkb.get_layouts.return_value[1])
+
+    def test_direct_replacement_types_mixed_selection_in_layout_runs(self):
+        from lswitch.platform.xkb_adapter import LayoutInfo
+
+        sel = _DirectSelectionAdapter("Ghbdtn\nПривет")
+        xkb = MagicMock()
+        xkb.get_layouts.return_value = [
+            LayoutInfo(name="en", index=0, xkb_name="us"),
+            LayoutInfo(name="ru", index=1, xkb_name="ru"),
+        ]
+        mode, _, _, _ = _make_selection_mode(sel_adapter=sel, xkb=xkb)
+        ctx = StateContext()
+
+        result = mode.execute(ctx)
+
+        assert result is True
+        assert sel.replace_calls == []
+        assert sel.typed_calls == [
+            ("Привет\n", "ru"),
+            ("Ghbdtn", "en"),
+        ]
+        assert xkb.switch_layout.call_args_list == [
+            call(target=xkb.get_layouts.return_value[1]),
+            call(target=xkb.get_layouts.return_value[0]),
+        ]
 
 
 class TestSelectionModeEmpty:

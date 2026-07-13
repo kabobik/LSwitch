@@ -29,6 +29,7 @@ class ConversionEngine:
         system: "ISystemAdapter",
         user_dict: "UserDictionary | None" = None,
         debug: bool = False,
+        timing: dict | None = None,
     ):
         self.xkb = xkb
         self.selection = selection
@@ -37,6 +38,8 @@ class ConversionEngine:
         self.system = system
         self.user_dict = user_dict
         self.debug = debug
+        self.timing = timing or {}
+        self.last_conversion: dict | None = None
 
     def choose_mode(self, context: "StateContext", selection_valid: bool = False) -> str:
         """Return 'selection', 'selection_expand', or 'retype' based on state.
@@ -74,12 +77,46 @@ class ConversionEngine:
 
         mode = self.choose_mode(context, selection_valid=selection_valid)
         logger.debug("Converting in mode: %s", mode)
+        self.last_conversion = None
         if mode == "retype":
-            retype = RetypeMode(self.virtual_kb, self.xkb, self.system, self.debug)
+            retype = RetypeMode(
+                self.virtual_kb,
+                self.xkb,
+                self.system,
+                self.debug,
+                timing=self.timing,
+            )
             return retype.execute(context)
         elif mode == "selection_expand":
-            sel_mode = SelectionMode(self.selection, self.xkb, self.system, self.debug, expand=True)
-            return sel_mode.execute(context)
+            sel_mode = SelectionMode(
+                self.selection,
+                self.xkb,
+                self.system,
+                self.debug,
+                expand=True,
+                timing=self.timing,
+            )
+            success = sel_mode.execute(context)
+            if success:
+                self._remember_selection_conversion(mode, sel_mode)
+            return success
         else:
-            sel_mode = SelectionMode(self.selection, self.xkb, self.system, self.debug)
-            return sel_mode.execute(context)
+            sel_mode = SelectionMode(
+                self.selection,
+                self.xkb,
+                self.system,
+                self.debug,
+                timing=self.timing,
+            )
+            success = sel_mode.execute(context)
+            if success:
+                self._remember_selection_conversion(mode, sel_mode)
+            return success
+
+    def _remember_selection_conversion(self, mode: str, sel_mode) -> None:
+        self.last_conversion = {
+            "mode": mode,
+            "original": getattr(sel_mode, "last_original", ""),
+            "converted": getattr(sel_mode, "last_converted", ""),
+            "target_lang": getattr(sel_mode, "last_target_lang", None),
+        }

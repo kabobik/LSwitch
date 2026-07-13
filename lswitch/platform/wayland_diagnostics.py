@@ -47,6 +47,7 @@ def run_wayland_diagnostics(
     dbus_client_factory: Callable[[object], object] | None = None,
     qt_app_factory: Callable[[], object] | None = None,
     invoker_factory: Callable[[object], object] | None = None,
+    system_dictionary_loader_factory: Callable[[], object] | None = None,
 ) -> DiagnosticReport:
     """Probe Wayland/KDE runtime state without starting the daemon."""
     report = DiagnosticReport()
@@ -56,6 +57,7 @@ def run_wayland_diagnostics(
     _add_expected(report, "session", session_type, expected="wayland")
     _add_expected(report, "compositor", compositor, expected="kde")
     _add_wl_clipboard_status(report)
+    _add_system_dictionary_status(report, system_dictionary_loader_factory)
 
     if dbus_client_factory is None:
         try:
@@ -173,6 +175,45 @@ def _add_wl_clipboard_status(report: DiagnosticReport) -> None:
         report.add("warn", "wl-clipboard", f"missing: {', '.join(missing)}")
     else:
         report.add("ok", "wl-clipboard", "wl-copy/wl-paste available")
+
+
+def _add_system_dictionary_status(
+    report: DiagnosticReport,
+    system_dictionary_loader_factory: Callable[[], object] | None,
+) -> None:
+    try:
+        if system_dictionary_loader_factory is None:
+            from lswitch.intelligence.system_dictionary_loader import (
+                SystemDictionaryLoader,
+            )
+
+            system_dictionary_loader_factory = SystemDictionaryLoader
+
+        loader = system_dictionary_loader_factory()
+        existing_dirs = [
+            str(path)
+            for path in getattr(loader, "dictionary_dirs", ())
+            if path.is_dir()
+        ]
+        if existing_dirs:
+            report.add("ok", "system dictionary dirs", ", ".join(existing_dirs))
+        else:
+            report.add("warn", "system dictionary dirs", "none found")
+
+        for lang in ("en", "ru"):
+            loaded = loader.load(lang)
+            if loaded is None:
+                report.add("warn", f"system dictionary {lang}", "not found")
+                continue
+            word_count = len(getattr(loaded, "words", ()))
+            status = "ok" if word_count > 0 else "warn"
+            report.add(
+                status,
+                f"system dictionary {lang}",
+                f"{loaded.path} words={word_count}",
+            )
+    except Exception as exc:
+        report.add("warn", "system dictionaries", str(exc))
 
 
 def _add_dbus_introspection(report: DiagnosticReport, dbus_client) -> None:

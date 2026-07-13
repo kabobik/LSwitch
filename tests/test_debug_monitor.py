@@ -167,6 +167,15 @@ class MockQTimer:
         pass
 
 
+def _marker_value(marker, *names, default="?"):
+    for name in names:
+        if isinstance(marker, dict) and name in marker:
+            return marker[name]
+        if hasattr(marker, name):
+            return getattr(marker, name)
+    return default
+
+
 @pytest.fixture
 def mock_app():
     """Create a mock LSwitchApp for testing."""
@@ -180,11 +189,13 @@ def mock_app():
     app.state_manager.context.shift_pressed = False
     app.state_manager.context.backspace_hold_active = False
     app.state_manager.context.backspace_repeats = 0
-    app._last_auto_marker = None
+    app.auto_conversion_session = Mock()
+    app.auto_conversion_session.last_marker = None
+    app.conversion_runtime = Mock()
+    app.conversion_runtime.extract_last_word = Mock(return_value=("", []))
     app._selection_valid = False
     app._prev_sel_text = ""
     app._prev_sel_owner_id = 0
-    app._extract_last_word_events = Mock(return_value=("", []))
     app.xkb = None
     return app
 
@@ -361,7 +372,7 @@ class DebugMonitorWindowMock:
     def _refresh_last_word(self):
         from lswitch.input.key_mapper import keycode_to_char
         try:
-            word, word_events = self._app._extract_last_word_events(None)
+            word, word_events = self._app.conversion_runtime.extract_last_word(None)
             if word:
                 self._word_label.setText(f"Word: '{word}' ({len(word)} chars)")
                 evt_parts = []
@@ -379,25 +390,25 @@ class DebugMonitorWindowMock:
             self._word_events_label.setText("Events: (error)")
     
     def _refresh_marker(self):
-        marker = getattr(self._app, '_last_auto_marker', None)
+        marker = self._app.auto_conversion_session.last_marker
         if marker is None:
             self._marker_label.setText("No marker")
             self._marker_age_label.setText("Age: -")
         else:
-            word = marker.get('word', '?')
-            direction = marker.get('direction', '?')
-            lang = marker.get('lang', '?')
+            word = _marker_value(marker, 'word', 'original_word')
+            direction = _marker_value(marker, 'direction')
+            lang = _marker_value(marker, 'lang', 'original_lang')
             self._marker_label.setText(
                 f"Word: '{word}'\nDirection: {direction}\nLang: {lang}"
             )
             self._update_marker_age()
     
     def _update_marker_age(self):
-        marker = getattr(self._app, '_last_auto_marker', None)
+        marker = self._app.auto_conversion_session.last_marker
         if marker is None:
             self._marker_age_label.setText("Age: -")
             return
-        marker_time = marker.get('time', 0)
+        marker_time = _marker_value(marker, 'time', 'created_at', default=0)
         if marker_time > 0:
             age = time.time() - marker_time
             self._marker_age_label.setText(f"Age: {age:.1f}s")
@@ -570,7 +581,7 @@ class TestAutoMarker:
     """Test auto marker display."""
 
     def test_no_marker_shows_none(self, mock_app, event_bus):
-        mock_app._last_auto_marker = None
+        mock_app.auto_conversion_session.last_marker = None
         window = DebugMonitorWindowMock(app=mock_app, event_bus=event_bus)
         
         assert "No marker" in window._marker_label.text()
@@ -578,7 +589,7 @@ class TestAutoMarker:
         window.cleanup()
 
     def test_marker_shows_word(self, mock_app, event_bus):
-        mock_app._last_auto_marker = {
+        mock_app.auto_conversion_session.last_marker = {
             'word': 'ghbdtn',
             'direction': 'en_to_ru',
             'lang': 'en',
@@ -592,7 +603,7 @@ class TestAutoMarker:
         window.cleanup()
 
     def test_marker_age_updates(self, mock_app, event_bus):
-        mock_app._last_auto_marker = {
+        mock_app.auto_conversion_session.last_marker = {
             'word': 'test',
             'direction': 'en_to_ru',
             'lang': 'en',
@@ -612,7 +623,7 @@ class TestLastWord:
     """Test last word display."""
 
     def test_no_word_shows_none(self, mock_app, event_bus):
-        mock_app._extract_last_word_events = Mock(return_value=("", []))
+        mock_app.conversion_runtime.extract_last_word = Mock(return_value=("", []))
         window = DebugMonitorWindowMock(app=mock_app, event_bus=event_bus)
         
         assert "(none)" in window._word_label.text()
@@ -620,7 +631,7 @@ class TestLastWord:
         window.cleanup()
 
     def test_word_shows_extracted(self, mock_app, event_bus):
-        mock_app._extract_last_word_events = Mock(return_value=("hello", [
+        mock_app.conversion_runtime.extract_last_word = Mock(return_value=("hello", [
             KeyEventData(code=35, value=1),
             KeyEventData(code=18, value=1),
             KeyEventData(code=38, value=1),

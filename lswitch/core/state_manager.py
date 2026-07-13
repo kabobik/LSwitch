@@ -30,7 +30,13 @@ class StateManager:
             return False
         new_state = next_state(self.context.state, event_name)
         if self.debug:
-            logger.debug("State: %s → %s (on %r)", self.context.state, new_state, event_name)
+            log_method = logger.debug if event_name == "shift_up_double" else logger.trace
+            log_method(  # type: ignore[attr-defined]
+                "State: %s → %s (on %r)",
+                self.context.state,
+                new_state,
+                event_name,
+            )
         self.context.state = new_state
         return True
 

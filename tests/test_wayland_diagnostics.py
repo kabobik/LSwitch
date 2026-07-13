@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 from lswitch.platform.wayland import DbusUInt32
 from lswitch.platform.wayland_diagnostics import (
     DiagnosticReport,
@@ -44,6 +47,32 @@ class _FakeDbusClient:
         raise AssertionError(f"Unexpected method: {method}")
 
 
+class _FakeSystemDictionaryLoader:
+    dictionary_dirs = (Path("/usr/share/hunspell"),)
+
+    def load(self, lang: str):
+        if lang == "en":
+            return SimpleNamespace(
+                lang="en",
+                path=Path("/usr/share/hunspell/en_US.dic"),
+                words={"hello", "help"},
+            )
+        if lang == "ru":
+            return SimpleNamespace(
+                lang="ru",
+                path=Path("/usr/share/hunspell/ru_RU.dic"),
+                words={"привет"},
+            )
+        return None
+
+
+class _MissingSystemDictionaryLoader:
+    dictionary_dirs = ()
+
+    def load(self, lang: str):
+        return None
+
+
 def _run_fake_diagnostic(*, switch_test: bool = False):
     fake_dbus = _FakeDbusClient()
 
@@ -56,6 +85,7 @@ def _run_fake_diagnostic(*, switch_test: bool = False):
         qt_app_factory=lambda: object(),
         invoker_factory=lambda app: object(),
         dbus_client_factory=lambda main_thread: fake_dbus,
+        system_dictionary_loader_factory=_FakeSystemDictionaryLoader,
     )
     return report, fake_dbus
 
@@ -86,6 +116,8 @@ class TestRunWaylandDiagnostics:
         assert "[ok] raw getLayoutsList:" in text
         assert "[ok] raw getLayout: 0" in text
         assert "[ok] parsed layouts: 0:en/us, 1:ru/ru" in text
+        assert "[ok] system dictionary en: /usr/share/hunspell/en_US.dic words=2" in text
+        assert "[ok] system dictionary ru: /usr/share/hunspell/ru_RU.dic words=1" in text
         assert "[info] switch test: skipped" in text
         assert ("setLayout", (1,)) not in fake_dbus.calls
 
@@ -132,3 +164,21 @@ class TestRunWaylandDiagnostics:
 
         assert report.ok is False
         assert "[fail] raw getLayoutsList: no service" in report.to_text()
+
+    def test_missing_system_dictionaries_are_warnings(self):
+        report = run_wayland_diagnostics(
+            env={
+                "XDG_SESSION_TYPE": "wayland",
+                "XDG_CURRENT_DESKTOP": "KDE",
+            },
+            qt_app_factory=lambda: object(),
+            invoker_factory=lambda app: object(),
+            dbus_client_factory=lambda main_thread: _FakeDbusClient(),
+            system_dictionary_loader_factory=_MissingSystemDictionaryLoader,
+        )
+
+        text = report.to_text()
+        assert report.ok is True
+        assert "[warn] system dictionary dirs: none found" in text
+        assert "[warn] system dictionary en: not found" in text
+        assert "[warn] system dictionary ru: not found" in text

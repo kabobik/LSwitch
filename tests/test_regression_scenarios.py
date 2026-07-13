@@ -198,7 +198,7 @@ class TestR03SelectionModeFromIdle:
 
         # Simulate fresh selection
         app.selection.set_selection("привет")
-        app._selection_valid = True  # as if poller/mouse_release detected it
+        app.selection_tracker.set_valid(True)  # as if poller/mouse_release detected it
 
         _double_shift(app)
 
@@ -318,7 +318,7 @@ class TestR06SelectionModeTargetLayout:
         app._wire_event_bus()
 
         app.selection.set_selection("привет")
-        app._selection_valid = True  # as if poller/mouse_release detected it
+        app.selection_tracker.set_valid(True)  # as if poller/mouse_release detected it
         _double_shift(app)
 
         # XKB adapter must have been asked to switch to 'en' layout (index 0)
@@ -336,7 +336,7 @@ class TestR06SelectionModeTargetLayout:
         app._wire_event_bus()
 
         app.selection.set_selection("ghbdtn")
-        app._selection_valid = True  # as if poller/mouse_release detected it
+        app.selection_tracker.set_valid(True)  # as if poller/mouse_release detected it
         _double_shift(app)
 
         calls = app.xkb.switch_calls
@@ -384,7 +384,7 @@ class TestR07ContextResetAfterConversion:
 
         assert app.state_manager.state == State.IDLE
         # Sticky buffer should be populated
-        assert len(app._last_retype_events) == 6
+        assert len(app.auto_conversion_session.sticky_events) == 6
 
         app.virtual_kb.reset_mock()
 
@@ -404,11 +404,11 @@ class TestR07ContextResetAfterConversion:
 
         _type_keys(app, GHBDTN)
         _double_shift(app)
-        assert len(app._last_retype_events) == 6
+        assert len(app.auto_conversion_session.sticky_events) == 6
 
         # Type new characters → sticky buffer must be cleared
         _type_keys(app, [16])  # 'q'
-        assert app._last_retype_events == []
+        assert app.auto_conversion_session.sticky_events == []
 
 
 # ---------------------------------------------------------------------------
@@ -478,8 +478,9 @@ class TestR08LastWordOnlyConversion:
         _double_shift(app)
 
         # Sticky buffer should have only 6 events (last word)
-        assert len(app._last_retype_events) == 6, (
-            f"Sticky buffer should have 6 events (last word), got {len(app._last_retype_events)}"
+        assert len(app.auto_conversion_session.sticky_events) == 6, (
+            "Sticky buffer should have 6 events (last word), got "
+            f"{len(app.auto_conversion_session.sticky_events)}"
         )
 
     def test_selection_mode_not_affected_by_trim(self, tmp_path):
@@ -488,14 +489,14 @@ class TestR08LastWordOnlyConversion:
         app._wire_event_bus()
 
         # Simulate fresh selection (no typing — empty buffer)
-        app._selection_valid = True
-        app._prev_sel_text = "some text"
+        app.selection_tracker.set_valid(True)
+        app.selection_tracker.prev_text = "some text"
 
-        # Force state to CONVERTING to trigger _do_conversion
+        # Force state to CONVERTING to trigger manual conversion
         from lswitch.core.states import State
         app.state_manager.context.state = State.CONVERTING
 
-        app._do_conversion()
+        app.conversion_runtime.request_manual_conversion()
 
         # Should NOT crash, conversion engine should have been called
         # (selection mode ignores event_buffer)

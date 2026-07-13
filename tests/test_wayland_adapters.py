@@ -83,6 +83,17 @@ def _real_pyqt_modules():
 
 
 class TestWaylandSystemAdapter:
+    def test_applies_timing_config(self):
+        adapter = WaylandSystemAdapter(
+            virtual_kb=MagicMock(),
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            enable_wl_clipboard=False,
+            timing={"wl_clipboard_timeout": 2.5},
+        )
+
+        assert adapter.WL_CLIPBOARD_TIMEOUT == 2.5
+
     def test_send_key_sequence_uses_virtual_keyboard_combo(self):
         vk = MagicMock()
         adapter = WaylandSystemAdapter(
@@ -350,6 +361,21 @@ class _RecordingWaylandSystem:
         return True
 
 
+class _ExpandablePrimarySystem(_RecordingWaylandSystem):
+    def __init__(self, sequence_text: dict[tuple[str, int], str], primary: str = "tim"):
+        super().__init__(primary=primary)
+        self.sequence_text = sequence_text
+        self.sequence_counts: dict[str, int] = {}
+
+    def send_key_sequence(self, sequence: str, timeout: float = 0.3) -> None:
+        self.keys_sent.append(sequence)
+        count = self.sequence_counts.get(sequence, 0) + 1
+        self.sequence_counts[sequence] = count
+        text = self.sequence_text.get((sequence, count))
+        if text is not None:
+            self.primary = text
+
+
 def _make_selection_adapter(system: _RecordingWaylandSystem) -> WaylandSelectionAdapter:
     adapter = WaylandSelectionAdapter(
         system=system,
@@ -501,6 +527,29 @@ class TestWaylandSelectionAdapter:
         assert system.keys_sent == []
         assert system.clipboard == "current"
 
+    def test_applies_timing_config(self):
+        system = _RecordingWaylandSystem(clipboard="current", primary="selected")
+        adapter = WaylandSelectionAdapter(
+            system=system,
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            timing={
+                "copy_wait_timeout": 0.2,
+                "copy_poll_interval": 0.03,
+                "copy_retry_delay": 0.04,
+                "paste_delay": 0.05,
+                "restore_delay": 0.06,
+                "expand_selection_delay": 0.07,
+            },
+        )
+
+        assert adapter.COPY_WAIT_TIMEOUT == 0.2
+        assert adapter.COPY_POLL_INTERVAL == 0.03
+        assert adapter.COPY_RETRY_DELAY == 0.04
+        assert adapter.PASTE_DELAY == 0.05
+        assert adapter.RESTORE_DELAY == 0.06
+        assert adapter.EXPAND_SELECTION_DELAY == 0.07
+
     def test_primary_strategy_replace_selection_by_typing(self):
         system = _RecordingWaylandSystem(clipboard="current", primary="selected")
         adapter = _make_primary_selection_adapter(system)
@@ -519,7 +568,7 @@ class TestWaylandSelectionAdapter:
         info = adapter.expand_selection_to_word()
 
         assert info.text == "word"
-        assert system.keys_sent == ["ctrl+shift+Left", "ctrl+c"]
+        assert system.keys_sent == ["ctrl+shift+Left", "ctrl+c", "shift+Left", "ctrl+c"]
 
     def test_primary_strategy_expand_reads_primary_without_copy(self):
         system = _RecordingWaylandSystem(clipboard="old", primary="word", copy_text="copied")
@@ -528,8 +577,52 @@ class TestWaylandSelectionAdapter:
         info = adapter.expand_selection_to_word()
 
         assert info.text == "word"
-        assert system.keys_sent == ["ctrl+shift+Left"]
+        assert system.keys_sent == ["ctrl+shift+Left", "shift+Left"]
         assert system.clipboard == "old"
+
+    def test_primary_strategy_expands_through_layout_punctuation(self):
+        system = _ExpandablePrimarySystem(
+            primary="tim",
+            sequence_text={
+                ("ctrl+shift+Left", 1): "tim",
+                ("shift+Left", 1): ";tim",
+                ("shift+Left", 2): "j;tim",
+                ("shift+Left", 3): "vj;tim",
+                ("shift+Left", 4): "cvj;tim",
+                ("shift+Left", 5): " cvj;tim",
+                ("shift+Right", 1): "cvj;tim",
+            },
+        )
+        adapter = _make_primary_selection_adapter(system)
+
+        info = adapter.expand_selection_to_word()
+
+        assert info.text == "cvj;tim"
+        assert system.keys_sent == [
+            "ctrl+shift+Left",
+            "shift+Left",
+            "shift+Left",
+            "shift+Left",
+            "shift+Left",
+            "shift+Left",
+            "shift+Right",
+        ]
+
+    def test_primary_strategy_does_not_expand_through_space(self):
+        system = _ExpandablePrimarySystem(
+            primary="tim",
+            sequence_text={
+                ("ctrl+shift+Left", 1): "tim",
+                ("shift+Left", 1): " tim",
+                ("shift+Right", 1): "tim",
+            },
+        )
+        adapter = _make_primary_selection_adapter(system)
+
+        info = adapter.expand_selection_to_word()
+
+        assert info.text == "tim"
+        assert system.keys_sent == ["ctrl+shift+Left", "shift+Left", "shift+Right"]
 
     def test_invalid_strategy_fails_clearly(self):
         system = _RecordingWaylandSystem()
