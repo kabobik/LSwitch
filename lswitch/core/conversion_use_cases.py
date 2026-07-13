@@ -85,6 +85,7 @@ class ManualConversionPreparation:
     saved_events: list
     saved_count: int
     pending_manual_learning: "PendingManualLearning | None"
+    original_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,7 @@ class UndoAutoConversionUseCase:
         timing: dict | None = None,
         debug: bool = False,
         layout_switch_controller=None,
+        trace_recorder=None,
     ):
         self.virtual_kb = virtual_kb
         self.xkb = xkb
@@ -173,9 +175,38 @@ class UndoAutoConversionUseCase:
         self.timing = timing or {}
         self.debug = debug
         self.layout_switch_controller = layout_switch_controller
+        self.trace_recorder = trace_recorder
 
     def execute(self, marker: AutoConversionMarker) -> bool:
-        self.learning_service.record_auto_undo_correction(marker)
+        started = time.perf_counter()
+        execution_steps: list[DecisionTraceStep] = []
+        try:
+            self.learning_service.record_auto_undo_correction(marker)
+            execution_steps.append(
+                _trace_step(
+                    "execution.learning",
+                    StepState.SUCCEEDED,
+                    correction=True,
+                )
+            )
+        except Exception as exc:
+            execution_steps.append(
+                _trace_step(
+                    "execution.learning",
+                    StepState.FAILED,
+                    decisive=True,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+            )
+            self._record_undo_trace(
+                marker,
+                success=False,
+                execution_steps=tuple(execution_steps),
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+            )
+            raise
+
         operation = (
             self.layout_switch_controller.begin_operation()
             if self.layout_switch_controller is not None
@@ -187,26 +218,165 @@ class UndoAutoConversionUseCase:
                 KEY_BACKSPACE,
                 n_times=marker.converted_len + (1 if marker.had_space else 0),
             )
+            execution_steps.append(
+                _trace_step(
+                    "execution.delete",
+                    StepState.SUCCEEDED,
+                    delete_count=(
+                        marker.converted_len
+                        + (1 if marker.had_space else 0)
+                    ),
+                )
+            )
             target = self.layout_service.find_available_layout_for_lang(
                 marker.original_lang
+            )
+            execution_steps.append(
+                _trace_step(
+                    "execution.target_layout",
+                    (
+                        StepState.SUCCEEDED
+                        if target is not None
+                        else StepState.NOT_MATCHED
+                    ),
+                    target_lang=marker.original_lang,
+                    target_layout=getattr(target, "name", None),
+                )
             )
             if target is not None:
                 if operation is not None:
                     operation.switch_to(target)
                 else:
                     self.xkb.switch_layout(target=target)
+                execution_steps.append(
+                    _trace_step(
+                        "execution.layout_switch",
+                        StepState.SUCCEEDED,
+                        target_layout=getattr(target, "name", None),
+                    )
+                )
             time.sleep(self.timing.get("undo_before_replay_delay", 0.03))
             self.virtual_kb.replay_events(marker.word_events)
+            execution_steps.append(
+                _trace_step(
+                    "execution.replay",
+                    StepState.SUCCEEDED,
+                    event_count=len(marker.word_events),
+                )
+            )
             if marker.had_space:
                 self.virtual_kb.tap_key(KEY_SPACE)
+                execution_steps.append(
+                    _trace_step(
+                        "execution.space",
+                        StepState.SUCCEEDED,
+                    )
+                )
             if operation is not None:
                 operation.finish(success=True)
+                execution_steps.append(
+                    _trace_step(
+                        "execution.layout_policy",
+                        StepState.SUCCEEDED,
+                        keep_target=operation.keep_target_after_conversion,
+                    )
+                )
+            execution_steps.append(
+                _trace_step(
+                    "execution.success",
+                    StepState.SUCCEEDED,
+                    decisive=True,
+                )
+            )
+            self._record_undo_trace(
+                marker,
+                success=True,
+                execution_steps=tuple(execution_steps),
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+            )
             return True
         except Exception as exc:
             logger.error("Undo auto-conversion failed: %s", exc)
             if operation is not None:
                 operation.finish(success=False)
+            execution_steps.append(
+                _trace_step(
+                    "execution.error",
+                    StepState.FAILED,
+                    decisive=True,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+            )
+            self._record_undo_trace(
+                marker,
+                success=False,
+                execution_steps=tuple(execution_steps),
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+            )
             return False
+
+    def _record_undo_trace(
+        self,
+        marker: AutoConversionMarker,
+        *,
+        success: bool,
+        execution_steps: tuple[DecisionTraceStep, ...],
+        duration_ms: float,
+    ) -> None:
+        if not (
+            self.trace_recorder is not None
+            and self.trace_recorder.enabled
+        ):
+            return
+        try:
+            from lswitch.intelligence.auto_detector import AutoDetector
+
+            current_text, source_lang = AutoDetector._converted_word(
+                marker.original_word.lower(),
+                marker.original_lang,
+            )
+        except Exception:
+            current_text = None
+            source_lang = marker.target_lang
+        current_text = current_text or marker.original_word
+        attempt = DecisionAttempt(
+            candidate=current_text,
+            converted_candidate=marker.original_word,
+            source_lang=source_lang or marker.target_lang,
+            target_lang=marker.original_lang,
+            outcome=DecisionOutcome.CONVERT,
+            steps=(
+                _trace_step(
+                    "undo.recent_auto_marker",
+                    StepState.MATCHED,
+                    decisive=True,
+                    marker_kind=marker.kind,
+                    had_space=marker.had_space,
+                ),
+            ),
+        )
+        _record_trace_safely(
+            self.trace_recorder,
+            DecisionTrace(
+                correlation_id=-time.monotonic_ns(),
+                trigger=TraceTrigger.UNDO,
+                original=current_text,
+                converted=marker.original_word,
+                source_lang=source_lang or marker.target_lang,
+                target_lang=marker.original_lang,
+                decision=DecisionOutcome.CONVERT,
+                execution=(
+                    ExecutionOutcome.SUCCEEDED
+                    if success
+                    else ExecutionOutcome.FAILED
+                ),
+                conversion_mode="undo",
+                attempts=(attempt,),
+                execution_steps=execution_steps,
+                duration_ms=duration_ms,
+            ),
+        )
 
 
 class RecentAutoConversionUseCase:
@@ -303,6 +473,7 @@ class ManualConversionPreparer:
                     prepared_buffer.trailing_space_count,
                 )
 
+        original_text = self.decode_events(saved_events)
         logger.debug(
             "DoConversion: selection_valid=%s, selection_repeat=%s, "
             "effective_selection=%s, chars_in_buffer=%d, "
@@ -313,7 +484,7 @@ class ManualConversionPreparer:
             saved_count,
             len(saved_events),
             len(sticky_events),
-            self.decode_events(saved_events),
+            original_text,
         )
 
         return ManualConversionPreparation(
@@ -321,6 +492,7 @@ class ManualConversionPreparer:
             saved_events=saved_events,
             saved_count=saved_count,
             pending_manual_learning=pending_manual_learning,
+            original_text=original_text,
         )
 
     def _current_layout(self):
@@ -363,10 +535,12 @@ class ManualConversionUseCase:
         conversion_engine: "ConversionEngine",
         learning_service: "LearningService",
         post_conversion_updater: PostConversionStateUpdater,
+        trace_recorder=None,
     ):
         self.conversion_engine = conversion_engine
         self.learning_service = learning_service
         self.post_conversion_updater = post_conversion_updater
+        self.trace_recorder = trace_recorder
 
     def execute(
         self,
@@ -376,33 +550,193 @@ class ManualConversionUseCase:
         saved_events: list,
         saved_count: int,
         pending_manual_learning: "PendingManualLearning | None",
+        original_text: str = "",
     ) -> ManualConversionResult:
-        success = self.conversion_engine.convert(
-            context,
-            selection_valid=selection_valid_for_convert,
-        )
+        started = time.perf_counter()
+        success: bool | None = None
+        learning_recorded = False
+        try:
+            success = self.conversion_engine.convert(
+                context,
+                selection_valid=selection_valid_for_convert,
+            )
 
-        if success and self.learning_service.user_dict is not None:
-            if pending_manual_learning is not None:
-                self.learning_service.record_manual_conversion(
-                    pending_manual_learning.word,
-                    pending_manual_learning.lang,
-                    pending_manual_learning.is_selection_conversion,
-                )
-            elif saved_count == 0:
-                self.learning_service.record_selection_conversion(
-                    getattr(self.conversion_engine, "last_conversion", None)
-                )
+            if success and self.learning_service.user_dict is not None:
+                if pending_manual_learning is not None:
+                    self.learning_service.record_manual_conversion(
+                        pending_manual_learning.word,
+                        pending_manual_learning.lang,
+                        pending_manual_learning.is_selection_conversion,
+                    )
+                    learning_recorded = True
+                elif saved_count == 0:
+                    self.learning_service.record_selection_conversion(
+                        getattr(self.conversion_engine, "last_conversion", None)
+                    )
+                    learning_recorded = True
 
-        sticky_events = self.post_conversion_updater.update(
+            sticky_events = self.post_conversion_updater.update(
+                success=success,
+                saved_count=saved_count,
+                saved_events=saved_events,
+                selection_valid_for_convert=selection_valid_for_convert,
+            )
+        except Exception as exc:
+            self._record_manual_trace(
+                original_text=original_text,
+                pending_manual_learning=pending_manual_learning,
+                success=success,
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+                learning_recorded=learning_recorded,
+                error=exc,
+            )
+            raise
+
+        self._record_manual_trace(
+            original_text=original_text,
+            pending_manual_learning=pending_manual_learning,
             success=success,
-            saved_count=saved_count,
-            saved_events=saved_events,
-            selection_valid_for_convert=selection_valid_for_convert,
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+            learning_recorded=learning_recorded,
         )
         return ManualConversionResult(
-            success=success,
+            success=bool(success),
             sticky_events=sticky_events,
+        )
+
+    def _record_manual_trace(
+        self,
+        *,
+        original_text: str,
+        pending_manual_learning: "PendingManualLearning | None",
+        success: bool | None,
+        duration_ms: float,
+        learning_recorded: bool,
+        error: Exception | None = None,
+    ) -> None:
+        if not (
+            self.trace_recorder is not None
+            and self.trace_recorder.enabled
+        ):
+            return
+
+        from lswitch.core.conversion_engine import ConversionModeDecision
+
+        mode_decision = getattr(
+            self.conversion_engine,
+            "last_mode_decision",
+            None,
+        )
+        if isinstance(mode_decision, ConversionModeDecision):
+            mode = mode_decision.mode
+            decision_steps = mode_decision.steps
+        else:
+            mode = "unknown"
+            decision_steps = (
+                _trace_step(
+                    "manual.mode.unknown",
+                    StepState.SKIPPED,
+                    decisive=True,
+                ),
+            )
+
+        last_conversion = getattr(
+            self.conversion_engine,
+            "last_conversion",
+            None,
+        )
+        if not isinstance(last_conversion, dict):
+            last_conversion = {}
+        original = (
+            last_conversion.get("original")
+            or (
+                pending_manual_learning.word
+                if pending_manual_learning is not None
+                else original_text
+            )
+            or ""
+        )
+        converted = last_conversion.get("converted") or None
+        if converted is None and original and success:
+            try:
+                from lswitch.core.text_converter import invert_layout_runs
+
+                converted = "".join(
+                    text
+                    for text, _lang in invert_layout_runs(original)
+                )
+            except Exception:
+                converted = None
+
+        source_lang = (
+            pending_manual_learning.lang
+            if pending_manual_learning is not None
+            else None
+        )
+        target_lang = last_conversion.get("target_lang")
+        if target_lang is None and source_lang in ("en", "ru"):
+            target_lang = "ru" if source_lang == "en" else "en"
+
+        execution_steps = list(
+            getattr(
+                self.conversion_engine,
+                "last_execution_steps",
+                (),
+            )
+            or ()
+        )
+        if learning_recorded:
+            execution_steps.append(
+                _trace_step(
+                    "execution.learning",
+                    StepState.SUCCEEDED,
+                )
+            )
+        if error is not None:
+            execution_steps.append(
+                _trace_step(
+                    "execution.error",
+                    StepState.FAILED,
+                    decisive=True,
+                    error_type=type(error).__name__,
+                    error=str(error),
+                )
+            )
+
+        decision_outcome = (
+            DecisionOutcome.SKIP
+            if not original and not success
+            else DecisionOutcome.CONVERT
+        )
+        attempt = DecisionAttempt(
+            candidate=original,
+            converted_candidate=converted,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            outcome=decision_outcome,
+            steps=decision_steps,
+        )
+        _record_trace_safely(
+            self.trace_recorder,
+            DecisionTrace(
+                correlation_id=-time.monotonic_ns(),
+                trigger=TraceTrigger.MANUAL,
+                original=original,
+                converted=converted,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                decision=decision_outcome,
+                execution=(
+                    ExecutionOutcome.SUCCEEDED
+                    if success and error is None
+                    else ExecutionOutcome.FAILED
+                ),
+                conversion_mode=mode,
+                attempts=(attempt,),
+                execution_steps=tuple(execution_steps),
+                duration_ms=duration_ms,
+                truncated=attempt.truncated,
+            ),
         )
 
 

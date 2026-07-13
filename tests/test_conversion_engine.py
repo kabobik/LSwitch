@@ -106,6 +106,62 @@ class TestChooseMode:
 
         assert engine.choose_mode(ctx, selection_valid=True) == "selection"
 
+    @pytest.mark.parametrize(
+        ("backspace", "chars", "selection_valid", "mode", "reason_id"),
+        [
+            (
+                True,
+                5,
+                True,
+                "selection",
+                "manual.mode.backspace_selection",
+            ),
+            (
+                False,
+                5,
+                True,
+                "retype",
+                "manual.mode.buffer_retype",
+            ),
+            (
+                False,
+                0,
+                True,
+                "selection",
+                "manual.mode.fresh_selection",
+            ),
+            (
+                False,
+                0,
+                False,
+                "selection_expand",
+                "manual.mode.expand_fallback",
+            ),
+        ],
+    )
+    def test_structured_mode_decision_records_decisive_priority(
+        self,
+        backspace,
+        chars,
+        selection_valid,
+        mode,
+        reason_id,
+    ):
+        engine, *_ = _make_engine()
+        ctx = StateContext()
+        ctx.backspace_hold_active = backspace
+        ctx.chars_in_buffer = chars
+
+        decision = engine.choose_mode_decision(
+            ctx,
+            selection_valid=selection_valid,
+        )
+
+        assert decision.mode == mode
+        assert decision.reason_id == reason_id
+        assert decision.steps[-1].rule_id == reason_id
+        assert decision.steps[-1].decisive is True
+
 
 # ---------------------------------------------------------------------------
 # convert() tests

@@ -65,6 +65,7 @@ class RetypeMode(BaseMode):
         self.before_replay_delay = float(
             timing.get("retype_before_replay_delay", 0.05)
         )
+        self.last_trace_steps = ()
 
     def execute(self, context: "StateContext") -> bool:
         if context.chars_in_buffer <= 0:
@@ -91,12 +92,14 @@ class RetypeMode(BaseMode):
             debug=self.debug,
             layout_switch_controller=self.layout_switch_controller,
         )
-        return service.retype_events(
+        success = service.retype_events(
             saved_events,
             delete_count=n_chars,
             switch_to_next=True,
             before_replay_delay=self.before_replay_delay,
         )
+        self.last_trace_steps = service.last_trace_steps
+        return success
 
 
 class SelectionMode(BaseMode):

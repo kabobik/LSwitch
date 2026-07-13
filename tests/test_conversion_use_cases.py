@@ -23,6 +23,7 @@ from lswitch.core.conversion_use_cases import (
     SpaceAutoConversionUseCase,
     UndoAutoConversionUseCase,
 )
+from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.events import KeyEventData
 from lswitch.core.layout_service import LayoutService
 from lswitch.core.layout_switch_controller import LayoutSwitchController
@@ -1058,3 +1059,146 @@ def test_related_mid_word_and_space_traces_share_correlation_id():
         TraceTrigger.SPACE_AUTO,
     }
     assert {trace.correlation_id for trace in traces} == {77}
+
+
+def test_manual_retype_trace_records_mode_and_execution_steps():
+    recorder = DecisionTraceRecorder(enabled=True)
+    xkb = MockXKBAdapter()
+    virtual_kb = MagicMock()
+    engine = ConversionEngine(
+        xkb=xkb,
+        selection=MagicMock(),
+        virtual_kb=virtual_kb,
+        dictionary=MagicMock(),
+        system=MagicMock(),
+        timing={"retype_before_replay_delay": 0},
+    )
+    learning_service = MagicMock()
+    learning_service.user_dict = None
+    updater = MagicMock()
+    updater.update.return_value = []
+    use_case = ManualConversionUseCase(
+        conversion_engine=engine,
+        learning_service=learning_service,
+        post_conversion_updater=updater,
+        trace_recorder=recorder,
+    )
+    context = _context_with_events([34, 35, 48, 32, 20, 49])
+
+    result = use_case.execute(
+        context=context,
+        selection_valid_for_convert=False,
+        saved_events=list(context.event_buffer),
+        saved_count=6,
+        pending_manual_learning=PendingManualLearning(
+            "ghbdtn",
+            "en",
+            False,
+        ),
+        original_text="ghbdtn",
+    )
+
+    assert result.success is True
+    trace = recorder.snapshot()[0]
+    assert trace.trigger is TraceTrigger.MANUAL
+    assert trace.decision is DecisionOutcome.CONVERT
+    assert trace.execution is ExecutionOutcome.SUCCEEDED
+    assert trace.conversion_mode == "retype"
+    assert trace.original == "ghbdtn"
+    assert trace.converted == "привет"
+    assert trace.attempts[0].steps[-1].rule_id == "manual.mode.buffer_retype"
+    assert any(
+        step.rule_id == "execution.replay"
+        for step in trace.execution_steps
+    )
+
+
+def test_manual_trace_records_engine_exception_without_swallowing_it():
+    recorder = DecisionTraceRecorder(enabled=True)
+    engine = MagicMock()
+    engine.convert.side_effect = RuntimeError("manual failed")
+    engine.last_mode_decision = None
+    engine.last_execution_steps = ()
+    learning_service = MagicMock()
+    updater = MagicMock()
+    use_case = ManualConversionUseCase(
+        conversion_engine=engine,
+        learning_service=learning_service,
+        post_conversion_updater=updater,
+        trace_recorder=recorder,
+    )
+
+    try:
+        use_case.execute(
+            context=StateContext(),
+            selection_valid_for_convert=False,
+            saved_events=[],
+            saved_count=0,
+            pending_manual_learning=None,
+            original_text="word",
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("manual exception was not propagated")
+
+    trace = recorder.snapshot()[0]
+    assert trace.execution is ExecutionOutcome.FAILED
+    assert trace.decision is DecisionOutcome.CONVERT
+    assert trace.execution_steps[-1].rule_id == "execution.error"
+
+
+def test_undo_trace_records_successful_restore_path():
+    recorder = DecisionTraceRecorder(enabled=True)
+    marker = AutoConversionMarker.for_space_conversion(
+        original_word="ghbdtn",
+        original_lang="en",
+        direction="en_to_ru",
+        word_events=[KeyEventData(code=34, value=1)],
+    )
+    xkb = MockXKBAdapter()
+    xkb.switch_layout(target=xkb.get_layouts()[1])
+    virtual_kb = MagicMock()
+    learning_service = MagicMock()
+    use_case = UndoAutoConversionUseCase(
+        virtual_kb=virtual_kb,
+        xkb=xkb,
+        learning_service=learning_service,
+        timing={"undo_before_replay_delay": 0},
+        trace_recorder=recorder,
+    )
+
+    assert use_case.execute(marker) is True
+
+    trace = recorder.snapshot()[0]
+    assert trace.trigger is TraceTrigger.UNDO
+    assert trace.original == "привет"
+    assert trace.converted == "ghbdtn"
+    assert trace.execution is ExecutionOutcome.SUCCEEDED
+    assert trace.execution_steps[-1].rule_id == "execution.success"
+
+
+def test_undo_trace_records_execution_failure():
+    recorder = DecisionTraceRecorder(enabled=True)
+    marker = AutoConversionMarker.for_mid_word_conversion(
+        original_word="ghbd",
+        original_lang="en",
+        direction="en_to_ru",
+        word_events=[],
+    )
+    virtual_kb = MagicMock()
+    virtual_kb.tap_key.side_effect = RuntimeError("delete failed")
+    use_case = UndoAutoConversionUseCase(
+        virtual_kb=virtual_kb,
+        xkb=MockXKBAdapter(),
+        learning_service=MagicMock(),
+        timing={"undo_before_replay_delay": 0},
+        trace_recorder=recorder,
+    )
+
+    assert use_case.execute(marker) is False
+
+    trace = recorder.snapshot()[0]
+    assert trace.decision is DecisionOutcome.CONVERT
+    assert trace.execution is ExecutionOutcome.FAILED
+    assert trace.execution_steps[-1].rule_id == "execution.error"

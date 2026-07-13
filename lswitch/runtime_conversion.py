@@ -133,6 +133,7 @@ def create_manual_conversion_controller(
     extract_last_word,
     update_selection_baseline,
     layout_switch_controller=None,
+    trace_recorder=None,
 ):
     """Create the manual conversion orchestration controller."""
     from lswitch.core.manual_conversion_controller import ManualConversionController
@@ -154,6 +155,8 @@ def create_manual_conversion_controller(
     }
     if layout_switch_controller is not None:
         kwargs["layout_switch_controller"] = layout_switch_controller
+    if trace_recorder is not None:
+        kwargs["trace_recorder"] = trace_recorder
     return ManualConversionController(
         **kwargs,
     )
@@ -178,6 +181,7 @@ def create_synced_manual_conversion_controller(
     extract_last_word,
     update_selection_baseline,
     layout_switch_controller=None,
+    trace_recorder=None,
 ):
     """Create manual conversion controller with learning service synced first."""
     return create_manual_conversion_controller(
@@ -201,6 +205,7 @@ def create_synced_manual_conversion_controller(
         extract_last_word=extract_last_word,
         update_selection_baseline=update_selection_baseline,
         layout_switch_controller=layout_switch_controller,
+        trace_recorder=trace_recorder,
     )
 
 
@@ -393,6 +398,7 @@ class ConversionRuntimeFacade:
                 extract_last_word=self.extract_last_word,
                 update_selection_baseline=self.update_selection_baseline,
                 layout_switch_controller=self.get_layout_switch_controller(),
+                trace_recorder=self.trace_recorder,
             ),
             session=self.auto_conversion_session,
         )

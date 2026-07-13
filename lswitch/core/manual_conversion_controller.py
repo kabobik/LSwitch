@@ -41,6 +41,7 @@ class ManualConversionController:
         extract_last_word,
         update_selection_baseline,
         layout_switch_controller=None,
+        trace_recorder=None,
     ):
         self.state_manager = state_manager
         self.selection_tracker = selection_tracker
@@ -56,6 +57,7 @@ class ManualConversionController:
         self.extract_last_word = extract_last_word
         self.update_selection_baseline = update_selection_baseline
         self.layout_switch_controller = layout_switch_controller
+        self.trace_recorder = trace_recorder
 
     def execute(
         self,
@@ -82,6 +84,7 @@ class ManualConversionController:
                     timing=self.timing,
                     debug=self.debug,
                     layout_switch_controller=self.layout_switch_controller,
+                    trace_recorder=self.trace_recorder,
                 )
             )
             result = recent_auto.execute(
@@ -120,6 +123,7 @@ class ManualConversionController:
                 post_conversion_updater=PostConversionStateUpdater(
                     self.selection_tracker
                 ),
+                trace_recorder=self.trace_recorder,
             )
             result = manual_conversion.execute(
                 context=self.state_manager.context,
@@ -129,6 +133,7 @@ class ManualConversionController:
                 saved_events=preparation.saved_events,
                 saved_count=preparation.saved_count,
                 pending_manual_learning=preparation.pending_manual_learning,
+                original_text=preparation.original_text,
             )
             sticky_events = result.sticky_events
         finally:
