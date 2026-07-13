@@ -70,6 +70,11 @@ def test_prefix_dictionary_can_merge_optional_system_words():
     assert dictionary.in_lang("en", "customword") is True
     assert dictionary.has_prefix("ru", "каст") is True
     assert loader.loaded_langs == ["en", "ru"]
+    en_sources = dictionary.sources_for_lang("en")
+    assert [source.kind for source in en_sources] == ["builtin", "system"]
+    assert en_sources[1].enabled is True
+    assert en_sources[1].loaded is True
+    assert en_sources[1].word_count == 1
 
 
 def test_dictionary_service_exposes_word_sets_by_language():

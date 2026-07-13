@@ -4,6 +4,20 @@ from __future__ import annotations
 
 from bisect import bisect_left
 from collections.abc import Iterable
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class PrefixDictionarySource:
+    """Lightweight metadata for a word source included in the prefix index."""
+
+    lang: str
+    kind: str
+    enabled: bool
+    loaded: bool
+    word_count: int = 0
+    path: str | None = None
+    explicit: bool = False
 
 
 class PrefixDictionary:
@@ -15,11 +29,38 @@ class PrefixDictionary:
         en_words: Iterable[str] | None = None,
         ru_words: Iterable[str] | None = None,
         min_prefix_len: int = 1,
+        sources: dict[str, Iterable[PrefixDictionarySource]] | None = None,
     ):
         self.min_prefix_len = max(1, min_prefix_len)
+        normalized_en = tuple(sorted(self._normalize_words(en_words or ())))
+        normalized_ru = tuple(sorted(self._normalize_words(ru_words or ())))
         self._words = {
-            "en": tuple(sorted(self._normalize_words(en_words or ()))),
-            "ru": tuple(sorted(self._normalize_words(ru_words or ()))),
+            "en": normalized_en,
+            "ru": normalized_ru,
+        }
+        default_sources = {
+            "en": (
+                PrefixDictionarySource(
+                    lang="en",
+                    kind="builtin",
+                    enabled=True,
+                    loaded=True,
+                    word_count=len(normalized_en),
+                ),
+            ),
+            "ru": (
+                PrefixDictionarySource(
+                    lang="ru",
+                    kind="builtin",
+                    enabled=True,
+                    loaded=True,
+                    word_count=len(normalized_ru),
+                ),
+            ),
+        }
+        self._sources = {
+            lang: tuple((sources or default_sources).get(lang, ()))
+            for lang in ("en", "ru")
         }
 
     @classmethod
@@ -31,15 +72,39 @@ class PrefixDictionary:
         system_loader=None,
         include_system: bool = False,
     ) -> "PrefixDictionary":
-        en_words = dictionary.words_for_lang("en")
-        ru_words = dictionary.words_for_lang("ru")
-        if include_system and system_loader is not None:
-            en_words = cls._merge_system_words(en_words, system_loader, "en")
-            ru_words = cls._merge_system_words(ru_words, system_loader, "ru")
+        words_by_lang = {
+            "en": dictionary.words_for_lang("en"),
+            "ru": dictionary.words_for_lang("ru"),
+        }
+        sources: dict[str, list[PrefixDictionarySource]] = {
+            lang: [
+                PrefixDictionarySource(
+                    lang=lang,
+                    kind="builtin",
+                    enabled=True,
+                    loaded=True,
+                    word_count=len(words),
+                )
+            ]
+            for lang, words in words_by_lang.items()
+        }
+        if system_loader is not None:
+            for lang in ("en", "ru"):
+                loaded = system_loader.load(lang) if include_system else None
+                if loaded is not None:
+                    words_by_lang[lang].update(loaded.words)
+                status = cls._system_source_status(
+                    system_loader,
+                    lang,
+                    enabled=include_system,
+                    loaded=loaded,
+                )
+                sources[lang].append(status)
         return cls(
-            en_words=en_words,
-            ru_words=ru_words,
+            en_words=words_by_lang["en"],
+            ru_words=words_by_lang["ru"],
             min_prefix_len=min_prefix_len,
+            sources=sources,
         )
 
     def in_lang(self, lang: str, word: str | None) -> bool:
@@ -62,6 +127,10 @@ class PrefixDictionary:
         end = bisect_left(words, normalized + "\U0010ffff")
         return end - start
 
+    def sources_for_lang(self, lang: str) -> tuple[PrefixDictionarySource, ...]:
+        """Return immutable metadata for sources used by one language index."""
+        return self._sources.get(lang, ())
+
     @staticmethod
     def _normalize_token(token: str | None) -> str:
         if not isinstance(token, str):
@@ -77,9 +146,30 @@ class PrefixDictionary:
         return normalized
 
     @staticmethod
-    def _merge_system_words(words: set[str], system_loader, lang: str) -> set[str]:
-        merged = set(words)
-        loaded = system_loader.load(lang)
-        if loaded is not None:
-            merged.update(loaded.words)
-        return merged
+    def _system_source_status(
+        system_loader,
+        lang: str,
+        *,
+        enabled: bool,
+        loaded,
+    ) -> PrefixDictionarySource:
+        get_status = getattr(system_loader, "get_status", None)
+        status = get_status(lang, enabled=enabled) if callable(get_status) else None
+        path = getattr(status, "path", None)
+        if path is None and loaded is not None:
+            path = getattr(loaded, "path", None)
+        word_count = getattr(status, "word_count", None)
+        if word_count is None:
+            word_count = len(getattr(loaded, "words", ())) if loaded is not None else 0
+        loaded_flag = getattr(status, "loaded", None)
+        if loaded_flag is None:
+            loaded_flag = loaded is not None
+        return PrefixDictionarySource(
+            lang=lang,
+            kind="system",
+            enabled=bool(getattr(status, "enabled", enabled)),
+            loaded=bool(loaded_flag),
+            word_count=int(word_count),
+            path=str(path) if path is not None else None,
+            explicit=bool(getattr(status, "explicit", False)),
+        )
