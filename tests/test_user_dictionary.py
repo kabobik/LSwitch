@@ -143,3 +143,55 @@ def test_saved_toml_omits_cancelled_counterweights(tmp_dict, tmp_path):
     saved = (tmp_path / "user_dict.toml").read_text(encoding="utf-8")
 
     assert '"привет"' not in saved
+
+
+def test_policy_lookup_reports_exact_convert_and_keep(tmp_dict):
+    tmp_dict.add_confirmation("ghbdtn", "en", weight_step=2)
+    tmp_dict.add_correction("hello", "en", weight_step=2)
+
+    convert = tmp_dict.lookup_policy("ghbdtn", "en", min_weight=2)
+    keep = tmp_dict.lookup_policy("hello", "en", min_weight=2)
+
+    assert convert.exact_action == "convert"
+    assert convert.exact_weight == 2
+    assert keep.exact_action == "keep"
+    assert keep.exact_weight == -2
+
+
+def test_policy_lookup_reserves_proper_prefix(tmp_dict):
+    tmp_dict.add_confirmation("ghbdtn", "en", weight_step=2)
+    tmp_dict.add_correction("ghbdtnbr", "en", weight_step=2)
+
+    match = tmp_dict.lookup_policy("ghbd", "en", min_weight=2)
+
+    assert match.exact_action is None
+    assert match.has_convert_descendants is True
+    assert match.has_keep_descendants is True
+    assert match.has_any_match is True
+
+
+def test_policy_lookup_reports_opposite_descendant(tmp_dict):
+    tmp_dict.add_confirmation("foo", "en", weight_step=2)
+    tmp_dict.add_correction("foobar", "en", weight_step=2)
+
+    match = tmp_dict.lookup_policy("foo", "en", min_weight=2)
+
+    assert match.exact_action == "convert"
+    assert match.has_keep_descendants is True
+    assert match.has_opposite_descendant is True
+
+
+def test_policy_lookup_ignores_entries_below_threshold(tmp_dict):
+    tmp_dict.add_confirmation("legacy", "en", weight_step=1)
+
+    match = tmp_dict.lookup_policy("leg", "en", min_weight=2)
+
+    assert match.has_any_match is False
+
+
+def test_policy_index_refreshes_after_manual_learning(tmp_dict):
+    assert tmp_dict.lookup_policy("ghb", "en", min_weight=2).has_any_match is False
+
+    tmp_dict.add_confirmation("ghbdtn", "en", weight_step=2)
+
+    assert tmp_dict.lookup_policy("ghb", "en", min_weight=2).has_descendants is True

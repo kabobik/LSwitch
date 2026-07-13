@@ -26,8 +26,6 @@ system_dict_ru_path = ""
 
 # Enable the self-learning user dictionary.
 user_dict_enabled = false
-# Confirm accepted automatic conversions on the next word boundary.
-user_dict_auto_confirm = false
 # Minimum learned score required to affect detection.
 user_dict_min_weight = 2
 

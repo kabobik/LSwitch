@@ -15,6 +15,7 @@ from lswitch.intelligence.prefix_dictionary import (
     PrefixDictionary,
     PrefixDictionarySource,
 )
+from lswitch.intelligence.user_dictionary import UserPolicyMatch
 
 
 @dataclass(frozen=True)
@@ -109,34 +110,6 @@ class MidWordDetector:
             )
 
         steps: list[DecisionTraceStep] = []
-
-        if len(typed_prefix) < self.min_prefix_len:
-            steps.append(
-                self._step(
-                    "midword.prefix_length",
-                    StepState.NOT_MATCHED,
-                    decisive=True,
-                    length=len(typed_prefix),
-                    minimum=self.min_prefix_len,
-                )
-            )
-            return MidWordDecision(
-                False,
-                "prefix below threshold",
-                current_lang,
-                typed_prefix=typed_prefix,
-                reason_id="midword.prefix_length",
-                outcome=DecisionOutcome.SKIP,
-                steps=tuple(steps),
-            )
-        steps.append(
-            self._step(
-                "midword.prefix_length",
-                StepState.MATCHED,
-                length=len(typed_prefix),
-                minimum=self.min_prefix_len,
-            )
-        )
 
         if typed_prefix != typed_prefix.lower():
             steps.append(
@@ -235,6 +208,143 @@ class MidWordDetector:
             )
         )
 
+        user_policy = self._lookup_user_policy(typed_prefix, current_lang)
+        if user_policy is None:
+            steps.append(
+                self._step(
+                    "midword.user_dictionary.disabled",
+                    StepState.SKIPPED,
+                )
+            )
+        elif user_policy.exact_action == "convert":
+            if user_policy.has_keep_descendants:
+                steps.append(
+                    self._step(
+                        "midword.user_dictionary.prefix_reserved",
+                        StepState.MATCHED,
+                        decisive=True,
+                        prefix=typed_prefix,
+                        exact_action="convert",
+                        weight=user_policy.exact_weight,
+                        opposite_descendant=True,
+                    )
+                )
+                return MidWordDecision(
+                    False,
+                    "user dictionary prefix reserved by longer keep decision",
+                    current_lang,
+                    target_lang=target_lang,
+                    typed_prefix=typed_prefix,
+                    converted_prefix=converted_prefix,
+                    reason_id="midword.user_dictionary.prefix_reserved",
+                    outcome=DecisionOutcome.KEEP,
+                    steps=tuple(steps),
+                )
+            steps.append(
+                self._step(
+                    "midword.user_dictionary.exact_convert",
+                    StepState.MATCHED,
+                    decisive=True,
+                    prefix=typed_prefix,
+                    weight=user_policy.exact_weight,
+                    threshold=self.user_dict_min_weight,
+                )
+            )
+            return MidWordDecision(
+                True,
+                "exact user dictionary convert decision",
+                current_lang,
+                target_lang=target_lang,
+                typed_prefix=typed_prefix,
+                converted_prefix=converted_prefix,
+                reason_id="midword.user_dictionary.exact_convert",
+                outcome=DecisionOutcome.CONVERT,
+                steps=tuple(steps),
+            )
+        elif user_policy.exact_action == "keep":
+            steps.append(
+                self._step(
+                    "midword.user_dictionary.exact_keep",
+                    StepState.MATCHED,
+                    decisive=True,
+                    prefix=typed_prefix,
+                    weight=user_policy.exact_weight,
+                    threshold=-self.user_dict_min_weight,
+                )
+            )
+            return MidWordDecision(
+                False,
+                "exact user dictionary keep decision",
+                current_lang,
+                target_lang=target_lang,
+                typed_prefix=typed_prefix,
+                converted_prefix=converted_prefix,
+                reason_id="midword.user_dictionary.exact_keep",
+                outcome=DecisionOutcome.KEEP,
+                steps=tuple(steps),
+            )
+        elif user_policy.has_descendants:
+            steps.append(
+                self._step(
+                    "midword.user_dictionary.prefix_reserved",
+                    StepState.MATCHED,
+                    decisive=True,
+                    prefix=typed_prefix,
+                    convert_descendants=user_policy.has_convert_descendants,
+                    keep_descendants=user_policy.has_keep_descendants,
+                )
+            )
+            return MidWordDecision(
+                False,
+                "user dictionary prefix reserved",
+                current_lang,
+                target_lang=target_lang,
+                typed_prefix=typed_prefix,
+                converted_prefix=converted_prefix,
+                reason_id="midword.user_dictionary.prefix_reserved",
+                outcome=DecisionOutcome.KEEP,
+                steps=tuple(steps),
+            )
+        else:
+            steps.append(
+                self._step(
+                    "midword.user_dictionary.no_match",
+                    StepState.NOT_MATCHED,
+                    prefix=typed_prefix,
+                    threshold=self.user_dict_min_weight,
+                )
+            )
+
+        if len(typed_prefix) < self.min_prefix_len:
+            steps.append(
+                self._step(
+                    "midword.prefix_length",
+                    StepState.NOT_MATCHED,
+                    decisive=True,
+                    length=len(typed_prefix),
+                    minimum=self.min_prefix_len,
+                )
+            )
+            return MidWordDecision(
+                False,
+                "prefix below threshold",
+                current_lang,
+                target_lang=target_lang,
+                typed_prefix=typed_prefix,
+                converted_prefix=converted_prefix,
+                reason_id="midword.prefix_length",
+                outcome=DecisionOutcome.SKIP,
+                steps=tuple(steps),
+            )
+        steps.append(
+            self._step(
+                "midword.prefix_length",
+                StepState.MATCHED,
+                length=len(typed_prefix),
+                minimum=self.min_prefix_len,
+            )
+        )
+
         source_count = self.prefix_dictionary.prefix_count(current_lang, typed_prefix)
         target_count = self.prefix_dictionary.prefix_count(target_lang, converted_prefix)
         source_sources = self.prefix_dictionary.sources_for_lang(current_lang)
@@ -317,52 +427,6 @@ class MidWordDetector:
             )
         )
 
-        protected = self._find_protected_prefix(typed_prefix, current_lang)
-        if protected is not None:
-            protected_prefix, weight = protected
-            steps.append(
-                self._step(
-                    "midword.user_protection",
-                    StepState.MATCHED,
-                    decisive=True,
-                    prefix=protected_prefix,
-                    weight=weight,
-                    threshold=-self.user_dict_min_weight,
-                )
-            )
-            return MidWordDecision(
-                False,
-                (
-                    "user dictionary protects prefix "
-                    f"{protected_prefix!r}: weight={weight}"
-                ),
-                current_lang,
-                target_lang=target_lang,
-                typed_prefix=typed_prefix,
-                converted_prefix=converted_prefix,
-                source_prefix_count=source_count,
-                target_prefix_count=target_count,
-                reason_id="midword.user_protection",
-                outcome=DecisionOutcome.KEEP,
-                steps=tuple(steps),
-                dictionary_sources=dictionary_sources,
-            )
-
-        steps.append(
-            self._step(
-                (
-                    "midword.user_protection"
-                    if self.user_dict is not None
-                    else "midword.user_dictionary.disabled"
-                ),
-                (
-                    StepState.NOT_MATCHED
-                    if self.user_dict is not None
-                    else StepState.SKIPPED
-                ),
-                threshold=-self.user_dict_min_weight,
-            )
-        )
         steps.append(
             self._step(
                 "midword.switch",
@@ -442,24 +506,46 @@ class MidWordDetector:
             **facts,
         )
 
-    def _find_protected_prefix(
+    def _lookup_user_policy(
         self,
         typed_prefix: str,
         current_lang: str,
-    ) -> tuple[str, int] | None:
-        """Return a user-rejected prefix that protects this input subtree."""
+    ) -> UserPolicyMatch | None:
+        """Return exact and descendant user policy with a legacy fallback."""
         if self.user_dict is None:
             return None
 
-        for end in range(self.min_prefix_len, len(typed_prefix) + 1):
-            candidate = typed_prefix[:end]
+        lookup = getattr(self.user_dict, "lookup_policy", None)
+        if callable(lookup):
             try:
-                weight = int(self.user_dict.get_weight(candidate, current_lang))
+                match = lookup(
+                    typed_prefix,
+                    current_lang,
+                    min_weight=self.user_dict_min_weight,
+                )
             except (AttributeError, TypeError, ValueError):
-                continue
-            if weight <= -self.user_dict_min_weight:
-                return candidate, weight
-        return None
+                match = None
+            if isinstance(match, UserPolicyMatch):
+                return match
+
+        try:
+            weight = int(
+                self.user_dict.get_weight(typed_prefix, current_lang)
+            )
+        except (AttributeError, TypeError, ValueError):
+            weight = 0
+        if weight >= self.user_dict_min_weight:
+            action = "convert"
+        elif weight <= -self.user_dict_min_weight:
+            action = "keep"
+        else:
+            action = None
+        return UserPolicyMatch(
+            prefix=typed_prefix,
+            lang=current_lang,
+            exact_action=action,
+            exact_weight=weight if action is not None else 0,
+        )
 
     @staticmethod
     def _valid_en_layout_prefix(prefix: str) -> bool:

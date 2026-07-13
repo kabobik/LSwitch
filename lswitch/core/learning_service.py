@@ -50,16 +50,6 @@ class LearningService:
         )
         return True
 
-    def record_auto_confirmation(self, marker: AutoConversionMarker) -> bool:
-        if self.user_dict is None:
-            return False
-        self.user_dict.add_confirmation(
-            marker.original_word,
-            marker.original_lang,
-            debug=self.debug,
-        )
-        return True
-
     def record_manual_conversion(
         self,
         manual_word: str,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from lswitch.intelligence.mid_word_detector import MidWordDetector
 from lswitch.intelligence.prefix_dictionary import PrefixDictionary
+from lswitch.intelligence.user_dictionary import UserPolicyMatch
 
 
 def _detector() -> MidWordDetector:
@@ -92,6 +93,42 @@ class _UserDictionary:
     def get_weight(self, word: str, lang: str) -> int:
         return self.weights.get((word, lang), 0)
 
+    def lookup_policy(
+        self,
+        prefix: str,
+        lang: str,
+        *,
+        min_weight: int,
+    ) -> UserPolicyMatch:
+        weight = self.get_weight(prefix, lang)
+        exact_action = (
+            "convert"
+            if weight >= min_weight
+            else "keep"
+            if weight <= -min_weight
+            else None
+        )
+        return UserPolicyMatch(
+            prefix=prefix,
+            lang=lang,
+            exact_action=exact_action,
+            exact_weight=weight if exact_action else 0,
+            has_convert_descendants=any(
+                word_lang == lang
+                and word.startswith(prefix)
+                and word != prefix
+                and candidate_weight >= min_weight
+                for (word, word_lang), candidate_weight in self.weights.items()
+            ),
+            has_keep_descendants=any(
+                word_lang == lang
+                and word.startswith(prefix)
+                and word != prefix
+                and candidate_weight <= -min_weight
+                for (word, word_lang), candidate_weight in self.weights.items()
+            ),
+        )
+
 
 def test_mid_word_detector_respects_user_rejected_prefix():
     dictionary = PrefixDictionary(ru_words={"привет"})
@@ -105,10 +142,10 @@ def test_mid_word_detector_respects_user_rejected_prefix():
     decision = detector.should_switch("ghbd", "en")
 
     assert decision.should_switch is False
-    assert decision.reason == "user dictionary protects prefix 'ghbd': weight=-2"
+    assert decision.reason == "exact user dictionary keep decision"
 
 
-def test_mid_word_detector_protects_continuation_of_user_rejected_prefix():
+def test_mid_word_detector_releases_exact_keep_after_prefix_diverges():
     dictionary = PrefixDictionary(ru_words={"приветик"})
     detector = MidWordDetector(
         dictionary,
@@ -119,5 +156,53 @@ def test_mid_word_detector_protects_continuation_of_user_rejected_prefix():
 
     decision = detector.should_switch("ghbdtn", "en")
 
+    assert decision.should_switch is True
+    assert decision.reason == "target prefix found and source prefix absent"
+
+
+def test_mid_word_detector_reserves_user_dictionary_proper_prefix():
+    dictionary = PrefixDictionary(ru_words={"привет"})
+    detector = MidWordDetector(
+        dictionary,
+        min_prefix_len=4,
+        user_dict=_UserDictionary({("ghbdtn", "en"): 2}),
+        user_dict_min_weight=2,
+    )
+
+    decision = detector.should_switch("ghbd", "en")
+
     assert decision.should_switch is False
-    assert decision.reason == "user dictionary protects prefix 'ghbd': weight=-2"
+    assert decision.reason == "user dictionary prefix reserved"
+
+
+def test_mid_word_detector_exact_user_convert_bypasses_system_minimum_length():
+    detector = MidWordDetector(
+        PrefixDictionary(),
+        min_prefix_len=4,
+        user_dict=_UserDictionary({("ghb", "en"): 2}),
+        user_dict_min_weight=2,
+    )
+
+    decision = detector.should_switch("ghb", "en")
+
+    assert decision.should_switch is True
+    assert decision.reason_id == "midword.user_dictionary.exact_convert"
+
+
+def test_mid_word_detector_waits_for_opposite_user_descendant():
+    detector = MidWordDetector(
+        PrefixDictionary(),
+        min_prefix_len=4,
+        user_dict=_UserDictionary(
+            {
+                ("foo", "en"): 2,
+                ("foobar", "en"): -2,
+            }
+        ),
+        user_dict_min_weight=2,
+    )
+
+    decision = detector.should_switch("foo", "en")
+
+    assert decision.should_switch is False
+    assert decision.reason_id == "midword.user_dictionary.prefix_reserved"

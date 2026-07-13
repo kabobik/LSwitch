@@ -52,7 +52,6 @@ from lswitch.runtime_conversion import (
     create_manual_conversion_controller,
     create_space_auto_conversion_use_case,
     create_synced_manual_conversion_controller,
-    create_synced_space_auto_conversion_use_case,
     decode_buffer_events,
     execute_manual_conversion_with_session,
     extract_last_word_events,

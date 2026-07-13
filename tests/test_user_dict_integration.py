@@ -292,8 +292,8 @@ class TestNegativeWeightBlocksConversion:
         assert should is True
 
 
-class TestContinuedTypingConfirmsPrevious:
-    """Typing another word can optionally confirm the previous auto-conversion."""
+class TestContinuedTypingExpiresPreviousMarker:
+    """Typing another word expires the previous marker without learning."""
 
     def test_confirmation_skipped_by_default_on_next_space(self):
         app = _make_app(auto_switch=True)
@@ -314,35 +314,11 @@ class TestContinuedTypingConfirmsPrevious:
         _fill_buffer(app, [KEY_A, KEY_B, KEY_D])
         app.input_router.on_key_press(_event(KEY_SPACE))
 
-        # Auto-confirmation is disabled by default; the old marker is consumed
-        # without writing an implicit confirmation.
+        # The old marker is consumed without writing an implicit confirmation.
         assert ud.get_weight(old_word, old_lang) == 0
         marker = app.auto_conversion_session.last_marker
         assert marker is not None
         assert marker.original_word != old_word
-
-    def test_confirmation_called_on_next_space_when_enabled(self):
-        app = _make_app(auto_switch=True)
-        app.config._config['user_dict_auto_confirm'] = True
-        ud = _make_user_dict_in_memory()
-        app.user_dict = ud
-        app.auto_detector = _MockAutoDetector(should=True)
-        app._wire_event_bus()
-
-        # First word: triggers auto-conversion, sets marker
-        _fill_buffer(app, WORD_GHBDTN)
-        app.input_router.on_key_press(_event(KEY_SPACE))
-        marker = app.auto_conversion_session.last_marker
-        assert marker is not None
-        old_word = marker.original_word
-        old_lang = marker.original_lang
-
-        # Second word: another auto-conversion → previous should be confirmed
-        _fill_buffer(app, [KEY_A, KEY_B, KEY_D])
-        app.input_router.on_key_press(_event(KEY_SPACE))
-
-        # Old word was confirmed (+1)
-        assert ud.get_weight(old_word, old_lang) == 1
 
     def test_no_confirmation_without_user_dict(self):
         """user_dict=None → no crash, no confirmation."""

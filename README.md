@@ -210,8 +210,6 @@ system_dict_en_path = ""
 system_dict_ru_path = ""
 # Enable the self-learning user dictionary.
 user_dict_enabled = false
-# Automatically confirm accepted auto-conversions in the user dictionary.
-user_dict_auto_confirm = false
 # Minimum user dictionary score required to affect detection.
 user_dict_min_weight = 2
 # Wayland selection conversion mode.
@@ -290,7 +288,6 @@ expand_selection_delay = 0.2
   GUI показывает фактически активный путь, способ выбора и число загруженных
   слов
 - `user_dict_enabled` — самообучающийся словарь
-- `user_dict_auto_confirm` — записывать в словарь молчаливое принятие авто-конвертации на следующем пробеле; по умолчанию выключено
 - `wayland_selection_strategy` — стратегия selection-конвертации на Wayland:
   `"auto"` сначала читает PRIMARY без `Ctrl+C`, затем использует clipboard fallback;
   `"clipboard_copy"` всегда использует copy/paste flow;

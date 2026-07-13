@@ -25,23 +25,6 @@ def test_record_auto_undo_correction():
     user_dict.add_correction.assert_called_once_with("ghbdtn", "en", debug=True)
 
 
-def test_record_auto_confirmation():
-    user_dict = MagicMock()
-    marker = AutoConversionMarker(
-        kind="space",
-        original_word="ghbdtn",
-        original_lang="en",
-        target_lang="ru",
-        direction="en_to_ru",
-    )
-    service = LearningService(user_dict, debug=False)
-
-    ok = service.record_auto_confirmation(marker)
-
-    assert ok is True
-    user_dict.add_confirmation.assert_called_once_with("ghbdtn", "en", debug=False)
-
-
 def test_record_manual_retype_conversion():
     user_dict = MagicMock()
     service = LearningService(user_dict, debug=True, manual_weight_step=2)
@@ -118,7 +101,6 @@ def test_no_user_dictionary_returns_false_without_writes():
     )
 
     assert service.record_auto_undo_correction(marker) is False
-    assert service.record_auto_confirmation(marker) is False
     assert service.record_manual_conversion("ghbdtn", "en", False) is False
     assert service.record_selection_conversion({"mode": "selection"}) is False
 

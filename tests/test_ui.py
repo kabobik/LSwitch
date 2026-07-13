@@ -627,12 +627,12 @@ class TestConfigDialog:
         dlg.accept()
         assert len(received) == 1
 
-    def test_builds_five_pages_and_binds_all_33_settings(self, config_mgr, event_bus_ui):
+    def test_builds_five_pages_and_binds_all_32_settings(self, config_mgr, event_bus_ui):
         dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
 
         assert dlg._stack.count() == 5
-        assert len(dlg._widgets) == 33
-        assert len(dlg._setting_help_icons) == 33
+        assert len(dlg._widgets) == 32
+        assert len(dlg._setting_help_icons) == 32
 
     def test_every_setting_has_localized_help_icon(
         self,

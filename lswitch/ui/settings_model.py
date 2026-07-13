@@ -74,7 +74,6 @@ SETTINGS_BINDINGS: tuple[SettingsBinding, ...] = (
     _binding("system_dict_en_path", PAGE_DICTIONARIES, "path"),
     _binding("system_dict_ru_path", PAGE_DICTIONARIES, "path"),
     _binding("user_dict_enabled", PAGE_DICTIONARIES, "bool"),
-    _binding("user_dict_auto_confirm", PAGE_DICTIONARIES, "bool"),
     _binding("user_dict_min_weight", PAGE_DICTIONARIES, "int", minimum=0, maximum=2_147_483_647),
     _binding(
         "wayland_selection_strategy",
@@ -170,7 +169,6 @@ def dependency_enabled(values: dict) -> dict[str, bool]:
     enabled["system_dict_en_path"] = mid_word and system_dict
     enabled["system_dict_ru_path"] = mid_word and system_dict
     enabled["user_dict_min_weight"] = user_dict
-    enabled["user_dict_auto_confirm"] = user_dict and auto_switch
 
     wayland_paths = [
         binding.path

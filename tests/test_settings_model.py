@@ -30,11 +30,11 @@ def _leaf_paths(values: dict, prefix: str = "") -> set[str]:
     return paths
 
 
-def test_binding_registry_covers_all_33_config_paths_once():
+def test_binding_registry_covers_all_32_config_paths_once():
     paths = [binding.path for binding in SETTINGS_BINDINGS]
 
-    assert len(paths) == 33
-    assert len(set(paths)) == 33
+    assert len(paths) == 32
+    assert len(set(paths)) == 32
     assert set(paths) == _leaf_paths(DEFAULT_CONFIG)
 
 
@@ -146,16 +146,6 @@ def test_reset_all_uses_owned_defaults_without_committing():
             True,
         ),
         ({"user_dict_enabled": False}, "user_dict_min_weight", False),
-        (
-            {"user_dict_enabled": True, "auto_switch": False},
-            "user_dict_auto_confirm",
-            False,
-        ),
-        (
-            {"user_dict_enabled": True, "auto_switch": True},
-            "user_dict_auto_confirm",
-            True,
-        ),
         (
             {"wayland_selection_strategy": "disabled"},
             "wayland_selection_timing.expand_selection_delay",

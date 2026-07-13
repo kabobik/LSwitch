@@ -20,7 +20,6 @@ def create_space_auto_conversion_use_case(
     typed_buffer,
     xkb,
     virtual_kb,
-    learning_service,
     timing: dict,
     debug: bool,
     layout_switch_controller=None,
@@ -42,7 +41,6 @@ def create_space_auto_conversion_use_case(
             xkb,
             **retype_kwargs,
         ),
-        learning_service=learning_service,
         timing=timing,
         debug=debug,
         trace_recorder=trace_recorder,
@@ -78,41 +76,6 @@ def create_mid_word_auto_conversion_use_case(
         ),
         timing=timing,
         debug=debug,
-        trace_recorder=trace_recorder,
-    )
-
-
-def create_synced_space_auto_conversion_use_case(
-    *,
-    auto_detector,
-    typed_buffer,
-    xkb,
-    virtual_kb,
-    user_dict,
-    user_dict_min_weight,
-    learning_service,
-    timing: dict,
-    debug: bool,
-    manual_weight_step: int,
-    layout_switch_controller=None,
-    trace_recorder=None,
-):
-    """Create space auto-conversion use case with learning service synced first."""
-    return create_space_auto_conversion_use_case(
-        auto_detector=auto_detector,
-        typed_buffer=typed_buffer,
-        xkb=xkb,
-        virtual_kb=virtual_kb,
-        learning_service=synced_learning_service(
-            user_dict=user_dict,
-            user_dict_min_weight=user_dict_min_weight,
-            learning_service=learning_service,
-            debug=debug,
-            manual_weight_step=manual_weight_step,
-        ),
-        timing=timing,
-        debug=debug,
-        layout_switch_controller=layout_switch_controller,
         trace_recorder=trace_recorder,
     )
 
@@ -264,7 +227,6 @@ def try_space_auto_conversion_at_boundary(
     session,
     context,
     threshold: int,
-    auto_confirm_enabled: bool,
     correlation_id: int = 0,
 ) -> bool:
     """Execute space auto-conversion and apply transient session updates."""
@@ -272,7 +234,6 @@ def try_space_auto_conversion_at_boundary(
         context=context,
         threshold=threshold,
         last_auto_marker=session.last_marker,
-        auto_confirm_enabled=auto_confirm_enabled,
         correlation_id=correlation_id,
     )
     state = apply_space_auto_conversion_result(
@@ -410,10 +371,6 @@ class ConversionRuntimeFacade:
             session=self.auto_conversion_session,
             context=self.state_manager.context,
             threshold=self.config.get("auto_switch_threshold", 0),
-            auto_confirm_enabled=self.config.get(
-                "user_dict_auto_confirm",
-                False,
-            ),
             correlation_id=correlation_id,
         )
 
@@ -478,18 +435,14 @@ class ConversionRuntimeFacade:
         )
 
     def create_space_auto_conversion_use_case(self):
-        """Create a synced space auto-conversion use case for current adapters."""
-        return create_synced_space_auto_conversion_use_case(
+        """Create a space auto-conversion use case for current adapters."""
+        return create_space_auto_conversion_use_case(
             auto_detector=self.get_auto_detector(),
             typed_buffer=self.typed_buffer,
             xkb=self.get_xkb(),
             virtual_kb=self.get_virtual_kb(),
-            user_dict=self.get_user_dict(),
-            user_dict_min_weight=self.config.get("user_dict_min_weight", 2),
-            learning_service=self.learning_service,
             timing=self.get_timing(),
             debug=self.debug,
-            manual_weight_step=self.manual_weight_step,
             layout_switch_controller=self.get_layout_switch_controller(),
             trace_recorder=self.trace_recorder,
         )

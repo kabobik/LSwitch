@@ -41,20 +41,25 @@ def test_short_prefix_is_a_decisive_skip():
 
     assert decision.outcome is DecisionOutcome.SKIP
     assert decision.reason_id == "midword.prefix_length"
-    assert _ids(decision) == ["midword.prefix_length"]
-    assert decision.steps[0].state is StepState.NOT_MATCHED
-    assert decision.steps[0].decisive is True
-    assert _facts(decision.steps[0]) == {"length": 3, "minimum": 4}
+    assert _ids(decision) == [
+        "midword.case",
+        "midword.characters",
+        "midword.user_dictionary.disabled",
+        "midword.prefix_length",
+    ]
+    assert decision.steps[-1].state is StepState.NOT_MATCHED
+    assert decision.steps[-1].decisive is True
+    assert _facts(decision.steps[-1]) == {"length": 3, "minimum": 4}
 
 
-def test_case_rule_follows_successful_length_rule():
+def test_case_rule_runs_before_system_minimum_length():
     decision = MidWordDetector(_dictionary(), min_prefix_len=4).should_switch(
         "GhbD",
         "en",
     )
 
     assert decision.outcome is DecisionOutcome.KEEP
-    assert _ids(decision) == ["midword.prefix_length", "midword.case"]
+    assert _ids(decision) == ["midword.case"]
     assert decision.steps[-1].decisive is True
 
 
@@ -66,9 +71,10 @@ def test_source_prefix_match_stops_before_target_rule():
 
     assert decision.reason_id == "midword.source_prefix"
     assert _ids(decision) == [
-        "midword.prefix_length",
         "midword.case",
         "midword.characters",
+        "midword.user_dictionary.disabled",
+        "midword.prefix_length",
         "midword.source_prefix",
     ]
     assert _facts(decision.steps[-1])["count"] == 1
@@ -91,7 +97,7 @@ def test_missing_target_prefix_records_source_miss_first():
     assert decision.steps[-1].decisive is True
 
 
-def test_user_protection_is_recorded_after_target_evidence():
+def test_exact_user_keep_is_recorded_before_system_evidence():
     detector = MidWordDetector(
         _dictionary(),
         min_prefix_len=4,
@@ -101,8 +107,12 @@ def test_user_protection_is_recorded_after_target_evidence():
 
     decision = detector.should_switch("ghbd", "en")
 
-    assert decision.reason_id == "midword.user_protection"
-    assert _ids(decision)[-1] == "midword.user_protection"
+    assert decision.reason_id == "midword.user_dictionary.exact_keep"
+    assert _ids(decision) == [
+        "midword.case",
+        "midword.characters",
+        "midword.user_dictionary.exact_keep",
+    ]
     assert _facts(decision.steps[-1]) == {
         "prefix": "ghbd",
         "weight": -2,
@@ -119,7 +129,7 @@ def test_successful_switch_has_explicit_decisive_rule():
     assert decision.outcome is DecisionOutcome.CONVERT
     assert decision.reason_id == "midword.switch"
     assert _ids(decision)[-2:] == [
-        "midword.user_dictionary.disabled",
+        "midword.target_prefix",
         "midword.switch",
     ]
     assert decision.steps[-1].decisive is True

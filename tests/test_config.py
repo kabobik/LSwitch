@@ -44,7 +44,6 @@ class TestDefaultConfig:
         'system_dict_en_path',
         'system_dict_ru_path',
         'user_dict_enabled',
-        'user_dict_auto_confirm',
         'user_dict_min_weight',
         'wayland_selection_strategy',
         'timing',
@@ -88,7 +87,6 @@ class TestValidateConfig:
             'system_dict_en_path': '/tmp/en_US.dic',
             'system_dict_ru_path': '/tmp/ru_RU.dic',
             'user_dict_enabled': True,
-            'user_dict_auto_confirm': True,
             'user_dict_min_weight': 3,
             'wayland_selection_strategy': 'clipboard_copy',
             'timing': {'key_press_delay': 0.002},
@@ -105,7 +103,6 @@ class TestValidateConfig:
         assert result['system_dict_enabled'] is False
         assert result['system_dict_en_path'] == '/tmp/en_US.dic'
         assert result['system_dict_ru_path'] == '/tmp/ru_RU.dic'
-        assert result['user_dict_auto_confirm'] is True
         assert result['wayland_selection_strategy'] == 'clipboard_copy'
         assert result['timing']['key_press_delay'] == 0.002
         assert result['timing']['key_repeat_delay'] == DEFAULT_TIMING['key_repeat_delay']
@@ -157,10 +154,6 @@ class TestValidateConfig:
     def test_invalid_system_dict_path_type(self):
         with pytest.raises(ValueError, match="system_dict_en_path"):
             validate_config({'system_dict_en_path': 123})
-
-    def test_invalid_user_dict_auto_confirm_type(self):
-        with pytest.raises(ValueError, match="user_dict_auto_confirm"):
-            validate_config({'user_dict_auto_confirm': 'yes'})
 
     def test_invalid_wayland_selection_strategy(self):
         with pytest.raises(ValueError, match="wayland_selection_strategy"):
@@ -362,9 +355,7 @@ class TestConfigManager:
         mgr = ConfigManager(config_path=str(cfg_path))
 
         assert mgr.get("debug") is True
-        assert mgr.get("user_dict_auto_confirm") is False
         saved = cfg_path.read_text(encoding="utf-8")
-        assert "user_dict_auto_confirm = false" in saved
         assert "auto_switch = true" in saved
 
     def test_saved_config_documents_every_setting(self, tmp_path):

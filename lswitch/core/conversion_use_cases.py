@@ -752,7 +752,6 @@ class SpaceAutoConversionUseCase:
         typed_buffer,
         xkb: "IXKBAdapter",
         retype_service,
-        learning_service: "LearningService",
         timing: dict | None = None,
         debug: bool = False,
         candidate_provider=None,
@@ -762,7 +761,6 @@ class SpaceAutoConversionUseCase:
         self.typed_buffer = typed_buffer
         self.xkb = xkb
         self.retype_service = retype_service
-        self.learning_service = learning_service
         self.layout_service = LayoutService(xkb)
         self.timing = timing or {}
         self.debug = debug
@@ -781,7 +779,6 @@ class SpaceAutoConversionUseCase:
         context: "StateContext",
         threshold: int,
         last_auto_marker: AutoConversionMarker | dict | None,
-        auto_confirm_enabled: bool,
         correlation_id: int = 0,
     ) -> SpaceAutoConversionResult:
         if self.auto_detector is None:
@@ -905,9 +902,6 @@ class SpaceAutoConversionUseCase:
 
         marker_changed = False
         if last_auto_marker is not None:
-            old = AutoConversionMarker.from_legacy(last_auto_marker)
-            if auto_confirm_enabled:
-                self.learning_service.record_auto_confirmation(old)
             marker_changed = True
 
         if not should:

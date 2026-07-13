@@ -140,7 +140,6 @@ DEFAULT_CONFIG: dict = {
     'system_dict_en_path': '',
     'system_dict_ru_path': '',
     'user_dict_enabled': False,
-    'user_dict_auto_confirm': False,
     'user_dict_min_weight': 2,
     'wayland_selection_strategy': 'auto',
     'timing': DEFAULT_TIMING,
@@ -178,7 +177,6 @@ _CONFIG_COMMENTS: dict[str, str] = {
     'system_dict_en_path': 'Optional readable English .dic path; empty enables auto-discovery.',
     'system_dict_ru_path': 'Optional readable Russian .dic path; empty enables auto-discovery.',
     'user_dict_enabled': 'Enable the self-learning user dictionary.',
-    'user_dict_auto_confirm': 'Automatically confirm accepted auto-conversions in the user dictionary.',
     'user_dict_min_weight': 'Minimum user dictionary score required to affect detection.',
     'wayland_selection_strategy': 'Wayland selection conversion mode.',
     'timing': 'Common input/conversion timings, seconds.',
@@ -417,12 +415,6 @@ def validate_config(conf: dict | None) -> dict:
     if not isinstance(ude, bool):
         raise ValueError("Invalid 'user_dict_enabled': must be boolean")
     out['user_dict_enabled'] = ude
-
-    # user_dict_auto_confirm — boolean
-    udac = conf.get('user_dict_auto_confirm', defaults['user_dict_auto_confirm'])
-    if not isinstance(udac, bool):
-        raise ValueError("Invalid 'user_dict_auto_confirm': must be boolean")
-    out['user_dict_auto_confirm'] = udac
 
     # user_dict_min_weight — non-negative int
     udw = conf.get('user_dict_min_weight', defaults['user_dict_min_weight'])

@@ -17,6 +17,8 @@ import os
 import tempfile
 import time
 import logging
+from bisect import bisect_left
+from dataclasses import dataclass
 
 try:
     import tomllib
@@ -30,6 +32,34 @@ _ACTIONS = ("convert", "keep")
 _LANGS = ("en", "ru")
 
 
+@dataclass(frozen=True)
+class UserPolicyMatch:
+    """Exact and descendant policy evidence for one typed prefix."""
+
+    prefix: str
+    lang: str
+    exact_action: str | None = None
+    exact_weight: int = 0
+    has_convert_descendants: bool = False
+    has_keep_descendants: bool = False
+
+    @property
+    def has_descendants(self) -> bool:
+        return self.has_convert_descendants or self.has_keep_descendants
+
+    @property
+    def has_any_match(self) -> bool:
+        return self.exact_action is not None or self.has_descendants
+
+    @property
+    def has_opposite_descendant(self) -> bool:
+        if self.exact_action == "convert":
+            return self.has_keep_descendants
+        if self.exact_action == "keep":
+            return self.has_convert_descendants
+        return False
+
+
 class UserDictionary:
     """Stores user decisions for typed words by input layout."""
 
@@ -37,6 +67,8 @@ class UserDictionary:
         self.path = path
         self._last_check_time = time.time()
         self._last_mtime = 0.0
+        self._policy_index_version = 0
+        self._policy_index_cache: dict[tuple, tuple[str, ...]] = {}
         if os.path.exists(self.path):
             self._last_mtime = os.path.getmtime(self.path)
 
@@ -75,6 +107,7 @@ class UserDictionary:
             if current_mtime > self._last_mtime:
                 self._last_mtime = current_mtime
                 self.data = self._load()
+                self._invalidate_policy_index()
                 logger.info("User dictionary %s was reloaded.", self.path)
         except Exception as exc:
             logger.error("User dictionary reload failed: %s", exc)
@@ -88,6 +121,60 @@ class UserDictionary:
         keep_weight = self._get_action_weight("keep", lang_key, word_key)
         return convert_weight - keep_weight
 
+    def lookup_policy(
+        self,
+        prefix: str,
+        lang: str,
+        *,
+        min_weight: int = 1,
+    ) -> UserPolicyMatch:
+        """Return active exact and descendant decisions for a typed prefix."""
+        self._check_reload()
+        prefix_key = self._word(prefix)
+        lang_key = self._lang(lang)
+        threshold = max(1, int(min_weight))
+        if not prefix_key:
+            return UserPolicyMatch(prefix="", lang=lang_key)
+
+        convert_table = self._table("convert", lang_key)
+        keep_table = self._table("keep", lang_key)
+        convert_weight = int(convert_table.get(prefix_key, 0))
+        keep_weight = int(keep_table.get(prefix_key, 0))
+
+        exact_action: str | None = None
+        exact_weight = 0
+        if convert_weight >= threshold:
+            exact_action = "convert"
+            exact_weight = convert_weight
+        elif keep_weight >= threshold:
+            exact_action = "keep"
+            exact_weight = -keep_weight
+
+        convert_words = self._active_policy_words(
+            "convert",
+            lang_key,
+            threshold,
+        )
+        keep_words = self._active_policy_words(
+            "keep",
+            lang_key,
+            threshold,
+        )
+        return UserPolicyMatch(
+            prefix=prefix_key,
+            lang=lang_key,
+            exact_action=exact_action,
+            exact_weight=exact_weight,
+            has_convert_descendants=self._has_descendant(
+                convert_words,
+                prefix_key,
+            ),
+            has_keep_descendants=self._has_descendant(
+                keep_words,
+                prefix_key,
+            ),
+        )
+
     def add_correction(
         self,
         word: str,
@@ -97,6 +184,7 @@ class UserDictionary:
     ) -> None:
         """Record that this typed word should be kept as-is."""
         new_weight = self._increment("keep", word, lang, weight_step)
+        self._invalidate_policy_index()
         effective = self._effective_weight(word, lang)
         if debug:
             logger.debug(
@@ -117,6 +205,7 @@ class UserDictionary:
     ) -> None:
         """Record that this typed word should be converted."""
         new_weight = self._increment("convert", word, lang, weight_step)
+        self._invalidate_policy_index()
         effective = self._effective_weight(word, lang)
         if debug:
             logger.debug(
@@ -164,6 +253,46 @@ class UserDictionary:
 
     def _get_action_weight(self, action: str, lang: str, word: str) -> int:
         return int(self._table(action, lang).get(word, 0))
+
+    def _active_policy_words(
+        self,
+        action: str,
+        lang: str,
+        min_weight: int,
+    ) -> tuple[str, ...]:
+        cache = getattr(self, "_policy_index_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            self._policy_index_cache = cache
+        version = int(getattr(self, "_policy_index_version", 0))
+        key = (version, action, lang, min_weight)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        words = tuple(
+            sorted(
+                word
+                for word, weight in self._table(action, lang).items()
+                if int(weight) >= min_weight
+            )
+        )
+        cache[key] = words
+        return words
+
+    def _invalidate_policy_index(self) -> None:
+        self._policy_index_version = int(
+            getattr(self, "_policy_index_version", 0)
+        ) + 1
+        self._policy_index_cache = {}
+
+    @staticmethod
+    def _has_descendant(words: tuple[str, ...], prefix: str) -> bool:
+        index = bisect_left(words, prefix)
+        while index < len(words) and words[index].startswith(prefix):
+            if words[index] != prefix:
+                return True
+            index += 1
+        return False
 
     def _effective_weight(self, word: str, lang: str) -> int:
         word_key = self._word(word)

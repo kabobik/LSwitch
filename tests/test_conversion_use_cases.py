@@ -167,7 +167,7 @@ def test_mid_word_undo_persists_protection_for_detector(tmp_path):
 
     assert user_dict.get_weight("ghbd", "en") == -2
     assert decision.should_switch is False
-    assert "user dictionary protects prefix" in decision.reason
+    assert decision.reason == "exact user dictionary keep decision"
 
 
 def test_recent_auto_conversion_undo_handles_empty_buffer():
@@ -500,21 +500,18 @@ def _space_auto_use_case(
     xkb.keycode_to_char.side_effect = lambda code, _layout: keycode_to_char(code)
     retype_service = MagicMock()
     retype_service.retype_events.return_value = True
-    learning_service = MagicMock()
-    learning_service.user_dict = object()
     use_case = SpaceAutoConversionUseCase(
         auto_detector=_Detector(should_convert),
         typed_buffer=TypedBufferService(),
         xkb=xkb,
         retype_service=retype_service,
-        learning_service=learning_service,
         timing={
             "auto_before_replay_delay": 0,
             "auto_before_space_delay": 0,
         },
         trace_recorder=trace_recorder,
     )
-    return use_case, xkb, retype_service, learning_service
+    return use_case, xkb, retype_service
 
 
 def test_space_auto_conversion_use_case_uses_injected_candidate_provider():
@@ -543,7 +540,6 @@ def test_space_auto_conversion_use_case_uses_injected_candidate_provider():
         typed_buffer=typed_buffer,
         xkb=xkb,
         retype_service=retype_service,
-        learning_service=MagicMock(),
         timing={"auto_before_replay_delay": 0, "auto_before_space_delay": 0},
         candidate_provider=provider,
     )
@@ -553,7 +549,6 @@ def test_space_auto_conversion_use_case_uses_injected_candidate_provider():
         context=context,
         threshold=0,
         last_auto_marker=None,
-        auto_confirm_enabled=False,
     )
 
     assert result.space_consumed is True
@@ -587,7 +582,6 @@ def test_space_auto_conversion_use_case_skips_empty_candidate_from_provider():
         typed_buffer=typed_buffer,
         xkb=xkb,
         retype_service=retype_service,
-        learning_service=MagicMock(),
         candidate_provider=provider,
     )
 
@@ -595,7 +589,6 @@ def test_space_auto_conversion_use_case_skips_empty_candidate_from_provider():
         context=_context_with_events([34, 35]),
         threshold=0,
         last_auto_marker=None,
-        auto_confirm_enabled=False,
     )
 
     assert result.space_consumed is False
@@ -605,7 +598,7 @@ def test_space_auto_conversion_use_case_skips_empty_candidate_from_provider():
 
 
 def test_space_auto_conversion_use_case_retypes_word_and_returns_marker():
-    use_case, xkb, retype_service, _learning_service = _space_auto_use_case()
+    use_case, xkb, retype_service = _space_auto_use_case()
     context = _context_with_events([34, 35, 48])
     original_events = list(context.event_buffer)
 
@@ -613,7 +606,6 @@ def test_space_auto_conversion_use_case_retypes_word_and_returns_marker():
         context=context,
         threshold=0,
         last_auto_marker=None,
-        auto_confirm_enabled=False,
     )
 
     assert result.space_consumed is True
@@ -652,7 +644,6 @@ def test_space_auto_conversion_policy_restores_source_layout():
             xkb,
             layout_switch_controller=controller,
         ),
-        learning_service=MagicMock(),
         timing={"auto_before_replay_delay": 0, "auto_before_space_delay": 0},
     )
 
@@ -669,7 +660,7 @@ def test_space_auto_conversion_policy_restores_source_layout():
 
 
 def test_space_auto_conversion_use_case_consumes_previous_marker_without_conversion():
-    use_case, _xkb, retype_service, learning_service = _space_auto_use_case(
+    use_case, _xkb, retype_service = _space_auto_use_case(
         should_convert=False
     )
     context = _context_with_events([34, 35, 48])
@@ -684,19 +675,17 @@ def test_space_auto_conversion_use_case_consumes_previous_marker_without_convers
         context=context,
         threshold=0,
         last_auto_marker=marker,
-        auto_confirm_enabled=True,
     )
 
     assert result.space_consumed is False
     assert result.marker is None
     assert result.marker_changed is True
-    learning_service.record_auto_confirmation.assert_called_once_with(marker)
     retype_service.retype_events.assert_not_called()
     assert context.event_buffer
 
 
 def test_space_auto_conversion_use_case_skips_below_threshold():
-    use_case, _xkb, retype_service, learning_service = _space_auto_use_case()
+    use_case, _xkb, retype_service = _space_auto_use_case()
     context = _context_with_events([34, 35, 48])
 
     result = use_case.execute(
@@ -708,12 +697,10 @@ def test_space_auto_conversion_use_case_skips_below_threshold():
             direction="en_to_ru",
             word_events=[],
         ),
-        auto_confirm_enabled=True,
     )
 
     assert result.space_consumed is False
     assert result.marker_changed is False
-    learning_service.record_auto_confirmation.assert_not_called()
     retype_service.retype_events.assert_not_called()
 
 
@@ -902,7 +889,6 @@ def test_space_auto_trace_keeps_decision_separate_from_execution_success():
         typed_buffer=MagicMock(),
         xkb=xkb,
         retype_service=retype_service,
-        learning_service=MagicMock(),
         timing={"auto_before_replay_delay": 0, "auto_before_space_delay": 0},
         candidate_provider=provider,
         trace_recorder=recorder,
@@ -912,7 +898,6 @@ def test_space_auto_trace_keeps_decision_separate_from_execution_success():
         context=_context_with_events([34, 35, 48, 32, 20, 49]),
         threshold=0,
         last_auto_marker=None,
-        auto_confirm_enabled=False,
         correlation_id=42,
     )
 
@@ -930,7 +915,7 @@ def test_space_auto_trace_keeps_decision_separate_from_execution_success():
 
 def test_space_auto_trace_preserves_convert_decision_when_retype_fails():
     recorder = DecisionTraceRecorder(enabled=True)
-    use_case, _xkb, retype_service, _learning = _space_auto_use_case(
+    use_case, _xkb, retype_service = _space_auto_use_case(
         trace_recorder=recorder
     )
     retype_service.retype_events.return_value = False
@@ -940,7 +925,6 @@ def test_space_auto_trace_preserves_convert_decision_when_retype_fails():
         context=_context_with_events([34, 35, 48]),
         threshold=0,
         last_auto_marker=None,
-        auto_confirm_enabled=False,
         correlation_id=5,
     )
 
@@ -952,7 +936,7 @@ def test_space_auto_trace_preserves_convert_decision_when_retype_fails():
 
 def test_space_auto_threshold_skip_records_gate_without_detector_call():
     recorder = DecisionTraceRecorder(enabled=True)
-    use_case, _xkb, retype_service, _learning = _space_auto_use_case(
+    use_case, _xkb, retype_service = _space_auto_use_case(
         trace_recorder=recorder
     )
 
@@ -960,7 +944,6 @@ def test_space_auto_threshold_skip_records_gate_without_detector_call():
         context=_context_with_events([34, 35, 48]),
         threshold=10,
         last_auto_marker=None,
-        auto_confirm_enabled=False,
         correlation_id=6,
     )
 
@@ -1040,7 +1023,7 @@ def test_related_mid_word_and_space_traces_share_correlation_id():
         correlation_id=77,
     )
 
-    space_use_case, _xkb, _retype, _learning = _space_auto_use_case(
+    space_use_case, _xkb, _retype = _space_auto_use_case(
         should_convert=False,
         trace_recorder=recorder,
     )
@@ -1048,7 +1031,6 @@ def test_related_mid_word_and_space_traces_share_correlation_id():
         context=_context_with_events([34, 35, 48]),
         threshold=0,
         last_auto_marker=None,
-        auto_confirm_enabled=False,
         correlation_id=77,
     )
 
