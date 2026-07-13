@@ -12,6 +12,7 @@ from lswitch.runtime import (
     ConversionRuntimeFacade,
     PidLock,
     RuntimeConfigController,
+    RuntimeLoggingController,
     SelectionPollerThread,
     apply_runtime_config_update,
     create_core_components,
@@ -47,14 +48,29 @@ class LSwitchApp:
     def __init__(
         self,
         debug: bool = False,
+        trace: bool = False,
         config_path: str | None = None,
     ):
-        self.debug = debug
         self._running = False
         self._pid_lock: PidLock | None = None
 
         # Configuration
         self.config = ConfigManager(config_path=config_path, debug=debug)
+        if debug and not self.config.get("debug", False):
+            startup_candidate = self.config.get_all()
+            startup_candidate["debug"] = True
+            self.config.replace(
+                startup_candidate,
+                source="cli",
+                persist=False,
+            )
+        self.logging_controller = RuntimeLoggingController(
+            trace_override=trace,
+        )
+        self.debug = self.logging_controller.reconfigure(
+            self.config.get("debug", False),
+        )
+        self.config.set_debug(self.debug)
         runtime_config = read_runtime_config_snapshot(config=self.config)
         self.timing = runtime_config.timing
         self.x11_selection_timing = runtime_config.x11_selection_timing
@@ -218,6 +234,11 @@ class LSwitchApp:
 
     def _apply_runtime_config(self, change_set=None) -> None:
         """Apply config values that affect already-created runtime objects."""
+        self.debug = self.logging_controller.reconfigure(
+            self.config.get("debug", False),
+        )
+        self.config.set_debug(self.debug)
+        self.conversion_runtime.debug = self.debug
         applied = apply_runtime_config_update(
             config=self.config,
             state_manager=self.state_manager,
@@ -229,6 +250,14 @@ class LSwitchApp:
             debug=self.debug,
             manual_weight_step=self.MANUAL_WEIGHT_STEP,
             log=logger,
+            virtual_kb=self.virtual_kb,
+            selection=self.selection,
+            system=self.system,
+            xkb=self.xkb,
+            selection_poller=self._selection_poller,
+            selection_tracker=self.selection_tracker,
+            event_manager=self.event_manager,
+            device_manager=self.device_manager,
         )
         timing_config = applied.timing
         self.timing = timing_config.timing

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import types
+import logging
 from unittest.mock import MagicMock
 
 import lswitch.runtime as runtime_module
@@ -33,11 +34,13 @@ from lswitch.runtime import (
     PlatformRuntimeComponents,
     QtRuntimeBootstrap,
     RuntimeConfigSnapshot,
+    RuntimeLoggingController,
     RuntimeCoreComponents,
     SelectionPollerThread,
     SpaceAutoConversionState,
     StartedRuntimeResources,
     apply_runtime_config_update,
+    apply_platform_runtime_config,
     apply_runtime_timing_config,
     apply_space_auto_conversion_result,
     apply_user_dictionary_config,
@@ -767,7 +770,15 @@ def test_read_runtime_config_snapshot_reads_timing_tables():
 
 def test_apply_runtime_timing_config_updates_state_and_conversion_engine():
     config = MagicMock()
-    timing = {"retype": 0.1}
+    timing = {
+        "key_press_delay": 0.011,
+        "key_repeat_delay": 0.012,
+        "retype_before_replay_delay": 0.013,
+        "direct_type_after_layout_switch_delay": 0.014,
+        "undo_before_replay_delay": 0.015,
+        "auto_before_replay_delay": 0.016,
+        "auto_before_space_delay": 0.017,
+    }
     x11_selection_timing = {"poll_interval": 0.2}
     wayland_timing = {"wl_clipboard_timeout": 1.5}
     wayland_selection_timing = {"copy_wait_timeout": 0.7}
@@ -796,6 +807,14 @@ def test_apply_runtime_timing_config_updates_state_and_conversion_engine():
     assert snapshot.wayland_selection_timing is wayland_selection_timing
     assert state_manager.double_click_timeout == 0.45
     assert conversion_engine.timing is timing
+    assert conversion_engine.timing["retype_before_replay_delay"] == 0.013
+    assert (
+        conversion_engine.timing["direct_type_after_layout_switch_delay"]
+        == 0.014
+    )
+    assert conversion_engine.timing["undo_before_replay_delay"] == 0.015
+    assert conversion_engine.timing["auto_before_replay_delay"] == 0.016
+    assert conversion_engine.timing["auto_before_space_delay"] == 0.017
 
 
 def test_apply_runtime_timing_config_tolerates_missing_conversion_engine():
@@ -815,6 +834,153 @@ def test_apply_runtime_timing_config_tolerates_missing_conversion_engine():
     assert snapshot.wayland_timing == {}
     assert snapshot.wayland_selection_timing == {}
     assert state_manager.double_click_timeout == 0.3
+
+
+def test_runtime_logging_controller_switches_info_debug_and_preserves_trace():
+    root = MagicMock()
+    controller = RuntimeLoggingController(root_logger=root)
+
+    assert controller.reconfigure(True) is True
+    root.setLevel.assert_called_with(logging.DEBUG)
+    assert controller.reconfigure(False) is False
+    root.setLevel.assert_called_with(logging.INFO)
+
+    trace_root = MagicMock()
+    trace_controller = RuntimeLoggingController(
+        trace_override=True,
+        root_logger=trace_root,
+    )
+    assert trace_controller.reconfigure(False) is True
+    trace_root.setLevel.assert_called_once_with(5)
+
+
+def test_apply_platform_runtime_config_updates_x11_adapter_and_poller():
+    class Selection:
+        def __init__(self):
+            self.timing = None
+            self._debug = False
+
+        def reconfigure_timing(self, timing):
+            self.timing = timing
+
+    class Poller:
+        def __init__(self):
+            self.interval = None
+
+        def set_poll_interval(self, value):
+            self.interval = value
+
+    selection = Selection()
+    poller = Poller()
+    snapshot = RuntimeConfigSnapshot(
+        timing={},
+        x11_selection_timing={
+            "poll_interval": 0.17,
+            "paste_delay": 0.18,
+            "restore_delay": 0.19,
+            "expand_selection_delay": 0.20,
+        },
+        wayland_timing={},
+        wayland_selection_timing={},
+    )
+
+    changed = apply_platform_runtime_config(
+        config=MagicMock(),
+        snapshot=snapshot,
+        selection=selection,
+        selection_poller=poller,
+        debug=True,
+    )
+
+    assert changed is False
+    assert selection.timing["paste_delay"] == 0.18
+    assert selection.timing["restore_delay"] == 0.19
+    assert selection.timing["expand_selection_delay"] == 0.20
+    assert selection._debug is True
+    assert poller.interval == 0.17
+
+
+def test_apply_platform_runtime_config_updates_wayland_and_resets_freshness():
+    class TimingTarget:
+        def __init__(self):
+            self.timing = None
+            self.debug = False
+
+        def reconfigure_timing(self, timing):
+            self.timing = timing
+
+    class Selection:
+        def __init__(self):
+            self.strategy = "auto"
+            self.timing = None
+            self.debug = False
+
+        def reconfigure(self, *, strategy, timing, debug):
+            changed = strategy != self.strategy
+            self.strategy = strategy
+            self.timing = timing
+            self.debug = debug
+            return changed
+
+    config = MagicMock()
+    config.get.return_value = "primary_selection"
+    virtual_kb = TimingTarget()
+    system = TimingTarget()
+    selection = Selection()
+    tracker = SelectionFreshnessTracker(
+        valid=True,
+        repeat_valid=True,
+        prev_text="stale",
+        prev_owner_id=7,
+        baseline_initialized=True,
+    )
+    common = {
+        "key_press_delay": 0.011,
+        "key_repeat_delay": 0.012,
+        "retype_before_replay_delay": 0.013,
+        "direct_type_after_layout_switch_delay": 0.014,
+        "undo_before_replay_delay": 0.015,
+        "auto_before_replay_delay": 0.016,
+        "auto_before_space_delay": 0.017,
+    }
+    wayland = {"wl_clipboard_timeout": 1.7}
+    wayland_selection = {
+        "copy_wait_timeout": 0.21,
+        "copy_poll_interval": 0.022,
+        "copy_retry_delay": 0.023,
+        "paste_delay": 0.024,
+        "restore_delay": 0.025,
+        "expand_selection_delay": 0.026,
+    }
+    snapshot = RuntimeConfigSnapshot(
+        timing=common,
+        x11_selection_timing={},
+        wayland_timing=wayland,
+        wayland_selection_timing=wayland_selection,
+    )
+
+    changed = apply_platform_runtime_config(
+        config=config,
+        snapshot=snapshot,
+        virtual_kb=virtual_kb,
+        selection=selection,
+        system=system,
+        selection_tracker=tracker,
+        debug=True,
+    )
+
+    assert changed is True
+    assert virtual_kb.timing["key_press_delay"] == 0.011
+    assert virtual_kb.timing["key_repeat_delay"] == 0.012
+    assert system.timing["wl_clipboard_timeout"] == 1.7
+    assert selection.strategy == "primary_selection"
+    assert selection.timing == wayland_selection
+    assert selection.debug is True
+    assert tracker.valid is False
+    assert tracker.repeat_valid is False
+    assert tracker.prev_text == ""
+    assert tracker.prev_owner_id == 0
+    assert tracker.baseline_initialized is False
 
 
 def test_apply_user_dictionary_config_enables_dictionary():
@@ -1979,6 +2145,16 @@ def test_selection_poller_thread_initializes_and_stops():
     poller.stop()
 
     assert poller._running is False
+
+
+def test_selection_poller_interval_updates_and_wakes_existing_thread():
+    poller = SelectionPollerThread(MagicMock(), poll_interval=0.5)
+
+    poller.set_poll_interval(0.075)
+
+    assert poller.poll_interval == 0.075
+    assert poller._poll_interval == 0.075
+    assert poller._wake.is_set()
 
 
 def test_start_runtime_resources_starts_poller_scans_devices_and_starts_udev():

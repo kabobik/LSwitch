@@ -57,6 +57,21 @@ class TestDeviceName:
         assert vk.KEY_PRESS_DELAY == 0.004
         assert vk.KEY_REPEAT_DELAY == 0.005
 
+    def test_reconfigure_timing_and_debug_preserves_device(self):
+        mock_uinput = MagicMock()
+        with patch.object(_evdev_mod, "UInput", return_value=mock_uinput):
+            vk = VirtualKeyboard(debug=False)
+
+        vk.reconfigure_timing(
+            {"key_press_delay": 0.007, "key_repeat_delay": 0.008}
+        )
+        vk.set_debug(True)
+
+        assert vk._uinput is mock_uinput
+        assert vk.KEY_PRESS_DELAY == 0.007
+        assert vk.KEY_REPEAT_DELAY == 0.008
+        assert vk.debug is True
+
 
 class TestTapKey:
     def test_tap_key_press_release(self):

@@ -634,6 +634,10 @@ class ConfigManager:
         with self._lock:
             return copy.deepcopy(self._config.get(key, default))
 
+    def set_debug(self, enabled: bool) -> None:
+        """Update diagnostic logging used by subsequent file reloads."""
+        self._debug = bool(enabled)
+
     def set(self, key: str, value) -> None:
         """Set a single configuration value."""
         with self._lock:

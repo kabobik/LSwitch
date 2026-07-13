@@ -125,11 +125,22 @@ class SelectionPollerThread(threading.Thread):
         self._prev_text: str = ""
         self._prev_owner_id: int = 0
         self._on_selection_changed = on_selection_changed
-        self._poll_interval = poll_interval
+        self._interval_lock = threading.Lock()
+        self._wake = threading.Event()
+        self._poll_interval = float(poll_interval)
+
+    @property
+    def poll_interval(self) -> float:
+        with self._interval_lock:
+            return self._poll_interval
+
+    def set_poll_interval(self, value: float) -> None:
+        """Apply a new interval and wake a currently waiting poll loop."""
+        with self._interval_lock:
+            self._poll_interval = float(value)
+        self._wake.set()
 
     def run(self):
-        import time
-
         while self._running:
             try:
                 info = self._selection.get_selection()
@@ -147,10 +158,12 @@ class SelectionPollerThread(threading.Thread):
                         self._on_selection_changed(info.text, info.owner_id)
             except Exception as exc:
                 logger.trace("selection-poller error: %s", exc)  # type: ignore[attr-defined]
-            time.sleep(self._poll_interval)
+            self._wake.wait(self.poll_interval)
+            self._wake.clear()
 
     def stop(self):
         self._running = False
+        self._wake.set()
 
 
 @dataclass(frozen=True)

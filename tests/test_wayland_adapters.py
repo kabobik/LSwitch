@@ -94,6 +94,22 @@ class TestWaylandSystemAdapter:
 
         assert adapter.WL_CLIPBOARD_TIMEOUT == 2.5
 
+    def test_reconfigure_timing_and_debug_preserves_adapter(self):
+        virtual_kb = MagicMock()
+        adapter = WaylandSystemAdapter(
+            virtual_kb=virtual_kb,
+            main_thread=DirectMainThreadInvoker(),
+            compositor="kde",
+            enable_wl_clipboard=False,
+        )
+
+        adapter.reconfigure_timing({"wl_clipboard_timeout": 3.5})
+        adapter.set_debug(True)
+
+        assert adapter.virtual_kb is virtual_kb
+        assert adapter.WL_CLIPBOARD_TIMEOUT == 3.5
+        assert adapter.debug is True
+
     def test_send_key_sequence_uses_virtual_keyboard_combo(self):
         vk = MagicMock()
         adapter = WaylandSystemAdapter(
@@ -549,6 +565,37 @@ class TestWaylandSelectionAdapter:
         assert adapter.PASTE_DELAY == 0.05
         assert adapter.RESTORE_DELAY == 0.06
         assert adapter.EXPAND_SELECTION_DELAY == 0.07
+
+    def test_reconfigure_strategy_timing_and_debug_clears_transient_state(self):
+        system = _RecordingWaylandSystem(clipboard="current", primary="selected")
+        adapter = _make_selection_adapter(system)
+        adapter._prev_text = "stale"
+        adapter._saved_clipboard = "stale clipboard"
+
+        changed = adapter.reconfigure(
+            strategy="primary_selection",
+            timing={
+                "copy_wait_timeout": 0.21,
+                "copy_poll_interval": 0.031,
+                "copy_retry_delay": 0.041,
+                "paste_delay": 0.051,
+                "restore_delay": 0.061,
+                "expand_selection_delay": 0.071,
+            },
+            debug=True,
+        )
+
+        assert changed is True
+        assert adapter.strategy == "primary_selection"
+        assert adapter.COPY_WAIT_TIMEOUT == 0.21
+        assert adapter.COPY_POLL_INTERVAL == 0.031
+        assert adapter.COPY_RETRY_DELAY == 0.041
+        assert adapter.PASTE_DELAY == 0.051
+        assert adapter.RESTORE_DELAY == 0.061
+        assert adapter.EXPAND_SELECTION_DELAY == 0.071
+        assert adapter.debug is True
+        assert adapter._prev_text == ""
+        assert adapter._saved_clipboard is None
 
     def test_primary_strategy_replace_selection_by_typing(self):
         system = _RecordingWaylandSystem(clipboard="current", primary="selected")

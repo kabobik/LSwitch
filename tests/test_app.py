@@ -170,6 +170,27 @@ class TestRuntimeConfig:
         assert app.prefix_dictionary.has_prefix("en", "hello") is True
         assert app.mid_word_detector.min_prefix_len == 5
 
+    def test_debug_config_updates_effective_runtime_without_restart(self):
+        app = _make_app()
+        root_logger = MagicMock()
+        app.logging_controller.root_logger = root_logger
+        candidate = app.config.get_all()
+        candidate["debug"] = False
+
+        result = app.config_controller.apply(
+            candidate,
+            source="test",
+            persist=False,
+        )
+
+        assert result.ok is True
+        assert app.debug is False
+        assert app.state_manager.debug is False
+        assert app.conversion_runtime.debug is False
+        assert app.conversion_engine.debug is False
+        assert app.learning_service.debug is False
+        root_logger.setLevel.assert_called_once_with(20)
+
     def test_unrelated_config_change_does_not_rebuild_mid_word_runtime(self):
         app = _make_app()
         app.dictionary = MagicMock()

@@ -22,7 +22,9 @@ from lswitch.runtime_config import (
     AppliedRuntimeConfig,
     ConfigApplyResult,
     RuntimeConfigController,
+    RuntimeLoggingController,
     RuntimeConfigSnapshot,
+    apply_platform_runtime_config,
     apply_runtime_config_update,
     apply_runtime_timing_config,
     apply_user_dictionary_config,
@@ -30,6 +32,7 @@ from lswitch.runtime_config import (
     read_runtime_config_snapshot,
     synced_learning_service,
     sync_user_dictionary_components,
+    set_component_debug,
 )
 from lswitch.runtime_conversion import (
     ConversionRuntimeFacade,

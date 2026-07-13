@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable
@@ -97,21 +98,35 @@ class X11SelectionAdapter(ISelectionAdapter):
     ) -> None:
         self._system = system
         self._debug = debug
-        timing = timing or {}
-        self.PASTE_DELAY = float(timing.get("paste_delay", type(self).PASTE_DELAY))
-        self.RESTORE_DELAY = float(
-            timing.get("restore_delay", type(self).RESTORE_DELAY)
-        )
-        self.EXPAND_SELECTION_DELAY = float(
-            timing.get(
-                "expand_selection_delay",
-                type(self).EXPAND_SELECTION_DELAY,
-            )
-        )
+        self._timing_lock = threading.RLock()
+        self.reconfigure_timing(timing or {})
 
         # Cached previous state for freshness comparison
         self._prev_owner_id: int = 0
         self._prev_text: str = ""
+
+    def reconfigure_timing(self, timing: dict) -> None:
+        """Atomically replace selection delays for subsequent operations."""
+        paste_delay = float(timing.get("paste_delay", self.PASTE_DELAY))
+        restore_delay = float(timing.get("restore_delay", self.RESTORE_DELAY))
+        expand_delay = float(
+            timing.get("expand_selection_delay", self.EXPAND_SELECTION_DELAY)
+        )
+        with self._timing_lock:
+            self.PASTE_DELAY = paste_delay
+            self.RESTORE_DELAY = restore_delay
+            self.EXPAND_SELECTION_DELAY = expand_delay
+
+    def set_debug(self, enabled: bool) -> None:
+        self._debug = bool(enabled)
+
+    def _timing_snapshot(self) -> tuple[float, float, float]:
+        with self._timing_lock:
+            return (
+                self.PASTE_DELAY,
+                self.RESTORE_DELAY,
+                self.EXPAND_SELECTION_DELAY,
+            )
 
     # -- ISelectionAdapter --------------------------------------------------
 
@@ -151,12 +166,13 @@ class X11SelectionAdapter(ISelectionAdapter):
 
         Sequence: save clipboard → set clipboard → Ctrl+V → restore clipboard.
         """
+        paste_delay, restore_delay, _ = self._timing_snapshot()
         try:
             old_clip = self._system.get_clipboard(selection="clipboard")
             self._system.set_clipboard(new_text, selection="clipboard")
-            time.sleep(self.PASTE_DELAY)
+            time.sleep(paste_delay)
             self._system.send_key_sequence("ctrl+v")
-            time.sleep(self.RESTORE_DELAY)
+            time.sleep(restore_delay)
             # Restore the original clipboard
             if old_clip is not None:
                 self._system.set_clipboard(old_clip, selection="clipboard")
@@ -166,26 +182,34 @@ class X11SelectionAdapter(ISelectionAdapter):
 
     def expand_selection_to_word(self) -> SelectionInfo:
         """Expand the current selection to the surrounding word via Ctrl+Shift+Left."""
+        _, _, expand_delay = self._timing_snapshot()
         try:
             self._system.send_key_sequence("ctrl+shift+Left")
-            time.sleep(self.EXPAND_SELECTION_DELAY)
+            time.sleep(expand_delay)
         except Exception:
             pass
-        return self._expand_through_layout_word_boundaries(self.get_selection())
+        return self._expand_through_layout_word_boundaries(
+            self.get_selection(),
+            expand_delay=expand_delay,
+        )
 
     def _expand_through_layout_word_boundaries(
         self,
         initial: SelectionInfo,
+        *,
+        expand_delay: float | None = None,
     ) -> SelectionInfo:
         if not initial.text:
             return initial
 
+        if expand_delay is None:
+            _, _, expand_delay = self._timing_snapshot()
         previous = initial
         probing = False
         for _ in range(self.MAX_LAYOUT_WORD_PROBE_CHARS):
             try:
                 self._system.send_key_sequence("shift+Left")
-                time.sleep(self.EXPAND_SELECTION_DELAY)
+                time.sleep(expand_delay)
                 current = self.get_selection()
             except Exception:
                 return previous
@@ -197,20 +221,22 @@ class X11SelectionAdapter(ISelectionAdapter):
             added_char = added[-1]
             if not probing:
                 if added_char not in LAYOUT_WORD_CONTINUATION_CHARS:
-                    self._shrink_selection_right()
+                    self._shrink_selection_right(expand_delay=expand_delay)
                     return initial
                 probing = True
             elif not _is_layout_word_char(added_char):
-                self._shrink_selection_right()
+                self._shrink_selection_right(expand_delay=expand_delay)
                 return previous
 
             previous = current
 
         return previous
 
-    def _shrink_selection_right(self) -> None:
+    def _shrink_selection_right(self, *, expand_delay: float | None = None) -> None:
+        if expand_delay is None:
+            _, _, expand_delay = self._timing_snapshot()
         try:
             self._system.send_key_sequence("shift+Right")
-            time.sleep(self.EXPAND_SELECTION_DELAY)
+            time.sleep(expand_delay)
         except Exception:
             pass

@@ -250,3 +250,22 @@ class TestX11SelectionAdapterUnit:
         assert adapter.PASTE_DELAY == 0.03
         assert adapter.RESTORE_DELAY == 0.04
         assert adapter.EXPAND_SELECTION_DELAY == 0.06
+
+    def test_reconfigure_timing_and_debug_preserves_adapter(self):
+        system = _RecordingSystemAdapter()
+        adapter = X11SelectionAdapter(system=system, debug=False)
+
+        adapter.reconfigure_timing(
+            {
+                "paste_delay": 0.13,
+                "restore_delay": 0.14,
+                "expand_selection_delay": 0.16,
+            }
+        )
+        adapter.set_debug(True)
+
+        assert adapter._system is system
+        assert adapter.PASTE_DELAY == 0.13
+        assert adapter.RESTORE_DELAY == 0.14
+        assert adapter.EXPAND_SELECTION_DELAY == 0.16
+        assert adapter._debug is True

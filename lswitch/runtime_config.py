@@ -9,6 +9,7 @@ from typing import Callable
 
 from lswitch.config import ConfigChangeSet, ConfigManager
 from lswitch.core.events import Event, EventType
+from lswitch.log import TRACE
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,8 @@ class RuntimeConfigSnapshot:
 class AppliedRuntimeConfig:
     timing: RuntimeConfigSnapshot
     user_dict: object | None
+    debug: bool = False
+    selection_strategy_changed: bool = False
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,25 @@ class ConfigApplyResult:
     ok: bool
     changed_paths: frozenset[str] = frozenset()
     error: str | None = None
+
+
+class RuntimeLoggingController:
+    """Apply the effective process log level while preserving TRACE override."""
+
+    def __init__(self, *, trace_override: bool = False, root_logger=None) -> None:
+        self.trace_override = bool(trace_override)
+        self.root_logger = root_logger or logging.getLogger()
+        self.effective_debug = False
+
+    def reconfigure(self, debug: bool) -> bool:
+        if self.trace_override:
+            level = TRACE
+            self.effective_debug = True
+        else:
+            self.effective_debug = bool(debug)
+            level = logging.DEBUG if self.effective_debug else logging.INFO
+        self.root_logger.setLevel(level)
+        return self.effective_debug
 
 
 class RuntimeConfigController:
@@ -211,6 +233,85 @@ def apply_runtime_timing_config(
     return snapshot
 
 
+def _call_capability(component, name: str, *args, **kwargs):
+    if component is None:
+        return None
+    method = getattr(type(component), name, None)
+    if not callable(method):
+        return None
+    return method(component, *args, **kwargs)
+
+
+def set_component_debug(component, enabled: bool) -> None:
+    """Update a long-lived component without imposing a shared base class."""
+    if component is None:
+        return
+    if callable(getattr(type(component), "set_debug", None)):
+        component.set_debug(enabled)
+        return
+    values = getattr(component, "__dict__", {})
+    if "debug" in values:
+        component.debug = bool(enabled)
+    if "_debug" in values:
+        component._debug = bool(enabled)
+
+
+def apply_platform_runtime_config(
+    *,
+    config,
+    snapshot: RuntimeConfigSnapshot,
+    virtual_kb=None,
+    selection=None,
+    system=None,
+    xkb=None,
+    selection_poller=None,
+    selection_tracker=None,
+    event_manager=None,
+    device_manager=None,
+    debug: bool,
+) -> bool:
+    """Reconfigure existing platform objects and preserve their identities."""
+    _call_capability(virtual_kb, "reconfigure_timing", snapshot.timing)
+    _call_capability(system, "reconfigure_timing", snapshot.wayland_timing)
+
+    strategy_changed = False
+    if callable(getattr(type(selection), "reconfigure", None)):
+        strategy_changed = bool(
+            selection.reconfigure(
+                strategy=config.get("wayland_selection_strategy", "auto"),
+                timing=snapshot.wayland_selection_timing,
+                debug=debug,
+            )
+        )
+    else:
+        _call_capability(
+            selection,
+            "reconfigure_timing",
+            snapshot.x11_selection_timing,
+        )
+
+    if selection_poller is not None:
+        _call_capability(
+            selection_poller,
+            "set_poll_interval",
+            snapshot.x11_selection_timing.get("poll_interval", 0.5),
+        )
+
+    for component in (
+        virtual_kb,
+        selection,
+        system,
+        xkb,
+        event_manager,
+        device_manager,
+    ):
+        set_component_debug(component, debug)
+
+    if strategy_changed and selection_tracker is not None:
+        selection_tracker.reset_strategy_state()
+    return strategy_changed
+
+
 def apply_user_dictionary_config(
     *,
     config,
@@ -255,12 +356,36 @@ def apply_runtime_config_update(
     debug: bool,
     manual_weight_step: int,
     log,
+    virtual_kb=None,
+    selection=None,
+    system=None,
+    xkb=None,
+    selection_poller=None,
+    selection_tracker=None,
+    event_manager=None,
+    device_manager=None,
 ) -> AppliedRuntimeConfig:
     """Apply runtime config changes and sync mutable services."""
     timing = apply_runtime_timing_config(
         config=config,
         state_manager=state_manager,
         conversion_engine=conversion_engine,
+    )
+    state_manager.debug = bool(debug)
+    if conversion_engine is not None:
+        conversion_engine.debug = bool(debug)
+    strategy_changed = apply_platform_runtime_config(
+        config=config,
+        snapshot=timing,
+        virtual_kb=virtual_kb,
+        selection=selection,
+        system=system,
+        xkb=xkb,
+        selection_poller=selection_poller,
+        selection_tracker=selection_tracker,
+        event_manager=event_manager,
+        device_manager=device_manager,
+        debug=debug,
     )
     user_dict = apply_user_dictionary_config(
         config=config,
@@ -280,4 +405,6 @@ def apply_runtime_config_update(
     return AppliedRuntimeConfig(
         timing=timing,
         user_dict=user_dict,
+        debug=debug,
+        selection_strategy_changed=strategy_changed,
     )

@@ -30,6 +30,13 @@ class SelectionFreshnessTracker:
         self.set_valid(False)
         self.clear_repeat()
 
+    def reset_strategy_state(self) -> None:
+        """Discard freshness state that belongs to a previous adapter strategy."""
+        self.reset_fresh_and_repeat()
+        self.prev_text = ""
+        self.prev_owner_id = 0
+        self.baseline_initialized = False
+
     def effective_valid(self) -> bool:
         return self.valid or (
             self.repeat_valid and self.repeat_generation == self.generation

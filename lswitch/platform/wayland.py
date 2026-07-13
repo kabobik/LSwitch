@@ -12,6 +12,7 @@ import logging
 import re
 import shutil
 import subprocess
+import threading
 import time
 from typing import Callable, Optional
 
@@ -57,6 +58,12 @@ class _WaylandUnsupported:
         self.compositor = compositor or "unknown"
         self.debug = debug
 
+    def set_debug(self, enabled: bool) -> None:
+        self.debug = bool(enabled)
+        backend = getattr(self, "backend", None)
+        if backend is not None and hasattr(backend, "debug"):
+            backend.debug = bool(enabled)
+
     def _unsupported(self, operation: str) -> WaylandBackendNotImplementedError:
         return WaylandBackendNotImplementedError(
             f"Wayland backend operation '{operation}' is not implemented yet "
@@ -88,10 +95,22 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         self._command_lookup = command_lookup or shutil.which
         self._command_runner = command_runner or subprocess.run
         self._wl_clipboard_available: bool | None = None
-        timing = timing or {}
-        self.WL_CLIPBOARD_TIMEOUT = float(
-            timing.get("wl_clipboard_timeout", type(self).WL_CLIPBOARD_TIMEOUT)
+        self._timing_lock = threading.RLock()
+        self.reconfigure_timing(timing or {})
+
+    def reconfigure_timing(self, timing: dict) -> None:
+        timeout = float(
+            timing.get("wl_clipboard_timeout", self.WL_CLIPBOARD_TIMEOUT)
         )
+        with self._timing_lock:
+            self.WL_CLIPBOARD_TIMEOUT = timeout
+
+    def set_debug(self, enabled: bool) -> None:
+        self.debug = bool(enabled)
+
+    def _clipboard_timeout(self) -> float:
+        with self._timing_lock:
+            return self.WL_CLIPBOARD_TIMEOUT
 
     def run_command(self, args: list[str], timeout: float = 1.0) -> CommandResult:
         raise self._unsupported("run_command")
@@ -195,7 +214,7 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         normalized = self._normalize_clipboard_selection(selection)
         result = self._run_wl_command(
             self._wl_clipboard_args("wl-paste", selection),
-            timeout=self.WL_CLIPBOARD_TIMEOUT,
+            timeout=self._clipboard_timeout(),
         )
         if result.returncode == 0:
             return result.stdout
@@ -222,7 +241,7 @@ class WaylandSystemAdapter(_WaylandUnsupported, ISystemAdapter):
         result = self._run_wl_command(
             self._wl_clipboard_args("wl-copy", selection, mime_type=mime_type),
             input_text=text,
-            timeout=self.WL_CLIPBOARD_TIMEOUT,
+            timeout=self._clipboard_timeout(),
         )
         if result.returncode == 0:
             return True
@@ -331,44 +350,89 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         super().__init__(compositor=compositor, debug=debug)
         self.system = system
         self.main_thread = main_thread
+        self._timing_lock = threading.RLock()
         self.strategy = self._normalize_strategy(strategy)
         self._prev_text: str = ""
         self._saved_clipboard: str | None = None
+        self.reconfigure(timing=timing or {})
+
+    def reconfigure(
+        self,
+        *,
+        strategy: str | None = None,
+        timing: dict | None = None,
+        debug: bool | None = None,
+    ) -> bool:
+        """Replace strategy/timing and clear state owned by an old strategy."""
+        normalized_strategy = (
+            self._normalize_strategy(strategy)
+            if strategy is not None
+            else self.strategy
+        )
         timing = timing or {}
-        self.COPY_WAIT_TIMEOUT = float(
-            timing.get("copy_wait_timeout", type(self).COPY_WAIT_TIMEOUT)
+        values = (
+            float(timing.get("copy_wait_timeout", self.COPY_WAIT_TIMEOUT)),
+            float(timing.get("copy_poll_interval", self.COPY_POLL_INTERVAL)),
+            float(timing.get("copy_retry_delay", self.COPY_RETRY_DELAY)),
+            float(timing.get("paste_delay", self.PASTE_DELAY)),
+            float(timing.get("restore_delay", self.RESTORE_DELAY)),
+            float(
+                timing.get(
+                    "expand_selection_delay",
+                    self.EXPAND_SELECTION_DELAY,
+                )
+            ),
         )
-        self.COPY_POLL_INTERVAL = float(
-            timing.get("copy_poll_interval", type(self).COPY_POLL_INTERVAL)
-        )
-        self.COPY_RETRY_DELAY = float(
-            timing.get("copy_retry_delay", type(self).COPY_RETRY_DELAY)
-        )
-        self.PASTE_DELAY = float(timing.get("paste_delay", type(self).PASTE_DELAY))
-        self.RESTORE_DELAY = float(
-            timing.get("restore_delay", type(self).RESTORE_DELAY)
-        )
-        self.EXPAND_SELECTION_DELAY = float(
-            timing.get(
-                "expand_selection_delay",
-                type(self).EXPAND_SELECTION_DELAY,
+        with self._timing_lock:
+            strategy_changed = normalized_strategy != self.strategy
+            self.strategy = normalized_strategy
+            (
+                self.COPY_WAIT_TIMEOUT,
+                self.COPY_POLL_INTERVAL,
+                self.COPY_RETRY_DELAY,
+                self.PASTE_DELAY,
+                self.RESTORE_DELAY,
+                self.EXPAND_SELECTION_DELAY,
+            ) = values
+            if debug is not None:
+                self.debug = bool(debug)
+            if strategy_changed:
+                self._prev_text = ""
+                self._saved_clipboard = None
+        return strategy_changed
+
+    def reconfigure_timing(self, timing: dict) -> None:
+        self.reconfigure(timing=timing)
+
+    def set_debug(self, enabled: bool) -> None:
+        self.debug = bool(enabled)
+
+    def _runtime_snapshot(self) -> tuple[str, tuple[float, ...]]:
+        with self._timing_lock:
+            return self.strategy, (
+                self.COPY_WAIT_TIMEOUT,
+                self.COPY_POLL_INTERVAL,
+                self.COPY_RETRY_DELAY,
+                self.PASTE_DELAY,
+                self.RESTORE_DELAY,
+                self.EXPAND_SELECTION_DELAY,
             )
-        )
 
     def get_selection(self) -> SelectionInfo:
-        if self.strategy == "disabled":
+        strategy, copy_timing = self._runtime_snapshot()
+        if strategy == "disabled":
             return self.empty_selection()
 
-        if self.strategy in {"auto", "primary_selection"}:
+        if strategy in {"auto", "primary_selection"}:
             passive = self.get_passive_selection()
-            if passive.text or self.strategy == "primary_selection":
+            if passive.text or strategy == "primary_selection":
                 return passive
 
         old_clipboard = self.system.get_clipboard(selection="clipboard")
         self._saved_clipboard = old_clipboard
         sentinel = self._copy_sentinel()
         self._set_copy_sentinel(sentinel)
-        text = self._copy_selection_to_clipboard(sentinel)
+        text = self._copy_selection_to_clipboard(sentinel, timing=copy_timing)
         if not text:
             logger.debug("Wayland selection copy returned empty text")
             self.system.set_clipboard(old_clipboard, selection="clipboard")
@@ -400,17 +464,19 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         return fresh
 
     def replace_selection(self, new_text: str) -> bool:
-        if self.strategy in {"disabled", "primary_selection"}:
+        strategy, timing = self._runtime_snapshot()
+        if strategy in {"disabled", "primary_selection"}:
             return False
+        _, _, _, paste_delay, restore_delay, _ = timing
 
         old_clipboard = self._saved_clipboard
         if old_clipboard is None:
             old_clipboard = self.system.get_clipboard(selection="clipboard")
         try:
             self.system.set_clipboard(new_text, selection="clipboard")
-            time.sleep(self.PASTE_DELAY)
+            time.sleep(paste_delay)
             self.system.send_key_sequence("ctrl+v")
-            time.sleep(self.RESTORE_DELAY)
+            time.sleep(restore_delay)
             self.system.set_clipboard(old_clipboard, selection="clipboard")
             return True
         except Exception as exc:
@@ -420,7 +486,8 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
             self._saved_clipboard = None
 
     def prefers_direct_replacement(self) -> bool:
-        return self.strategy == "primary_selection"
+        strategy, _ = self._runtime_snapshot()
+        return strategy == "primary_selection"
 
     def replace_selection_by_typing(
         self,
@@ -442,32 +509,49 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
             return False
 
     def expand_selection_to_word(self) -> SelectionInfo:
-        if self.strategy == "disabled":
+        strategy, timing = self._runtime_snapshot()
+        if strategy == "disabled":
             return self.empty_selection()
+        expand_delay = timing[-1]
 
         self.system.send_key_sequence("ctrl+shift+Left")
-        time.sleep(self.EXPAND_SELECTION_DELAY)
-        if self.strategy in {"auto", "primary_selection"}:
+        time.sleep(expand_delay)
+        if strategy in {"auto", "primary_selection"}:
             passive = self.get_passive_selection()
-            if passive.text or self.strategy == "primary_selection":
-                return self._expand_through_layout_word_boundaries(passive)
-        return self._expand_through_layout_word_boundaries(self.get_selection())
+            if passive.text or strategy == "primary_selection":
+                return self._expand_through_layout_word_boundaries(
+                    passive,
+                    strategy=strategy,
+                    expand_delay=expand_delay,
+                )
+        return self._expand_through_layout_word_boundaries(
+            self.get_selection(),
+            strategy=strategy,
+            expand_delay=expand_delay,
+        )
 
     def _expand_through_layout_word_boundaries(
         self,
         initial: SelectionInfo,
+        *,
+        strategy: str | None = None,
+        expand_delay: float | None = None,
     ) -> SelectionInfo:
         if not initial.text:
             return initial
 
+        if strategy is None or expand_delay is None:
+            current_strategy, timing = self._runtime_snapshot()
+            strategy = strategy or current_strategy
+            expand_delay = timing[-1] if expand_delay is None else expand_delay
         saved_clipboard = self._saved_clipboard
         previous = initial
         probing = False
         for _ in range(self.MAX_LAYOUT_WORD_PROBE_CHARS):
             try:
                 self.system.send_key_sequence("shift+Left")
-                time.sleep(self.EXPAND_SELECTION_DELAY)
-                current = self._read_current_expanded_selection()
+                time.sleep(expand_delay)
+                current = self._read_current_expanded_selection(strategy=strategy)
             except Exception:
                 self._saved_clipboard = saved_clipboard
                 return previous
@@ -480,12 +564,12 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
             added_char = added[-1]
             if not probing:
                 if added_char not in LAYOUT_WORD_CONTINUATION_CHARS:
-                    self._shrink_selection_right()
+                    self._shrink_selection_right(expand_delay=expand_delay)
                     self._saved_clipboard = saved_clipboard
                     return initial
                 probing = True
             elif not _is_layout_word_char(added_char):
-                self._shrink_selection_right()
+                self._shrink_selection_right(expand_delay=expand_delay)
                 self._saved_clipboard = saved_clipboard
                 return previous
 
@@ -495,17 +579,24 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
         self._saved_clipboard = saved_clipboard
         return previous
 
-    def _read_current_expanded_selection(self) -> SelectionInfo:
-        if self.strategy in {"auto", "primary_selection"}:
+    def _read_current_expanded_selection(
+        self,
+        *,
+        strategy: str | None = None,
+    ) -> SelectionInfo:
+        strategy = strategy or self._runtime_snapshot()[0]
+        if strategy in {"auto", "primary_selection"}:
             passive = self.get_passive_selection()
-            if passive.text or self.strategy == "primary_selection":
+            if passive.text or strategy == "primary_selection":
                 return passive
         return self.get_selection()
 
-    def _shrink_selection_right(self) -> None:
+    def _shrink_selection_right(self, *, expand_delay: float | None = None) -> None:
+        if expand_delay is None:
+            expand_delay = self._runtime_snapshot()[1][-1]
         try:
             self.system.send_key_sequence("shift+Right")
-            time.sleep(self.EXPAND_SELECTION_DELAY)
+            time.sleep(expand_delay)
         except Exception:
             pass
 
@@ -513,24 +604,45 @@ class WaylandSelectionAdapter(_WaylandUnsupported, ISelectionAdapter):
     def empty_selection() -> SelectionInfo:
         return SelectionInfo(text="", owner_id=0, timestamp=time.time())
 
-    def _wait_for_clipboard_copy(self, sentinel: str) -> str:
-        deadline = time.time() + self.COPY_WAIT_TIMEOUT
+    def _wait_for_clipboard_copy(
+        self,
+        sentinel: str,
+        *,
+        timeout: float | None = None,
+        poll_interval: float | None = None,
+    ) -> str:
+        if timeout is None or poll_interval is None:
+            timing = self._runtime_snapshot()[1]
+            timeout = timing[0] if timeout is None else timeout
+            poll_interval = timing[1] if poll_interval is None else poll_interval
+        deadline = time.time() + timeout
         while time.time() < deadline:
             current = self.system.get_clipboard(selection="clipboard")
             if current and current != sentinel:
                 return current
-            time.sleep(self.COPY_POLL_INTERVAL)
+            time.sleep(poll_interval)
         return ""
 
-    def _copy_selection_to_clipboard(self, sentinel: str) -> str:
+    def _copy_selection_to_clipboard(
+        self,
+        sentinel: str,
+        *,
+        timing: tuple[float, ...] | None = None,
+    ) -> str:
+        timing = timing or self._runtime_snapshot()[1]
+        copy_timeout, poll_interval, retry_delay = timing[:3]
         for sequence in self.COPY_SHORTCUTS:
             self.system.send_key_sequence(sequence)
-            text = self._wait_for_clipboard_copy(sentinel)
+            text = self._wait_for_clipboard_copy(
+                sentinel,
+                timeout=copy_timeout,
+                poll_interval=poll_interval,
+            )
             if text:
                 logger.debug("Wayland selection copy succeeded via %s", sequence)
                 return text
             logger.debug("Wayland selection copy via %s returned no text", sequence)
-            time.sleep(self.COPY_RETRY_DELAY)
+            time.sleep(retry_delay)
         return ""
 
     def _copy_sentinel(self) -> str:

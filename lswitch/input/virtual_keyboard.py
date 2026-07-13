@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import logging
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -17,13 +18,8 @@ class VirtualKeyboard:
     def __init__(self, debug: bool = False, timing: dict | None = None):
         self.debug = debug
         self._uinput: Any = None
-        timing = timing or {}
-        self.KEY_PRESS_DELAY = float(
-            timing.get("key_press_delay", type(self).KEY_PRESS_DELAY)
-        )
-        self.KEY_REPEAT_DELAY = float(
-            timing.get("key_repeat_delay", type(self).KEY_REPEAT_DELAY)
-        )
+        self._timing_lock = threading.RLock()
+        self.reconfigure_timing(timing or {})
         self._open()
 
     def _open(self) -> None:
@@ -38,6 +34,24 @@ class VirtualKeyboard:
     # when they arrive faster than the input processing loop runs.
     KEY_PRESS_DELAY  = 0.001   # 1 ms between press and release
     KEY_REPEAT_DELAY = 0.001   # 1 ms between successive key taps
+
+    def reconfigure_timing(self, timing: dict) -> None:
+        """Atomically replace delays used by subsequent input operations."""
+        press_delay = float(timing.get("key_press_delay", self.KEY_PRESS_DELAY))
+        repeat_delay = float(timing.get("key_repeat_delay", self.KEY_REPEAT_DELAY))
+        with self._timing_lock:
+            self.KEY_PRESS_DELAY = press_delay
+            self.KEY_REPEAT_DELAY = repeat_delay
+
+    def set_debug(self, enabled: bool) -> None:
+        self.debug = bool(enabled)
+
+    def _timing_snapshot(self) -> tuple[float, float]:
+        lock = getattr(self, "_timing_lock", None)
+        if lock is None:
+            return self.KEY_PRESS_DELAY, self.KEY_REPEAT_DELAY
+        with lock:
+            return self.KEY_PRESS_DELAY, self.KEY_REPEAT_DELAY
 
     _KEY_NAME_MAP: dict[str, int] = {
         "ctrl": 29,
@@ -122,12 +136,13 @@ class VirtualKeyboard:
     def tap_key(self, keycode: int, n_times: int = 1) -> None:
         """Press and release a keycode n times."""
         logger.debug("VirtualKeyboard: tap_key code=%s n_times=%s", keycode, n_times)
+        press_delay, repeat_delay = self._timing_snapshot()
         for i in range(n_times):
             self._write(keycode, 1)
-            time.sleep(self.KEY_PRESS_DELAY)
+            time.sleep(press_delay)
             self._write(keycode, 0)
             if i < n_times - 1:
-                time.sleep(self.KEY_REPEAT_DELAY)
+                time.sleep(repeat_delay)
 
     @classmethod
     def _key_name_to_code(cls, name: str) -> int:
@@ -145,13 +160,14 @@ class VirtualKeyboard:
         if not names:
             return
         keycodes = [self._key_name_to_code(name) for name in names]
+        press_delay, _ = self._timing_snapshot()
         logger.debug("VirtualKeyboard: send_combo sequence=%s codes=%s", sequence, keycodes)
         for code in keycodes:
             self._write(code, 1)
-            time.sleep(self.KEY_PRESS_DELAY)
+            time.sleep(press_delay)
         for code in reversed(keycodes):
             self._write(code, 0)
-            time.sleep(self.KEY_PRESS_DELAY)
+            time.sleep(press_delay)
 
     def type_text(self, text: str, layout_name: str = "en") -> bool:
         """Type text through the currently active keyboard layout.
@@ -169,6 +185,7 @@ class VirtualKeyboard:
             len(text),
             layout_name,
         )
+        press_delay, repeat_delay = self._timing_snapshot()
         for ch in text:
             key = self._text_char_to_key(ch, layout_name=layout_name)
             if key is None:
@@ -177,13 +194,13 @@ class VirtualKeyboard:
             code, shifted = key
             if shifted:
                 self._write(self.KEY_LEFTSHIFT, 1)
-                time.sleep(self.KEY_PRESS_DELAY)
+                time.sleep(press_delay)
             self._write(code, 1)
-            time.sleep(self.KEY_PRESS_DELAY)
+            time.sleep(press_delay)
             self._write(code, 0)
             if shifted:
                 self._write(self.KEY_LEFTSHIFT, 0)
-            time.sleep(self.KEY_REPEAT_DELAY)
+            time.sleep(repeat_delay)
         return True
 
     @classmethod
@@ -237,6 +254,7 @@ class VirtualKeyboard:
         uppercase letter in the new layout.
         """
         logger.debug("VirtualKeyboard: replay_events %d events", len(events))
+        press_delay, repeat_delay = self._timing_snapshot()
         # Build a set of codes that get a release in the list already
         released_codes: set[int] = set()
         for ev in events:
@@ -253,15 +271,15 @@ class VirtualKeyboard:
             shifted = getattr(ev, 'shifted', False) is True
             if shifted:
                 self._write(self.KEY_LEFTSHIFT, 1)
-                time.sleep(self.KEY_PRESS_DELAY)
+                time.sleep(press_delay)
             self._write(code, value)
             # Send synthetic release if this is a press without a paired release
             if value == 1 and code not in released_codes:
-                time.sleep(self.KEY_PRESS_DELAY)
+                time.sleep(press_delay)
                 self._write(code, 0)
             if shifted:
                 self._write(self.KEY_LEFTSHIFT, 0)
-            time.sleep(self.KEY_REPEAT_DELAY)
+            time.sleep(repeat_delay)
 
     def _write(self, code: int, value: int) -> None:
         if self._uinput is None:

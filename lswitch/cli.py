@@ -73,5 +73,5 @@ def main():
         raise SystemExit(0 if report.ok else 1)
 
     from lswitch.app import LSwitchApp
-    app = LSwitchApp(debug=debug)
+    app = LSwitchApp(debug=debug, trace=args.trace)
     app.run()
