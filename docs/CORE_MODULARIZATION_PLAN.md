@@ -699,6 +699,6 @@ lswitch/
 - platform-specific код остается в `platform/*`;
 - все существующие regression tests проходят.
 
-После этого добавление mid-word/per-app/layout-profile features должно
+После этого добавление mid-word/layout-profile features должно
 выглядеть как подключение нового controller/use case, а не как расширение
 монолитного `LSwitchApp`.
