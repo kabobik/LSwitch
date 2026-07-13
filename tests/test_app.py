@@ -47,8 +47,8 @@ def _make_app(**kwargs) -> LSwitchApp:
 class TestLSwitchAppInit:
     """LSwitchApp construction and attribute defaults."""
 
-    def test_default_parameters(self):
-        app = LSwitchApp()
+    def test_default_parameters(self, tmp_path):
+        app = LSwitchApp(config_path=str(tmp_path / "config.toml"))
         assert app.debug is False
         assert app._running is False
 
@@ -143,6 +143,7 @@ class TestRuntimeConfig:
 
     def test_config_changed_disables_user_dictionary_without_restart(self):
         app = _make_app()
+        app.config.set("user_dict_enabled", True)
         fake_dict = MagicMock()
         app.user_dict = fake_dict
         app.auto_detector = MagicMock()
