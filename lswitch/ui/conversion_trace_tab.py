@@ -6,11 +6,12 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QBrush, QColor, QFont, QPalette
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -18,13 +19,17 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSplitter,
     QTextEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from lswitch.core.decision_trace import (
+    DecisionOutcome,
     DecisionTrace,
     DecisionTraceClearedData,
+    ExecutionOutcome,
 )
 from lswitch.core.events import Event, EventType
 from lswitch.i18n import t
@@ -36,6 +41,11 @@ from lswitch.ui.conversion_trace_presenter import (
     ConversionTraceViewModel,
     format_trace,
     format_trace_list_item,
+    format_trace_summary,
+    outcome_label,
+    rule_description,
+    rule_label,
+    step_state_label,
 )
 
 if TYPE_CHECKING:
@@ -143,16 +153,48 @@ class ConversionTraceTab(QWidget):
         )
         splitter.addWidget(self._trace_list)
 
+        detail_panel = QWidget()
+        detail_layout = QVBoxLayout(detail_panel)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+
         self._detail = QTextEdit()
         self._detail.setReadOnly(True)
         self._detail.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self._detail.setMaximumHeight(180)
         detail_font = QFont("Monospace", 9)
         detail_font.setStyleHint(QFont.StyleHint.Monospace)
         self._detail.setFont(detail_font)
         self._detail.setAccessibleName(
             self._tr("trace_detail_accessible", "Selected conversion trace")
         )
-        splitter.addWidget(self._detail)
+        detail_layout.addWidget(self._detail)
+
+        self._step_tree = QTreeWidget()
+        self._step_tree.setColumnCount(3)
+        self._step_tree.setHeaderLabels(
+            [
+                self._tr("trace_tree_rule", "Rule / stage"),
+                self._tr("trace_tree_result", "Result"),
+                self._tr("trace_tree_facts", "Facts"),
+            ]
+        )
+        self._step_tree.header().setSectionResizeMode(
+            0,
+            QHeaderView.ResizeMode.Stretch,
+        )
+        self._step_tree.header().setSectionResizeMode(
+            1,
+            QHeaderView.ResizeMode.ResizeToContents,
+        )
+        self._step_tree.header().setSectionResizeMode(
+            2,
+            QHeaderView.ResizeMode.Stretch,
+        )
+        self._step_tree.setAccessibleName(
+            self._tr("trace_tree_accessible", "Ordered conversion rules")
+        )
+        detail_layout.addWidget(self._step_tree, 1)
+        splitter.addWidget(detail_panel)
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
         layout.addWidget(splitter, 1)
@@ -263,6 +305,7 @@ class ConversionTraceTab(QWidget):
             )
             item.setData(Qt.ItemDataRole.UserRole, trace.trace_id)
             item.setToolTip(format_trace(trace, self._translate))
+            item.setForeground(QBrush(self._trace_color(trace)))
             self._trace_list.addItem(item)
             if trace.trace_id == preferred_id:
                 selected_row = row
@@ -287,9 +330,124 @@ class ConversionTraceTab(QWidget):
     def _render_selected(self) -> None:
         trace = self._model.get(self._selected_trace_id)
         self._detail.setPlainText(
-            format_trace(trace, self._translate) if trace is not None else ""
+            format_trace_summary(trace, self._translate)
+            if trace is not None
+            else ""
         )
+        self._populate_step_tree(trace)
         self._copy_button.setEnabled(trace is not None)
+
+    def _populate_step_tree(self, trace: DecisionTrace | None) -> None:
+        self._step_tree.clear()
+        if trace is None:
+            return
+        for number, attempt in enumerate(trace.attempts, 1):
+            title = self._tr(
+                "trace_attempt_group",
+                "Attempt {number}: {candidate}",
+                number=number,
+                candidate=attempt.candidate,
+            )
+            group = QTreeWidgetItem(
+                [
+                    title,
+                    outcome_label(attempt.outcome, self._translate),
+                    f"{attempt.duration_ms:.2f} ms",
+                ]
+            )
+            group.setForeground(1, QBrush(self._decision_color(attempt.outcome)))
+            self._step_tree.addTopLevelItem(group)
+            self._append_steps(group, attempt.steps)
+            group.setExpanded(True)
+        if trace.execution_steps:
+            group = QTreeWidgetItem(
+                [
+                    self._tr("trace_execution_path", "Execution path"),
+                    outcome_label(trace.execution, self._translate),
+                    "",
+                ]
+            )
+            group.setForeground(
+                1,
+                QBrush(self._execution_color(trace.execution)),
+            )
+            self._step_tree.addTopLevelItem(group)
+            self._append_steps(group, trace.execution_steps)
+            group.setExpanded(True)
+
+    def _append_steps(self, parent: QTreeWidgetItem, steps) -> None:
+        markers = {
+            "matched": "✓",
+            "not_matched": "○",
+            "skipped": "—",
+            "succeeded": "✓",
+            "failed": "✕",
+        }
+        for step in steps:
+            decisive = (
+                " · " + self._tr("trace_decisive", "decisive")
+                if step.decisive
+                else ""
+            )
+            facts = "; ".join(
+                f"{fact.key}={fact.value}" for fact in step.facts
+            )
+            item = QTreeWidgetItem(
+                [
+                    f"{markers[step.state.value]} "
+                    f"{rule_label(step.rule_id, self._translate)} "
+                    f"[{step.rule_id}]",
+                    f"{step_state_label(step.state, self._translate)}{decisive}",
+                    facts,
+                ]
+            )
+            description = rule_description(step.rule_id, self._translate)
+            if description:
+                item.setToolTip(0, description)
+            if step.decisive:
+                for column in (0, 1):
+                    font = item.font(column)
+                    font.setBold(True)
+                    item.setFont(column, font)
+            if step.state.value == "failed":
+                item.setForeground(0, QBrush(self._semantic_color("error")))
+                item.setForeground(1, QBrush(self._semantic_color("error")))
+            parent.addChild(item)
+
+    def _semantic_color(self, name: str) -> QColor:
+        background = self.palette().color(QPalette.ColorRole.Window)
+        dark_theme = background.lightness() < 128
+        if name == "error":
+            return QColor("#ff6b6b" if dark_theme else "#b00020")
+        if name == "keep":
+            return QColor("#81c784" if dark_theme else "#2e7d32")
+        if name == "convert":
+            return self.palette().color(QPalette.ColorRole.Highlight)
+        return self.palette().color(QPalette.ColorRole.Text)
+
+    def _decision_color(self, outcome: DecisionOutcome) -> QColor:
+        if outcome is DecisionOutcome.ERROR:
+            return self._semantic_color("error")
+        if outcome is DecisionOutcome.CONVERT:
+            return self._semantic_color("convert")
+        if outcome is DecisionOutcome.KEEP:
+            return self._semantic_color("keep")
+        return self._semantic_color("neutral")
+
+    def _execution_color(self, outcome: ExecutionOutcome) -> QColor:
+        if outcome is ExecutionOutcome.FAILED:
+            return self._semantic_color("error")
+        if outcome is ExecutionOutcome.SUCCEEDED:
+            return self._semantic_color("keep")
+        return self._semantic_color("neutral")
+
+    def _trace_color(self, trace: DecisionTrace) -> QColor:
+        if (
+            trace.decision is DecisionOutcome.ERROR
+            or trace.execution is ExecutionOutcome.FAILED
+        ):
+            return self._semantic_color("error")
+        return self._decision_color(trace.decision)
 
     def _update_status(self, *, visible_count: int | None = None) -> None:
         if not self._enabled:

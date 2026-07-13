@@ -27,6 +27,56 @@ TRACE_FILTERS = (
     FILTER_ERRORS,
 )
 
+KNOWN_TRACE_RULE_IDS = (
+    "candidate.invalid",
+    "candidate.empty",
+    "candidate.non_alphabetic",
+    "candidate.valid",
+    "candidate.min_length",
+    "auto.buffer_threshold",
+    "auto.user_dictionary.override",
+    "auto.user_dictionary.protection",
+    "auto.user_dictionary.neutral",
+    "auto.user_dictionary.disabled",
+    "auto.layout.unknown",
+    "auto.source_dictionary.match",
+    "auto.target_dictionary.match",
+    "auto.ngram.delta",
+    "auto.ngram.zero_source",
+    "auto.no_evidence",
+    "auto.detector.error",
+    "auto.legacy_decision",
+    "midword.prefix_length",
+    "midword.case",
+    "midword.characters",
+    "midword.layout",
+    "midword.source_prefix",
+    "midword.target_prefix",
+    "midword.user_protection",
+    "midword.user_dictionary.disabled",
+    "midword.switch",
+    "midword.detector.error",
+    "midword.legacy_decision",
+    "manual.mode.backspace_selection",
+    "manual.mode.buffer_retype",
+    "manual.mode.fresh_selection",
+    "manual.mode.expand_fallback",
+    "manual.mode.unknown",
+    "undo.recent_auto_marker",
+    "execution.current_layout",
+    "execution.target_layout",
+    "execution.layout_switch",
+    "execution.delete",
+    "execution.replay",
+    "execution.retype",
+    "execution.selection",
+    "execution.space",
+    "execution.layout_policy",
+    "execution.learning",
+    "execution.success",
+    "execution.error",
+)
+
 
 def _translated(
     key: str,
@@ -102,8 +152,10 @@ def _format_step(
     return lines
 
 
-def format_trace(trace: DecisionTrace, translate: Translate = t) -> str:
-    """Format a complete trace for the detail panel and explicit copy."""
+def _trace_summary_lines(
+    trace: DecisionTrace,
+    translate: Translate,
+) -> list[str]:
     arrow_text = trace.original
     if trace.converted is not None:
         arrow_text = f"{arrow_text} → {trace.converted}"
@@ -143,6 +195,17 @@ def format_trace(trace: DecisionTrace, translate: Translate = t) -> str:
                 translate,
             )
         )
+    return lines
+
+
+def format_trace_summary(trace: DecisionTrace, translate: Translate = t) -> str:
+    """Format only the stable summary shown above collapsible rule groups."""
+    return "\n".join(_trace_summary_lines(trace, translate))
+
+
+def format_trace(trace: DecisionTrace, translate: Translate = t) -> str:
+    """Format a complete trace for the detail panel and explicit copy."""
+    lines = _trace_summary_lines(trace, translate)
 
     if trace.attempts:
         lines.extend(

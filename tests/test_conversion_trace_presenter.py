@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 
+import pytest
+
 from lswitch.core.decision_trace import (
     DecisionAttempt,
     DecisionOutcome,
@@ -19,10 +21,12 @@ from lswitch.ui.conversion_trace_presenter import (
     FILTER_CONVERTED,
     FILTER_ERRORS,
     FILTER_KEPT,
+    KNOWN_TRACE_RULE_IDS,
     ConversionTraceViewModel,
     format_trace,
     trace_matches,
 )
+from lswitch.i18n import I18n
 
 
 def _trace(
@@ -128,3 +132,42 @@ def test_view_model_is_bounded_and_marks_related_flows():
 
     assert model.get(1) is None
     assert tuple(item.trace_id for item in model.visible()) == (3, 2)
+
+
+def test_rule_registry_has_labels_and_descriptions_in_both_languages():
+    translations = I18n()._translations
+
+    for language in ("en", "ru"):
+        language_map = translations[language]
+        for rule_id in KNOWN_TRACE_RULE_IDS:
+            key = f"trace_rule_{rule_id.replace('.', '_')}"
+            assert language_map[key]
+            assert language_map[f"{key}_description"]
+
+
+def test_formatter_localizes_chrome_but_keeps_stable_rule_ids():
+    i18n = I18n()
+    i18n.lang = "ru"
+
+    rendered = format_trace(_trace(1), translate=i18n.t)
+
+    assert "Решение: Конвертировать" in rendered
+    assert "Исполнение: Успешно" in rendered
+    assert "unknown.rule" in rendered
+
+
+@pytest.mark.parametrize(
+    ("lang", "expected"),
+    (
+        ("en", "Decision: Convert"),
+        ("ru", "Решение: Конвертировать"),
+    ),
+)
+def test_formatter_supports_english_and_russian(lang, expected):
+    i18n = I18n()
+    i18n.lang = lang
+
+    rendered = format_trace(_trace(1), translate=i18n.t)
+
+    assert expected in rendered
+    assert i18n.t("trace_execution_path") in rendered

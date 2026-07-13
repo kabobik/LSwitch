@@ -8,6 +8,7 @@ from types import SimpleNamespace
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from lswitch.core.decision_trace import (
@@ -20,6 +21,7 @@ from lswitch.core.decision_trace import (
 from lswitch.core.event_bus import EventBus
 from lswitch.core.events import EventType
 from lswitch.core.states import State, StateContext
+from lswitch.i18n import t
 from lswitch.ui.conversion_trace_tab import ConversionTraceTab
 from lswitch.ui.debug_monitor import DebugMonitorWindow
 
@@ -110,7 +112,27 @@ def test_same_midword_trace_id_is_updated_in_place(qapp):
 
     assert tab._trace_list.count() == 1
     assert "ghb" in tab._trace_list.item(0).text()
-    assert "Attempt 2" in tab._detail.toPlainText()
+    assert tab._step_tree.topLevelItemCount() == 2
+    assert "ghb" in tab._step_tree.topLevelItem(1).text(0)
+    tab.cleanup()
+
+
+def test_selection_is_preserved_by_trace_id_when_new_record_arrives(qapp):
+    _event_bus, recorder, tab = _tab()
+    first = _record(recorder, 1, "first")
+    _record(recorder, 2, "second")
+    qapp.processEvents()
+    tab._trace_list.setCurrentRow(1)
+    assert tab._selected_trace_id == first.trace_id
+
+    _record(recorder, 3, "third")
+    qapp.processEvents()
+
+    assert tab._selected_trace_id == first.trace_id
+    assert (
+        tab._trace_list.currentItem().data(Qt.ItemDataRole.UserRole)
+        == first.trace_id
+    )
     tab.cleanup()
 
 
@@ -153,7 +175,7 @@ def test_disabling_recorder_clears_open_tab(qapp):
     qapp.processEvents()
 
     assert tab._trace_list.count() == 0
-    assert "disabled" in tab._status_label.text().lower()
+    assert tab._status_label.text() == tab._translate("trace_disabled")
     assert not tab._clear_button.isEnabled()
     tab.cleanup()
 
@@ -187,5 +209,7 @@ def test_debug_monitor_wraps_legacy_state_in_second_tab(qapp):
     assert window._tabs.currentIndex() == 0
     assert window._tabs.widget(0) is window._conversion_trace_tab
     assert window._tabs.widget(1) is window._state_tab
+    assert window._tabs.tabText(0) == t("debug_monitor_tab_conversions")
+    assert window._tabs.tabText(1) == t("debug_monitor_tab_state")
 
     window.cleanup()
