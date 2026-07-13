@@ -102,6 +102,36 @@ def test_system_dictionary_loader_reports_disabled_without_loading(tmp_path):
     assert status.path is None
 
 
+def test_system_dictionary_loader_builds_one_immutable_snapshot(tmp_path):
+    en_path = tmp_path / "en_US.dic"
+    ru_path = tmp_path / "ru_RU.dic"
+    en_path.write_text("2\nhello\nworld\n", encoding="utf-8")
+    ru_path.write_text("2\nпривет\nпример\n", encoding="utf-8")
+    loader = SystemDictionaryLoader(dictionary_dirs=[tmp_path])
+
+    snapshot = loader.load_snapshot()
+
+    assert snapshot.en_words == frozenset({"hello", "world"})
+    assert snapshot.ru_words == frozenset({"привет", "пример"})
+    assert snapshot.available("en") is True
+    assert snapshot.available("ru") is True
+    assert snapshot.status_for_lang("en").path == en_path
+    assert snapshot.status_for_lang("ru").path == ru_path
+
+
+def test_disabled_snapshot_does_not_read_dictionary_files(monkeypatch):
+    loader = SystemDictionaryLoader()
+    loaded_langs = []
+    monkeypatch.setattr(loader, "load", loaded_langs.append)
+
+    snapshot = loader.load_snapshot(enabled=False)
+
+    assert loaded_langs == []
+    assert snapshot.en_words == frozenset()
+    assert snapshot.ru_words == frozenset()
+    assert all(not status.enabled for status in snapshot.statuses)
+
+
 def test_system_dictionary_loader_rejects_missing_explicit_path(tmp_path):
     missing = tmp_path / "missing.dic"
     loader = SystemDictionaryLoader(explicit_paths={"en": missing})

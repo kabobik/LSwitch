@@ -110,6 +110,14 @@ def _target_dictionary_decision() -> DictionaryDecision:
     )
 
 
+def _positive_target_ngrams():
+    ngrams = MagicMock()
+    ngrams.score.side_effect = (
+        lambda _word, lang: 0.2 if lang == "ru" else 0.0
+    )
+    return ngrams
+
+
 def _do_double_shift(app: LSwitchApp):
     """Simulate a quick double-Shift via the state manager."""
     app.state_manager.on_shift_down()
@@ -225,7 +233,7 @@ class TestDoubleShiftAfterAutoCallsCorrection:
 
         dict_svc = MagicMock()
         dict_svc.evaluate.return_value = _target_dictionary_decision()
-        ngrams = MagicMock()
+        ngrams = _positive_target_ngrams()
 
         detector = AutoDetector(dictionary=dict_svc, ngrams=ngrams, user_dict=ud)
         should, reason = detector.should_convert('ghbdtn', 'en')
@@ -271,7 +279,7 @@ class TestNegativeWeightBlocksConversion:
 
         dict_svc = MagicMock()
         dict_svc.evaluate.return_value = _target_dictionary_decision()
-        ngrams = MagicMock()
+        ngrams = _positive_target_ngrams()
 
         detector = AutoDetector(dictionary=dict_svc, ngrams=ngrams, user_dict=ud)
         should, reason = detector.should_convert('ghbdtn', 'en')
@@ -284,7 +292,7 @@ class TestNegativeWeightBlocksConversion:
 
         dict_svc = MagicMock()
         dict_svc.evaluate.return_value = _target_dictionary_decision()
-        ngrams = MagicMock()
+        ngrams = _positive_target_ngrams()
 
         detector = AutoDetector(dictionary=dict_svc, ngrams=ngrams, user_dict=ud)
         should, reason = detector.should_convert('ghbdtn', 'en')
@@ -345,7 +353,7 @@ class TestUserDictDisabledNoEffect:
     def test_auto_detector_works_without_user_dict(self):
         dict_svc = MagicMock()
         dict_svc.evaluate.return_value = _target_dictionary_decision()
-        ngrams = MagicMock()
+        ngrams = _positive_target_ngrams()
 
         detector = AutoDetector(dictionary=dict_svc, ngrams=ngrams, user_dict=None)
         should, reason = detector.should_convert('ghbdtn', 'en')

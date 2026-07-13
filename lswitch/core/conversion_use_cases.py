@@ -790,25 +790,6 @@ class SpaceAutoConversionUseCase:
         if context.event_buffer and context.event_buffer[-1].code == KEY_SPACE:
             return SpaceAutoConversionResult(space_consumed=False)
 
-        if context.chars_in_buffer < threshold:
-            logger.debug(
-                "Auto-conv skipped: buf=%d < threshold=%d",
-                context.chars_in_buffer,
-                threshold,
-            )
-            self._record_gate(
-                correlation_id=correlation_id,
-                original=self._buffer_text(context),
-                outcome=DecisionOutcome.SKIP,
-                rule_id="auto.buffer_threshold",
-                state=StepState.NOT_MATCHED,
-                facts={
-                    "chars_in_buffer": context.chars_in_buffer,
-                    "threshold": threshold,
-                },
-            )
-            return SpaceAutoConversionResult(space_consumed=False)
-
         try:
             current_layout_info = self.xkb.get_current_layout() if self.xkb else None
         except Exception as exc:
@@ -863,6 +844,7 @@ class SpaceAutoConversionUseCase:
             should, reason, attempt = self._evaluate_candidate(
                 candidate.text,
                 candidate.current_lang,
+                ngram_min_length=threshold,
             )
         except Exception as exc:
             logger.warning("AutoDetector error: %s", exc)
@@ -1069,11 +1051,21 @@ class SpaceAutoConversionUseCase:
         self,
         word: str,
         current_lang: str,
+        *,
+        ngram_min_length: int = 0,
     ) -> tuple[bool, str, DecisionAttempt]:
         from lswitch.intelligence.auto_detector import AutoDecision
 
         evaluate = getattr(self.auto_detector, "evaluate", None)
-        decision = evaluate(word, current_lang) if callable(evaluate) else None
+        decision = (
+            evaluate(
+                word,
+                current_lang,
+                ngram_min_length=ngram_min_length,
+            )
+            if callable(evaluate)
+            else None
+        )
         if isinstance(decision, AutoDecision):
             return (
                 decision.should_convert,

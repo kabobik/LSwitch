@@ -30,11 +30,11 @@ def _leaf_paths(values: dict, prefix: str = "") -> set[str]:
     return paths
 
 
-def test_binding_registry_covers_all_32_config_paths_once():
+def test_binding_registry_covers_all_31_config_paths_once():
     paths = [binding.path for binding in SETTINGS_BINDINGS]
 
-    assert len(paths) == 32
-    assert len(set(paths)) == 32
+    assert len(paths) == 31
+    assert len(set(paths)) == 31
     assert set(paths) == _leaf_paths(DEFAULT_CONFIG)
 
 
@@ -133,15 +133,15 @@ def test_reset_all_uses_owned_defaults_without_committing():
     [
         ({"auto_switch": False}, "auto_switch_threshold", False),
         ({"auto_switch": True}, "auto_switch_threshold", True),
-        ({"auto_switch_mid_word": False}, "mid_word_min_prefix_len", False),
-        ({"auto_switch_mid_word": False}, "system_dict_enabled", False),
+        ({"auto_switch": False}, "mid_word_min_prefix_len", False),
+        ({"auto_switch": False}, "system_dict_enabled", False),
         (
-            {"auto_switch_mid_word": True, "system_dict_enabled": False},
+            {"auto_switch": True, "system_dict_enabled": False},
             "system_dict_en_path",
             False,
         ),
         (
-            {"auto_switch_mid_word": True, "system_dict_enabled": True},
+            {"auto_switch": True, "system_dict_enabled": True},
             "system_dict_ru_path",
             True,
         ),

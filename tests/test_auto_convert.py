@@ -13,6 +13,8 @@ from lswitch.core.auto_marker import AutoConversionMarker
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.layout_service import LayoutService
 from lswitch.core.states import State
+from lswitch.intelligence.auto_detector import AutoDetector
+from lswitch.intelligence.dictionary_service import DictionaryService
 from lswitch.platform.xkb_adapter import LayoutInfo
 
 from tests.conftest import MockXKBAdapter, MockSelectionAdapter, MockSystemAdapter
@@ -228,12 +230,17 @@ class TestTryAutoConversionAtSpace:
         assert result is False
 
     def test_below_threshold_returns_false(self):
-        """chars_in_buffer < threshold → no conversion."""
+        """A short unresolved word does not reach the n-gram fallback."""
         app = _make_app(auto_switch=True, threshold=10)
-        app.auto_detector = _MockAutoDetector(should=True)
+        ngrams = MagicMock()
+        ngrams.score.side_effect = (
+            lambda _word, lang: 0.2 if lang == "ru" else 0.0
+        )
+        app.auto_detector = AutoDetector(DictionaryService(), ngrams)
         _fill_buffer(app, [KEY_G, KEY_H, KEY_B])  # buf=3 chars < threshold=10
         result = app.conversion_runtime.try_space_auto_conversion()
         assert result is False
+        ngrams.score.assert_not_called()
 
     def test_above_threshold_returns_true(self):
         """chars_in_buffer >= threshold → conversion proceeds."""

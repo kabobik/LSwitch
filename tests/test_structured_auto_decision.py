@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from unittest.mock import MagicMock
 
 from lswitch.core.decision_trace import DecisionOutcome, StepState
 from lswitch.intelligence.auto_detector import AutoDetector
@@ -63,7 +64,10 @@ def _dictionary_miss() -> DictionaryDecision:
 
 
 def test_source_dictionary_match_is_decisive_keep():
-    detector = AutoDetector(DictionaryService(), NgramAnalyzer())
+    detector = AutoDetector(
+        DictionaryService(en_words={"hello"}, ru_words={"привет"}),
+        NgramAnalyzer(),
+    )
 
     decision = detector.evaluate("hello", "en")
 
@@ -78,8 +82,11 @@ def test_source_dictionary_match_is_decisive_keep():
     assert decision.steps[-1].state is StepState.MATCHED
 
 
-def test_target_dictionary_match_records_source_miss_first():
-    detector = AutoDetector(DictionaryService(), NgramAnalyzer())
+def test_target_dictionary_match_is_left_to_ngram_fallback():
+    detector = AutoDetector(
+        DictionaryService(en_words={"hello"}, ru_words={"привет"}),
+        NgramAnalyzer(),
+    )
 
     decision = detector.evaluate("ghbdtn", "en")
 
@@ -89,10 +96,27 @@ def test_target_dictionary_match_records_source_miss_first():
         "candidate.valid",
         "auto.user_dictionary.disabled",
         "auto.source_dictionary.match",
-        "auto.target_dictionary.match",
+        "auto.ngram.min_length",
+        "auto.ngram.delta",
     ]
-    assert decision.steps[-2].state is StepState.NOT_MATCHED
+    assert decision.steps[-3].state is StepState.NOT_MATCHED
     assert decision.steps[-1].decisive is True
+
+
+def test_boundary_detector_uses_source_only_dictionary_api():
+    service = DictionaryService(
+        en_words={"hello"},
+        ru_words={"привет"},
+    )
+    service.evaluate = MagicMock(
+        side_effect=AssertionError("legacy target lookup must not run")
+    )
+    detector = AutoDetector(service, NgramAnalyzer())
+
+    decision = detector.evaluate("ghbdtn", "en")
+
+    assert decision.outcome is DecisionOutcome.CONVERT
+    service.evaluate.assert_not_called()
 
 
 def test_user_override_short_circuits_dictionary_rules():
@@ -126,6 +150,58 @@ def test_user_protection_is_decisive_keep():
     assert decision.steps[-1].decisive is True
 
 
+def test_exact_user_decision_ignores_ngram_minimum_length():
+    detector = AutoDetector(
+        DictionaryService(),
+        _Scores(source=0.0, target=0.0),
+        user_dict=_UserDictionary(2),
+    )
+
+    decision = detector.evaluate("ghb", "en", ngram_min_length=10)
+
+    assert decision.outcome is DecisionOutcome.CONVERT
+    assert decision.reason_id == "auto.user_dictionary.override"
+    assert "auto.ngram.min_length" not in _rule_ids(decision)
+
+
+def test_ngram_minimum_length_applies_only_after_user_and_source_rules():
+    detector = AutoDetector(
+        _StaticDictionary(_dictionary_miss()),
+        _Scores(source=0.0, target=0.2),
+    )
+
+    decision = detector.evaluate("ghb", "en", ngram_min_length=10)
+
+    assert decision.outcome is DecisionOutcome.SKIP
+    assert decision.reason_id == "auto.ngram.min_length"
+    assert _rule_ids(decision)[-2:] == [
+        "auto.source_dictionary.match",
+        "auto.ngram.min_length",
+    ]
+
+
+def test_unavailable_source_dictionary_is_not_reported_as_a_miss():
+    unavailable = DictionaryDecision(
+        **{
+            **_dictionary_miss().__dict__,
+            "source_available": False,
+        }
+    )
+    detector = AutoDetector(
+        _StaticDictionary(unavailable),
+        _Scores(source=0.0, target=0.0),
+    )
+
+    decision = detector.evaluate("ghbdtn", "en")
+
+    source_step = next(
+        step
+        for step in decision.steps
+        if step.rule_id == "auto.source_dictionary.match"
+    )
+    assert source_step.state is StepState.UNAVAILABLE
+
+
 def test_ngram_delta_captures_scores_delta_and_threshold():
     detector = AutoDetector(
         _StaticDictionary(_dictionary_miss()),
@@ -142,10 +218,11 @@ def test_ngram_delta_captures_scores_delta_and_threshold():
         "target_score": 0.2,
         "delta": 0.1,
         "threshold": 0.05,
+        "target_positive": True,
     }
 
 
-def test_zero_source_fallback_follows_failed_delta_rule():
+def test_zero_source_without_target_evidence_reaches_no_evidence():
     detector = AutoDetector(
         _StaticDictionary(_dictionary_miss()),
         _Scores(source=0.0, target=0.0),
@@ -153,10 +230,10 @@ def test_zero_source_fallback_follows_failed_delta_rule():
 
     decision = detector.evaluate("ghbdtn", "en")
 
-    assert decision.reason_id == "auto.ngram.zero_source"
+    assert decision.reason_id == "auto.no_evidence"
     assert _rule_ids(decision)[-2:] == [
         "auto.ngram.delta",
-        "auto.ngram.zero_source",
+        "auto.no_evidence",
     ]
     assert decision.steps[-2].state is StepState.NOT_MATCHED
     assert decision.steps[-1].decisive is True
@@ -194,7 +271,10 @@ def test_invalid_candidate_stops_before_optional_services():
 
 
 def test_dictionary_service_exposes_structured_match_and_miss():
-    service = DictionaryService()
+    service = DictionaryService(
+        en_words={"hello"},
+        ru_words={"привет"},
+    )
 
     source = service.evaluate("hello", "en")
     target = service.evaluate("ghbdtn", "en")

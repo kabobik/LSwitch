@@ -158,24 +158,32 @@ class TestRuntimeConfig:
         assert app.auto_detector.user_dict is None
         assert app.conversion_engine.user_dict is None
 
-    def test_config_changed_rebuilds_mid_word_detector_without_restart(self):
+    def test_config_changed_rebuilds_mid_word_detector_without_restart(
+        self,
+        tmp_path,
+    ):
         app = _make_app()
-        dictionary = MagicMock()
-        dictionary.words_for_lang.side_effect = lambda lang: {
-            "en": {"hello"},
-            "ru": {"привет"},
-        }.get(lang, set())
-        app.dictionary = dictionary
+        app.dictionary = MagicMock()
+        app.auto_detector = MagicMock()
+        en_path = tmp_path / "en.dic"
+        ru_path = tmp_path / "ru.dic"
+        en_path.write_text("1\nhello\n", encoding="utf-8")
+        ru_path.write_text("1\nпривет\n", encoding="utf-8")
 
         candidate = app.config.get_all()
+        candidate["auto_switch"] = True
         candidate["mid_word_min_prefix_len"] = 5
-        candidate["system_dict_enabled"] = False
+        candidate["system_dict_enabled"] = True
+        candidate["system_dict_en_path"] = str(en_path)
+        candidate["system_dict_ru_path"] = str(ru_path)
         result = app.config_controller.apply(candidate, source="test", persist=False)
 
         assert result.ok is True
         assert app.prefix_dictionary.has_prefix("en", "hell") is False
         assert app.prefix_dictionary.has_prefix("en", "hello") is True
         assert app.mid_word_detector.min_prefix_len == 5
+        assert app.auto_detector.dictionary is app.dictionary
+        assert app.conversion_engine.dictionary is app.dictionary
 
     def test_config_changed_exposes_loaded_system_dictionary_statuses(
         self,
@@ -189,7 +197,7 @@ class TestRuntimeConfig:
         en_path.write_text("2\nhello\nworld\n", encoding="utf-8")
         ru_path.write_text("2\nпривет\nпример\n", encoding="utf-8")
         candidate = app.config.get_all()
-        candidate["auto_switch_mid_word"] = True
+        candidate["auto_switch"] = True
         candidate["system_dict_enabled"] = True
         candidate["system_dict_en_path"] = str(en_path)
         candidate["system_dict_ru_path"] = str(ru_path)
@@ -363,7 +371,7 @@ class TestRuntimeConfig:
         app = _make_app()
         app.dictionary = MagicMock()
         app.user_dict = object()
-        app.config.set("auto_switch_mid_word", True)
+        app.config.set("auto_switch", True)
         app.config.set("user_dict_min_weight", 4)
 
         app._apply_mid_word_runtime_config()

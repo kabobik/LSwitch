@@ -147,6 +147,7 @@ class LSwitchApp:
         self.event_manager = None
         self._udev_monitor = None
         self.dictionary = None
+        self.system_lexicon = None
         self.prefix_dictionary = None
         self.auto_detector = None
         self.mid_word_detector = None
@@ -192,10 +193,7 @@ class LSwitchApp:
             event_bus=self.event_bus,
             user_dict=self.user_dict,
             user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
-            auto_switch_mid_word=self.config.get(
-                'auto_switch_mid_word',
-                False,
-            ),
+            auto_switch=self.config.get('auto_switch', False),
             mid_word_min_prefix_len=self.config.get('mid_word_min_prefix_len', 4),
             system_dict_enabled=self.config.get('system_dict_enabled', True),
             system_dict_en_path=self.config.get('system_dict_en_path', ''),
@@ -220,6 +218,7 @@ class LSwitchApp:
         )
 
         conversion_runtime = platform_runtime.conversion
+        self.system_lexicon = conversion_runtime.system_lexicon
         self.dictionary = conversion_runtime.dictionary
         self.prefix_dictionary = conversion_runtime.prefix_dictionary
         self.auto_detector = conversion_runtime.auto_detector
@@ -303,11 +302,7 @@ class LSwitchApp:
             and signature != self._mid_word_runtime_signature
         ):
             mid_word_runtime = create_mid_word_detection_runtime(
-                dictionary=self.dictionary,
-                auto_switch_mid_word=values.get(
-                    'auto_switch_mid_word',
-                    False,
-                ),
+                auto_switch=values.get('auto_switch', False),
                 mid_word_min_prefix_len=values.get(
                     'mid_word_min_prefix_len',
                     4,
@@ -372,15 +367,7 @@ class LSwitchApp:
             prepared_update is not None
             and prepared_update.mid_word_runtime is not None
         ):
-            self.prefix_dictionary = (
-                prepared_update.mid_word_runtime.prefix_dictionary
-            )
-            self.mid_word_detector = (
-                prepared_update.mid_word_runtime.mid_word_detector
-            )
-            self.system_dictionary_statuses = (
-                prepared_update.mid_word_runtime.system_dictionaries
-            )
+            self._install_mid_word_runtime(prepared_update.mid_word_runtime)
             self._mid_word_runtime_signature = prepared_update.mid_word_signature
         else:
             self._apply_mid_word_runtime_config()
@@ -393,8 +380,7 @@ class LSwitchApp:
         if signature == self._mid_word_runtime_signature:
             return
         mid_word_runtime = create_mid_word_detection_runtime(
-            dictionary=self.dictionary,
-            auto_switch_mid_word=self.config.get('auto_switch_mid_word', False),
+            auto_switch=self.config.get('auto_switch', False),
             mid_word_min_prefix_len=self.config.get('mid_word_min_prefix_len', 4),
             system_dict_enabled=self.config.get('system_dict_enabled', True),
             system_dict_en_path=self.config.get('system_dict_en_path', ''),
@@ -402,10 +388,20 @@ class LSwitchApp:
             user_dict=self.user_dict,
             user_dict_min_weight=self.config.get('user_dict_min_weight', 2),
         )
+        self._install_mid_word_runtime(mid_word_runtime)
+        self._mid_word_runtime_signature = signature
+
+    def _install_mid_word_runtime(self, mid_word_runtime) -> None:
+        """Atomically publish one lexicon snapshot to all dictionary consumers."""
+        self.system_lexicon = mid_word_runtime.system_lexicon
+        self.dictionary = mid_word_runtime.dictionary
         self.prefix_dictionary = mid_word_runtime.prefix_dictionary
         self.mid_word_detector = mid_word_runtime.mid_word_detector
         self.system_dictionary_statuses = mid_word_runtime.system_dictionaries
-        self._mid_word_runtime_signature = signature
+        if self.auto_detector is not None:
+            self.auto_detector.dictionary = self.dictionary
+        if self.conversion_engine is not None:
+            self.conversion_engine.dictionary = self.dictionary
 
     def _current_mid_word_runtime_signature(self) -> tuple:
         """Return config inputs that require rebuilding the prefix detector."""
@@ -417,7 +413,7 @@ class LSwitchApp:
     @staticmethod
     def _mid_word_runtime_signature_for(values: dict, user_dict) -> tuple:
         """Return detector inputs for a candidate config and user dictionary."""
-        enabled = bool(values.get('auto_switch_mid_word', False))
+        enabled = bool(values.get('auto_switch', False))
         include_system = enabled and bool(
             values.get('system_dict_enabled', True)
         )

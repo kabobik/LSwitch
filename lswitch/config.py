@@ -134,7 +134,6 @@ DEFAULT_CONFIG: dict = {
     'layout_switch_key': 'Alt+Shift',
     'auto_switch': False,
     'auto_switch_threshold': 0,
-    'auto_switch_mid_word': False,
     'mid_word_min_prefix_len': 4,
     'system_dict_enabled': True,
     'system_dict_en_path': '',
@@ -169,11 +168,10 @@ _CONFIG_COMMENTS: dict[str, str] = {
     'debug': 'Enable live DEBUG logging and Debug Monitor; --trace remains an override.',
     'switch_layout_after_convert': 'Keep the result layout after conversion; false restores the previous layout.',
     'layout_switch_key': 'Verified fallback shortcut; direct XKB/D-Bus target switching has priority.',
-    'auto_switch': 'Enable automatic wrong-layout conversion at a word boundary.',
-    'auto_switch_threshold': 'Minimum buffered characters before automatic conversion; 0 adds no restriction.',
-    'auto_switch_mid_word': 'Enable automatic conversion while a word is still being typed.',
-    'mid_word_min_prefix_len': 'Minimum prefix length before mid-word detection starts.',
-    'system_dict_enabled': 'Use system Hunspell/MySpell dictionaries for mid-word detection.',
+    'auto_switch': 'Enable automatic wrong-layout conversion while typing and at a word boundary.',
+    'auto_switch_threshold': 'Minimum word length for boundary n-gram fallback; 0 adds no restriction.',
+    'mid_word_min_prefix_len': 'Minimum prefix length before system dictionary detection starts.',
+    'system_dict_enabled': 'Use system Hunspell/MySpell dictionaries while typing.',
     'system_dict_en_path': 'Optional readable English .dic path; empty enables auto-discovery.',
     'system_dict_ru_path': 'Optional readable Russian .dic path; empty enables auto-discovery.',
     'user_dict_enabled': 'Enable the self-learning user dictionary.',
@@ -375,12 +373,6 @@ def validate_config(conf: dict | None) -> dict:
     if ast_i < 0:
         raise ValueError(f"Invalid 'auto_switch_threshold': must be >= 0")
     out['auto_switch_threshold'] = ast_i
-
-    # auto_switch_mid_word — boolean
-    asmw = conf.get('auto_switch_mid_word', defaults['auto_switch_mid_word'])
-    if not isinstance(asmw, bool):
-        raise ValueError("Invalid 'auto_switch_mid_word': must be boolean")
-    out['auto_switch_mid_word'] = asmw
 
     # mid_word_min_prefix_len — positive int
     mw_min_raw = conf.get(

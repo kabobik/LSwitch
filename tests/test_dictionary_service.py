@@ -6,7 +6,10 @@ from lswitch.intelligence.dictionary_service import DictionaryService
 
 @pytest.fixture
 def svc() -> DictionaryService:
-    return DictionaryService()
+    return DictionaryService(
+        en_words={"hello"},
+        ru_words={"привет"},
+    )
 
 
 def test_ru_word_recognized(svc: DictionaryService) -> None:
@@ -71,6 +74,14 @@ def test_should_convert_ru_typed_on_ru_layout(svc):
     """'руддщ' набрано в RU раскладке → 'hello' → должно конвертироваться."""
     result, reason = svc.should_convert("руддщ", "ru")
     assert result is True
+
+
+def test_source_evaluation_does_not_report_target_dictionary_match(svc):
+    decision = svc.evaluate_source("ghbdtn", "en")
+
+    assert decision.source_match is False
+    assert decision.target_match is None
+    assert decision.converted_word is None
 
 
 def test_empty_string_no_crash(svc):

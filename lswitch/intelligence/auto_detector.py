@@ -42,11 +42,10 @@ class AutoDecision:
 class AutoDetector:
     """Decides whether a word needs layout conversion.
 
-    Priority chain (from TECHNICAL_SPEC_v2.md §6.2):
-    1. Word correct in current layout dict → no convert
-    2. Converted word found in target layout dict → convert
-    3. N-gram score significantly better in target → convert
-    4. Otherwise → no convert
+    Boundary priority chain:
+    1. Exact user policy decides convert/keep.
+    2. Exact source-system word vetoes conversion.
+    3. Strict n-gram evidence is the final fallback.
     """
 
     def __init__(self, dictionary: "DictionaryService", ngrams: "NgramAnalyzer",
@@ -57,7 +56,13 @@ class AutoDetector:
         self.user_dict = user_dict
         self.user_dict_min_weight = user_dict_min_weight
 
-    def evaluate(self, word: str | None, current_layout: str) -> AutoDecision:
+    def evaluate(
+        self,
+        word: str | None,
+        current_layout: str,
+        *,
+        ngram_min_length: int = 0,
+    ) -> AutoDecision:
         """Evaluate a candidate once and retain every reached rule."""
         steps: list[DecisionTraceStep] = []
 
@@ -202,9 +207,15 @@ class AutoDetector:
                 )
             )
 
-        dictionary_decision = self.dictionary.evaluate(
-            word_clean,
-            current_layout,
+        evaluate_source = getattr(
+            type(self.dictionary),
+            "evaluate_source",
+            None,
+        )
+        dictionary_decision = (
+            evaluate_source(self.dictionary, word_clean, current_layout)
+            if callable(evaluate_source)
+            else self.dictionary.evaluate(word_clean, current_layout)
         )
         if not isinstance(dictionary_decision, DictionaryDecision):
             raise TypeError("DictionaryService.evaluate() returned invalid result")
@@ -228,7 +239,9 @@ class AutoDetector:
             )
 
         source_state = (
-            StepState.MATCHED
+            StepState.UNAVAILABLE
+            if not dictionary_decision.source_available
+            else StepState.MATCHED
             if dictionary_decision.source_match
             else StepState.NOT_MATCHED
         )
@@ -246,33 +259,6 @@ class AutoDetector:
             return AutoDecision(
                 outcome=DecisionOutcome.KEEP,
                 reason_id="auto.source_dictionary.match",
-                reason=dictionary_decision.reason,
-                original=word_clean,
-                converted=converted,
-                source_lang=current_layout,
-                target_lang=target_lang,
-                steps=tuple(steps),
-            )
-
-        target_state = (
-            StepState.MATCHED
-            if dictionary_decision.target_match
-            else StepState.NOT_MATCHED
-        )
-        steps.append(
-            self._step(
-                "auto.target_dictionary.match",
-                target_state,
-                decisive=bool(dictionary_decision.target_match),
-                available=dictionary_decision.target_available,
-                lang=target_lang,
-                word=converted,
-            )
-        )
-        if dictionary_decision.target_match:
-            return AutoDecision(
-                outcome=DecisionOutcome.CONVERT,
-                reason_id="auto.target_dictionary.match",
                 reason=dictionary_decision.reason,
                 original=word_clean,
                 converted=converted,
@@ -299,12 +285,43 @@ class AutoDetector:
                 steps=tuple(steps),
             )
 
+        minimum = max(0, int(ngram_min_length))
+        if len(normalized) < minimum:
+            steps.append(
+                self._step(
+                    "auto.ngram.min_length",
+                    StepState.NOT_MATCHED,
+                    decisive=True,
+                    length=len(normalized),
+                    minimum=minimum,
+                )
+            )
+            return AutoDecision(
+                outcome=DecisionOutcome.SKIP,
+                reason_id="auto.ngram.min_length",
+                reason="word below n-gram fallback threshold",
+                original=word_clean,
+                converted=converted,
+                source_lang=current_layout,
+                target_lang=target_lang,
+                steps=tuple(steps),
+            )
+
+        steps.append(
+            self._step(
+                "auto.ngram.min_length",
+                StepState.MATCHED,
+                length=len(normalized),
+                minimum=minimum,
+            )
+        )
+
         score_target = self.ngrams.score(converted, target_lang)
         score_source = self.ngrams.score(normalized, current_layout)
 
         threshold = 0.05
         delta = score_target - score_source
-        ngram_matches = delta > threshold
+        ngram_matches = score_target > 0.0 and delta > threshold
         steps.append(
             self._step(
                 "auto.ngram.delta",
@@ -314,6 +331,7 @@ class AutoDetector:
                 target_score=score_target,
                 delta=delta,
                 threshold=threshold,
+                target_positive=score_target > 0.0,
             )
         )
         if ngram_matches:
@@ -324,33 +342,6 @@ class AutoDetector:
                     f"ngram: target={score_target:.3f} "
                     f"> source={score_source:.3f}"
                 ),
-                original=word_clean,
-                converted=converted,
-                source_lang=current_layout,
-                target_lang=target_lang,
-                steps=tuple(steps),
-            )
-
-        zero_source_matches = score_source == 0.0 and len(normalized) >= 4
-        steps.append(
-            self._step(
-                "auto.ngram.zero_source",
-                (
-                    StepState.MATCHED
-                    if zero_source_matches
-                    else StepState.NOT_MATCHED
-                ),
-                decisive=zero_source_matches,
-                source_score=score_source,
-                length=len(normalized),
-                minimum_length=4,
-            )
-        )
-        if zero_source_matches:
-            return AutoDecision(
-                outcome=DecisionOutcome.CONVERT,
-                reason_id="auto.ngram.zero_source",
-                reason="ngram: zero source score, likely wrong layout",
                 original=word_clean,
                 converted=converted,
                 source_lang=current_layout,

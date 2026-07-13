@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from lswitch.core.decision_trace import StepState
 from lswitch.intelligence.mid_word_detector import MidWordDetector
-from lswitch.intelligence.prefix_dictionary import PrefixDictionary
+from lswitch.intelligence.prefix_dictionary import (
+    PrefixDictionary,
+    PrefixDictionarySource,
+)
 from lswitch.intelligence.user_dictionary import UserPolicyMatch
 
 
@@ -84,6 +88,38 @@ def test_mid_word_detector_requires_target_prefix_count_threshold():
     assert decision.should_switch is False
     assert decision.reason == "target prefix not found"
     assert decision.target_prefix_count == 1
+
+
+def test_mid_word_detector_disables_system_stage_when_one_dictionary_missing():
+    dictionary = PrefixDictionary(
+        ru_words={"привет"},
+        sources={
+            "en": (
+                PrefixDictionarySource(
+                    lang="en",
+                    kind="system",
+                    enabled=True,
+                    loaded=False,
+                ),
+            ),
+            "ru": (
+                PrefixDictionarySource(
+                    lang="ru",
+                    kind="system",
+                    enabled=True,
+                    loaded=True,
+                    word_count=1,
+                ),
+            ),
+        },
+    )
+    detector = MidWordDetector(dictionary, min_prefix_len=4)
+
+    decision = detector.should_switch("ghbd", "en")
+
+    assert decision.should_switch is False
+    assert decision.reason_id == "midword.system_dictionary.unavailable"
+    assert decision.steps[-1].state is StepState.UNAVAILABLE
 
 
 class _UserDictionary:

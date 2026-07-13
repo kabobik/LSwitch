@@ -63,11 +63,8 @@ class NgramAnalyzer:
     def should_convert(self, text: str, from_lang: str, threshold: float = 0.1) -> bool:
         """Return True if text scores better in the opposite language.
 
-        Guards:
-        - text containing digits or non-letter characters → False
-          (numbers, passwords, abbreviations with special chars)
-        - short sequences ≤ 3 chars with zero n-gram matches → False
-          (abbreviations like php/sql that are too short to discriminate)
+        Conversion requires positive target evidence and a strict score delta.
+        Text containing digits or non-letter characters is never converted.
         """
         if not text:
             return False
@@ -75,15 +72,16 @@ class NgramAnalyzer:
         clean = text.strip().lower()
         if not clean.isalpha():
             return False
+        from lswitch.intelligence.maps import EN_TO_RU, RU_TO_EN
+
+        if from_lang == "en":
+            converted = "".join(EN_TO_RU.get(char, char) for char in clean)
+        elif from_lang == "ru":
+            converted = "".join(RU_TO_EN.get(char, char) for char in clean)
+        else:
+            return False
         self._ensure_loaded()
         to_lang = "en" if from_lang == "ru" else "ru"
         score_from = self.score(clean, from_lang)
-        score_to = self.score(clean, to_lang)
-        # Основное правило: целевой язык значительно лучше
-        if score_to - score_from > threshold:
-            return True
-        # Эвристика: нет совпадений в from_lang и текст достаточно длинный
-        # (>= 4 符合: исключает короткие аббревиатуры php/sql, но ловит ghbdtn)
-        if score_from == 0.0 and len(clean) >= 4:
-            return True
-        return False
+        score_to = self.score(converted, to_lang)
+        return score_to > 0.0 and score_to - score_from > threshold

@@ -68,7 +68,6 @@ SETTINGS_BINDINGS: tuple[SettingsBinding, ...] = (
     _binding("layout_switch_key", PAGE_GENERAL, "shortcut"),
     _binding("auto_switch", PAGE_AUTO, "bool"),
     _binding("auto_switch_threshold", PAGE_AUTO, "int", minimum=0, maximum=2_147_483_647),
-    _binding("auto_switch_mid_word", PAGE_AUTO, "bool"),
     _binding("mid_word_min_prefix_len", PAGE_AUTO, "int", minimum=1, maximum=32),
     _binding("system_dict_enabled", PAGE_DICTIONARIES, "bool"),
     _binding("system_dict_en_path", PAGE_DICTIONARIES, "path"),
@@ -158,16 +157,15 @@ def dependency_enabled(values: dict) -> dict[str, bool]:
     """Return enabled state for every setting path in the current draft."""
     enabled = {binding.path: True for binding in SETTINGS_BINDINGS}
     auto_switch = bool(dotted_get(values, "auto_switch", False))
-    mid_word = bool(dotted_get(values, "auto_switch_mid_word", False))
     system_dict = bool(dotted_get(values, "system_dict_enabled", False))
     user_dict = bool(dotted_get(values, "user_dict_enabled", False))
     strategy = dotted_get(values, "wayland_selection_strategy", "auto")
 
     enabled["auto_switch_threshold"] = auto_switch
-    enabled["mid_word_min_prefix_len"] = mid_word
-    enabled["system_dict_enabled"] = mid_word
-    enabled["system_dict_en_path"] = mid_word and system_dict
-    enabled["system_dict_ru_path"] = mid_word and system_dict
+    enabled["mid_word_min_prefix_len"] = auto_switch
+    enabled["system_dict_enabled"] = auto_switch
+    enabled["system_dict_en_path"] = auto_switch and system_dict
+    enabled["system_dict_ru_path"] = auto_switch and system_dict
     enabled["user_dict_min_weight"] = user_dict
 
     wayland_paths = [

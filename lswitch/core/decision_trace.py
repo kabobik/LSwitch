@@ -61,6 +61,7 @@ class StepState(str, Enum):
 
     MATCHED = "matched"
     NOT_MATCHED = "not_matched"
+    UNAVAILABLE = "unavailable"
     SKIPPED = "skipped"
     SUCCEEDED = "succeeded"
     FAILED = "failed"

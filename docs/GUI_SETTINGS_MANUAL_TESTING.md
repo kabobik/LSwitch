@@ -47,7 +47,7 @@ CI/локальном test suite. Проверки реального ввода
    Ожидается: уровень логов и видимость `Debug Monitor` меняются без restart.
 6. Запустить отдельно с `--trace`, выключить `debug` в GUI.
    Ожидается: GUI показывает пояснение, effective level остаётся `TRACE`.
-7. Включить mid-word и system dictionaries с пустыми путями.
+7. Включить автоматическую конвертацию и system dictionaries с пустыми путями.
    Ожидается: GUI показывает автообнаруженные EN/RU пути и количество слов;
    поля остаются пустыми, потому что задают только явный override.
 8. На каждой странице навести указатель на значки `ⓘ` у настроек.
@@ -65,11 +65,9 @@ CI/локальном test suite. Проверки реального ввода
 
 | Действие | Ожидаемое визуальное состояние |
 |---|---|
-| Выключить `auto_switch` | Отключён `auto_switch_threshold` |
-| Выключить `auto_switch_mid_word` | Отключены prefix length и system dictionaries |
+| Выключить `auto_switch` | Отключены n-gram threshold, prefix length и system dictionaries |
 | Выключить `system_dict_enabled` | Отключены оба пути `.dic` и кнопки обзора |
-| Выключить `user_dict_enabled` | Отключены weight и auto-confirm |
-| Оставить user dictionary, выключить auto-switch | Отключён только auto-confirm |
+| Выключить `user_dict_enabled` | Отключён минимальный вес user dictionary |
 | Выбрать Wayland strategy `disabled` | Отключены все Wayland selection timings |
 | Выбрать `primary_selection` | Доступен только expand delay из этой timing-группы |
 

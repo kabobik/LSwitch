@@ -468,7 +468,7 @@ class ConfigDialog(QDialog):
             )
         }
         active_in_draft = bool(
-            self.model.get("auto_switch_mid_word", False)
+            self.model.get("auto_switch", False)
             and self.model.get("system_dict_enabled", False)
         )
         for lang, label in self._dictionary_status_labels.items():

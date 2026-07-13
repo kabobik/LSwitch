@@ -490,6 +490,7 @@ def _context_with_events(codes: list[int]) -> StateContext:
 def _space_auto_use_case(
     *,
     should_convert: bool = True,
+    auto_detector=None,
     trace_recorder=None,
 ):
     xkb = MagicMock()
@@ -501,7 +502,7 @@ def _space_auto_use_case(
     retype_service = MagicMock()
     retype_service.retype_events.return_value = True
     use_case = SpaceAutoConversionUseCase(
-        auto_detector=_Detector(should_convert),
+        auto_detector=auto_detector or _Detector(should_convert),
         typed_buffer=TypedBufferService(),
         xkb=xkb,
         retype_service=retype_service,
@@ -685,7 +686,11 @@ def test_space_auto_conversion_use_case_consumes_previous_marker_without_convers
 
 
 def test_space_auto_conversion_use_case_skips_below_threshold():
-    use_case, _xkb, retype_service = _space_auto_use_case()
+    ngrams = MagicMock()
+    ngrams.score.side_effect = lambda _word, lang: 0.2 if lang == "ru" else 0.0
+    use_case, _xkb, retype_service = _space_auto_use_case(
+        auto_detector=AutoDetector(DictionaryService(), ngrams),
+    )
     context = _context_with_events([34, 35, 48])
 
     result = use_case.execute(
@@ -700,7 +705,8 @@ def test_space_auto_conversion_use_case_skips_below_threshold():
     )
 
     assert result.space_consumed is False
-    assert result.marker_changed is False
+    assert result.marker_changed is True
+    assert result.marker is None
     retype_service.retype_events.assert_not_called()
 
 
@@ -909,7 +915,7 @@ def test_space_auto_trace_keeps_decision_separate_from_execution_success():
     assert trace.execution is ExecutionOutcome.SUCCEEDED
     assert trace.converted == "привет"
     assert trace.conversion_mode == "retype"
-    assert trace.attempts[0].steps[-1].rule_id == "auto.target_dictionary.match"
+    assert trace.attempts[0].steps[-1].rule_id == "auto.ngram.delta"
     assert trace.execution_steps[-1].rule_id == "execution.retype"
 
 
@@ -934,9 +940,12 @@ def test_space_auto_trace_preserves_convert_decision_when_retype_fails():
     assert trace.execution is ExecutionOutcome.FAILED
 
 
-def test_space_auto_threshold_skip_records_gate_without_detector_call():
+def test_space_auto_threshold_is_recorded_inside_ngram_fallback():
     recorder = DecisionTraceRecorder(enabled=True)
+    ngrams = MagicMock()
+    ngrams.score.side_effect = lambda _word, lang: 0.2 if lang == "ru" else 0.0
     use_case, _xkb, retype_service = _space_auto_use_case(
+        auto_detector=AutoDetector(DictionaryService(), ngrams),
         trace_recorder=recorder
     )
 
@@ -949,7 +958,8 @@ def test_space_auto_threshold_skip_records_gate_without_detector_call():
 
     trace = recorder.snapshot()[0]
     assert trace.decision is DecisionOutcome.SKIP
-    assert trace.attempts[0].steps[0].rule_id == "auto.buffer_threshold"
+    assert trace.attempts[0].steps[-1].rule_id == "auto.ngram.min_length"
+    ngrams.score.assert_not_called()
     retype_service.retype_events.assert_not_called()
 
 

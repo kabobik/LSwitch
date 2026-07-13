@@ -42,7 +42,7 @@ class PrefixDictionary:
             "en": (
                 PrefixDictionarySource(
                     lang="en",
-                    kind="builtin",
+                    kind="memory",
                     enabled=True,
                     loaded=True,
                     word_count=len(normalized_en),
@@ -51,7 +51,7 @@ class PrefixDictionary:
             "ru": (
                 PrefixDictionarySource(
                     lang="ru",
-                    kind="builtin",
+                    kind="memory",
                     enabled=True,
                     loaded=True,
                     word_count=len(normalized_ru),
@@ -69,40 +69,58 @@ class PrefixDictionary:
         dictionary,
         *,
         min_prefix_len: int = 1,
-        system_loader=None,
-        include_system: bool = False,
     ) -> "PrefixDictionary":
         words_by_lang = {
             "en": dictionary.words_for_lang("en"),
             "ru": dictionary.words_for_lang("ru"),
         }
-        sources: dict[str, list[PrefixDictionarySource]] = {
-            lang: [
+        sources: dict[str, tuple[PrefixDictionarySource, ...]] = {
+            lang: (
                 PrefixDictionarySource(
                     lang=lang,
-                    kind="builtin",
-                    enabled=True,
-                    loaded=True,
+                    kind="memory",
+                    enabled=cls._dictionary_available(dictionary, lang),
+                    loaded=cls._dictionary_available(dictionary, lang),
                     word_count=len(words),
-                )
-            ]
+                ),
+            )
             for lang, words in words_by_lang.items()
         }
-        if system_loader is not None:
-            for lang in ("en", "ru"):
-                loaded = system_loader.load(lang) if include_system else None
-                if loaded is not None:
-                    words_by_lang[lang].update(loaded.words)
-                status = cls._system_source_status(
-                    system_loader,
-                    lang,
-                    enabled=include_system,
-                    loaded=loaded,
-                )
-                sources[lang].append(status)
         return cls(
             en_words=words_by_lang["en"],
             ru_words=words_by_lang["ru"],
+            min_prefix_len=min_prefix_len,
+            sources=sources,
+        )
+
+    @classmethod
+    def from_system_snapshot(
+        cls,
+        snapshot,
+        *,
+        min_prefix_len: int = 1,
+    ) -> "PrefixDictionary":
+        sources: dict[str, tuple[PrefixDictionarySource, ...]] = {}
+        for lang in ("en", "ru"):
+            status = snapshot.status_for_lang(lang)
+            sources[lang] = (
+                PrefixDictionarySource(
+                    lang=lang,
+                    kind="system",
+                    enabled=bool(getattr(status, "enabled", False)),
+                    loaded=bool(getattr(status, "loaded", False)),
+                    word_count=int(getattr(status, "word_count", 0)),
+                    path=(
+                        str(status.path)
+                        if getattr(status, "path", None) is not None
+                        else None
+                    ),
+                    explicit=bool(getattr(status, "explicit", False)),
+                ),
+            )
+        return cls(
+            en_words=snapshot.en_words,
+            ru_words=snapshot.ru_words,
             min_prefix_len=min_prefix_len,
             sources=sources,
         )
@@ -146,30 +164,6 @@ class PrefixDictionary:
         return normalized
 
     @staticmethod
-    def _system_source_status(
-        system_loader,
-        lang: str,
-        *,
-        enabled: bool,
-        loaded,
-    ) -> PrefixDictionarySource:
-        get_status = getattr(system_loader, "get_status", None)
-        status = get_status(lang, enabled=enabled) if callable(get_status) else None
-        path = getattr(status, "path", None)
-        if path is None and loaded is not None:
-            path = getattr(loaded, "path", None)
-        word_count = getattr(status, "word_count", None)
-        if word_count is None:
-            word_count = len(getattr(loaded, "words", ())) if loaded is not None else 0
-        loaded_flag = getattr(status, "loaded", None)
-        if loaded_flag is None:
-            loaded_flag = loaded is not None
-        return PrefixDictionarySource(
-            lang=lang,
-            kind="system",
-            enabled=bool(getattr(status, "enabled", enabled)),
-            loaded=bool(loaded_flag),
-            word_count=int(word_count),
-            path=str(path) if path is not None else None,
-            explicit=bool(getattr(status, "explicit", False)),
-        )
+    def _dictionary_available(dictionary, lang: str) -> bool:
+        is_available = getattr(dictionary, "is_available", None)
+        return bool(is_available(lang)) if callable(is_available) else True

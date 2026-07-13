@@ -38,7 +38,6 @@ class TestDefaultConfig:
         'layout_switch_key',
         'auto_switch',
         'auto_switch_threshold',
-        'auto_switch_mid_word',
         'mid_word_min_prefix_len',
         'system_dict_enabled',
         'system_dict_en_path',
@@ -81,7 +80,6 @@ class TestValidateConfig:
             'layout_switch_key': 'Caps_Lock',
             'auto_switch': True,
             'auto_switch_threshold': 5,
-            'auto_switch_mid_word': True,
             'mid_word_min_prefix_len': 5,
             'system_dict_enabled': False,
             'system_dict_en_path': '/tmp/en_US.dic',
@@ -98,7 +96,6 @@ class TestValidateConfig:
         assert result['debug'] is True
         assert result['layout_switch_key'] == 'CapsLock'
         assert result['auto_switch_threshold'] == 5
-        assert result['auto_switch_mid_word'] is True
         assert result['mid_word_min_prefix_len'] == 5
         assert result['system_dict_enabled'] is False
         assert result['system_dict_en_path'] == '/tmp/en_US.dic'
@@ -138,10 +135,6 @@ class TestValidateConfig:
     def test_invalid_auto_switch_threshold_negative(self):
         with pytest.raises(ValueError, match="auto_switch_threshold"):
             validate_config({'auto_switch_threshold': -1})
-
-    def test_invalid_auto_switch_mid_word_type(self):
-        with pytest.raises(ValueError, match="auto_switch_mid_word"):
-            validate_config({'auto_switch_mid_word': 'yes'})
 
     def test_invalid_mid_word_min_prefix_len_range(self):
         with pytest.raises(ValueError, match="mid_word_min_prefix_len"):
@@ -203,7 +196,7 @@ class TestLoadConfig:
             debug = true
             double_click_timeout = 0.5
             wayland_selection_strategy = "primary_selection"
-            auto_switch_mid_word = true
+            auto_switch = true
             mid_word_min_prefix_len = 5
             system_dict_enabled = false
             system_dict_en_path = "/tmp/en_US.dic"
@@ -227,7 +220,7 @@ class TestLoadConfig:
         assert result['debug'] is True
         assert result['double_click_timeout'] == 0.5
         assert result['wayland_selection_strategy'] == 'primary_selection'
-        assert result['auto_switch_mid_word'] is True
+        assert result['auto_switch'] is True
         assert result['mid_word_min_prefix_len'] == 5
         assert result['system_dict_enabled'] is False
         assert result['system_dict_en_path'] == '/tmp/en_US.dic'
@@ -237,7 +230,6 @@ class TestLoadConfig:
         assert result['wayland_timing']['wl_clipboard_timeout'] == 2.0
         assert result['wayland_selection_timing']['paste_delay'] == 0.15
         # Other keys remain default
-        assert result['auto_switch'] is False
 
     def test_invalid_toml_returns_defaults(self, tmp_path):
         cfg_file = tmp_path / "config.toml"
@@ -274,7 +266,7 @@ class TestConfigManager:
         text = path.read_text(encoding="utf-8")
         assert "false restores the previous layout" in text
         assert "direct XKB/D-Bus target switching has priority" in text
-        assert "Minimum buffered characters" in text
+        assert "Minimum word length for boundary n-gram fallback" in text
         assert "0 adds no restriction" in text
         assert 'layout_switch_key = "Alt+Shift"' in text
 
@@ -332,7 +324,7 @@ class TestConfigManager:
         assert "[wayland_selection_timing]" in saved
         assert 'debug = true' in saved
         assert 'double_click_timeout = 0.7' in saved
-        assert 'auto_switch_mid_word = false' in saved
+        assert 'auto_switch_mid_word' not in saved
         assert 'mid_word_min_prefix_len = 4' in saved
 
         # Reload

@@ -92,10 +92,8 @@ def test_password_not_converted(analyzer: NgramAnalyzer) -> None:
     assert analyzer.should_convert("P@ssw0rd", "en") is False
 
 
-def test_ru_to_en_conversion(analyzer: NgramAnalyzer) -> None:
-    """Кириллица с нулевым RU-скором (неверная раскладка) → should_convert('ru') = True.
-
-    'йьъщ' — комбинация кириллических букв с нулевым n-gram скором в RU
-    (нет таких биграмм в русском языке), что диагностирует неверную раскладку.
-    """
-    assert analyzer.should_convert("йьъщ", "ru") is True
+def test_zero_scores_do_not_trigger_ru_to_en_conversion(
+    analyzer: NgramAnalyzer,
+) -> None:
+    """Нулевой source score без положительного target score недостаточен."""
+    assert analyzer.should_convert("йьъщ", "ru") is False

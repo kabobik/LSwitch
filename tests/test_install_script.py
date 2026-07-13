@@ -132,6 +132,7 @@ offer_system_dictionaries
 
     assert "UNEXPECTED INSTALL" not in result.stdout
     assert "Установка словарей пропущена" in result.stdout
+    assert "префиксная конвертация будет недоступна" in result.stdout
 
 
 def test_dictionary_package_failure_does_not_abort_install(tmp_path):

@@ -345,11 +345,39 @@ class MidWordDetector:
             )
         )
 
-        source_count = self.prefix_dictionary.prefix_count(current_lang, typed_prefix)
-        target_count = self.prefix_dictionary.prefix_count(target_lang, converted_prefix)
         source_sources = self.prefix_dictionary.sources_for_lang(current_lang)
         target_sources = self.prefix_dictionary.sources_for_lang(target_lang)
         dictionary_sources = source_sources + target_sources
+        if not (
+            self._has_loaded_source(source_sources)
+            and self._has_loaded_source(target_sources)
+        ):
+            steps.append(
+                self._prefix_step(
+                    "midword.system_dictionary.unavailable",
+                    StepState.UNAVAILABLE,
+                    count=0,
+                    lang=f"{current_lang}->{target_lang}",
+                    prefix=typed_prefix,
+                    sources=dictionary_sources,
+                    decisive=True,
+                )
+            )
+            return MidWordDecision(
+                False,
+                "system dictionary pair unavailable",
+                current_lang,
+                target_lang=target_lang,
+                typed_prefix=typed_prefix,
+                converted_prefix=converted_prefix,
+                reason_id="midword.system_dictionary.unavailable",
+                outcome=DecisionOutcome.SKIP,
+                steps=tuple(steps),
+                dictionary_sources=dictionary_sources,
+            )
+
+        source_count = self.prefix_dictionary.prefix_count(current_lang, typed_prefix)
+        target_count = self.prefix_dictionary.prefix_count(target_lang, converted_prefix)
 
         if source_count > 0:
             steps.append(
@@ -546,6 +574,12 @@ class MidWordDetector:
             exact_action=action,
             exact_weight=weight if action is not None else 0,
         )
+
+    @staticmethod
+    def _has_loaded_source(
+        sources: tuple[PrefixDictionarySource, ...],
+    ) -> bool:
+        return any(source.enabled and source.loaded for source in sources)
 
     @staticmethod
     def _valid_en_layout_prefix(prefix: str) -> bool:

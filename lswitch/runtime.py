@@ -107,6 +107,7 @@ class InputRouterCallbacks:
 
 @dataclass(frozen=True)
 class ConversionRuntimeComponents:
+    system_lexicon: object
     dictionary: DictionaryService
     ngrams: NgramAnalyzer
     auto_detector: AutoDetector
@@ -118,6 +119,8 @@ class ConversionRuntimeComponents:
 
 @dataclass(frozen=True)
 class MidWordDetectionRuntime:
+    system_lexicon: object
+    dictionary: DictionaryService
     prefix_dictionary: object
     mid_word_detector: object
     system_dictionaries: tuple = ()
@@ -225,7 +228,7 @@ def auto_conversion_enabled(*, config, auto_detector) -> bool:
 
 def mid_word_auto_conversion_enabled(*, config, mid_word_detector) -> bool:
     """Return whether mid-word auto-conversion is currently available."""
-    return bool(mid_word_detector and config.get("auto_switch_mid_word"))
+    return bool(mid_word_detector and config.get("auto_switch"))
 
 
 def inject_deferred_space(virtual_kb) -> None:
@@ -279,18 +282,16 @@ def create_conversion_runtime(
     user_dict_min_weight: int,
     debug: bool,
     timing: dict,
-    auto_switch_mid_word: bool = False,
+    auto_switch: bool = False,
     mid_word_min_prefix_len: int = 4,
     system_dict_enabled: bool = False,
     system_dict_en_path: str = "",
     system_dict_ru_path: str = "",
 ) -> ConversionRuntimeComponents:
     """Create dictionary, auto-detection, and conversion executor services."""
-    dictionary = DictionaryService()
     ngrams = NgramAnalyzer()
     mid_word_runtime = create_mid_word_detection_runtime(
-        dictionary=dictionary,
-        auto_switch_mid_word=auto_switch_mid_word,
+        auto_switch=auto_switch,
         mid_word_min_prefix_len=mid_word_min_prefix_len,
         system_dict_enabled=system_dict_enabled,
         system_dict_en_path=system_dict_en_path,
@@ -298,7 +299,9 @@ def create_conversion_runtime(
         user_dict=user_dict,
         user_dict_min_weight=user_dict_min_weight,
     )
+    dictionary = mid_word_runtime.dictionary
     return ConversionRuntimeComponents(
+        system_lexicon=mid_word_runtime.system_lexicon,
         dictionary=dictionary,
         ngrams=ngrams,
         auto_detector=AutoDetector(
@@ -325,8 +328,7 @@ def create_conversion_runtime(
 
 def create_mid_word_detection_runtime(
     *,
-    dictionary,
-    auto_switch_mid_word: bool = True,
+    auto_switch: bool = True,
     mid_word_min_prefix_len: int = 4,
     system_dict_enabled: bool = False,
     system_dict_en_path: str = "",
@@ -345,14 +347,16 @@ def create_mid_word_detection_runtime(
             "ru": system_dict_ru_path,
         },
     )
-    include_system = bool(auto_switch_mid_word and system_dict_enabled)
-    prefix_dictionary = PrefixDictionary.from_dictionary_service(
-        dictionary,
+    include_system = bool(auto_switch and system_dict_enabled)
+    system_lexicon = system_loader.load_snapshot(enabled=include_system)
+    dictionary = DictionaryService.from_system_snapshot(system_lexicon)
+    prefix_dictionary = PrefixDictionary.from_system_snapshot(
+        system_lexicon,
         min_prefix_len=mid_word_min_prefix_len,
-        system_loader=system_loader,
-        include_system=include_system,
     )
     return MidWordDetectionRuntime(
+        system_lexicon=system_lexicon,
+        dictionary=dictionary,
         prefix_dictionary=prefix_dictionary,
         mid_word_detector=MidWordDetector(
             prefix_dictionary,
@@ -360,10 +364,7 @@ def create_mid_word_detection_runtime(
             user_dict=user_dict,
             user_dict_min_weight=user_dict_min_weight,
         ),
-        system_dictionaries=tuple(
-            system_loader.get_status(lang, enabled=include_system)
-            for lang in ("en", "ru")
-        ),
+        system_dictionaries=system_lexicon.statuses,
     )
 
 
@@ -405,7 +406,7 @@ def create_platform_runtime_components(
     event_bus: EventBus,
     user_dict,
     user_dict_min_weight: int,
-    auto_switch_mid_word: bool = False,
+    auto_switch: bool = False,
     mid_word_min_prefix_len: int = 4,
     system_dict_enabled: bool = False,
     system_dict_en_path: str = "",
@@ -432,7 +433,7 @@ def create_platform_runtime_components(
         user_dict_min_weight=user_dict_min_weight,
         debug=debug,
         timing=timing,
-        auto_switch_mid_word=auto_switch_mid_word,
+        auto_switch=auto_switch,
         mid_word_min_prefix_len=mid_word_min_prefix_len,
         system_dict_enabled=system_dict_enabled,
         system_dict_en_path=system_dict_en_path,

@@ -141,7 +141,7 @@ def test_prefix_steps_capture_active_dictionary_source_metadata():
         "en": (
             PrefixDictionarySource(
                 lang="en",
-                kind="builtin",
+                kind="memory",
                 enabled=True,
                 loaded=True,
                 word_count=1,
@@ -150,7 +150,7 @@ def test_prefix_steps_capture_active_dictionary_source_metadata():
         "ru": (
             PrefixDictionarySource(
                 lang="ru",
-                kind="builtin",
+                kind="memory",
                 enabled=True,
                 loaded=True,
                 word_count=1,

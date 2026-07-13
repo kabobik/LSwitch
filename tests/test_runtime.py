@@ -27,7 +27,10 @@ from lswitch.core.learning_service import LearningService
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
 from lswitch.core.typed_buffer import TypedBufferService
-from lswitch.intelligence.system_dictionary_loader import SystemDictionaryStatus
+from lswitch.intelligence.system_dictionary_loader import (
+    SystemDictionaryStatus,
+    SystemLexiconSnapshot,
+)
 from lswitch.runtime import (
     AppliedRuntimeConfig,
     ConversionRuntimeFacade,
@@ -563,7 +566,7 @@ def test_create_input_router_callbacks_late_binds_mid_word_conversion_enabled():
 
     assert callbacks.conversion.mid_word_auto_conversion_enabled() is True
     assert callbacks.conversion.try_mid_word_auto_conversion() is True
-    config.get.assert_called_once_with("auto_switch_mid_word")
+    config.get.assert_called_once_with("auto_switch")
     try_mid_word.assert_called_once()
 
 
@@ -1830,13 +1833,17 @@ def test_update_passive_selection_baseline_on_click_tolerates_read_errors():
     tracker.on_click_passive_selection.assert_not_called()
 
 
-def test_create_conversion_runtime_wires_detector_and_engine():
+def test_create_conversion_runtime_wires_detector_and_engine(tmp_path):
     user_dict = MagicMock()
     xkb = MagicMock()
     selection = MagicMock()
     virtual_kb = MagicMock()
     system = MagicMock()
     timing = {"retype_before_replay_delay": 0.01}
+    en_path = tmp_path / "en.dic"
+    ru_path = tmp_path / "ru.dic"
+    en_path.write_text("1\nhello\n", encoding="utf-8")
+    ru_path.write_text("1\nпривет\n", encoding="utf-8")
 
     components = create_conversion_runtime(
         xkb=xkb,
@@ -1847,6 +1854,10 @@ def test_create_conversion_runtime_wires_detector_and_engine():
         user_dict_min_weight=4,
         debug=True,
         timing=timing,
+        auto_switch=True,
+        system_dict_enabled=True,
+        system_dict_en_path=str(en_path),
+        system_dict_ru_path=str(ru_path),
     )
 
     assert isinstance(components, ConversionRuntimeComponents)
@@ -1866,23 +1877,23 @@ def test_create_conversion_runtime_wires_detector_and_engine():
     assert components.conversion_engine.debug is True
     assert components.conversion_engine.timing is timing
     assert len(components.system_dictionaries) == 2
-    assert all(
-        status.enabled is False
-        for status in components.system_dictionaries
-    )
+    assert all(status.loaded for status in components.system_dictionaries)
+    assert components.system_lexicon.en_words == frozenset({"hello"})
+    assert components.dictionary.words_for_lang("en") == {"hello"}
 
 
-def test_create_mid_word_detection_runtime_uses_configured_prefix_len():
-    dictionary = MagicMock()
-    dictionary.words_for_lang.side_effect = lambda lang: {
-        "en": {"hello"},
-        "ru": {"привет"},
-    }.get(lang, set())
+def test_create_mid_word_detection_runtime_uses_configured_prefix_len(tmp_path):
+    en_path = tmp_path / "en.dic"
+    ru_path = tmp_path / "ru.dic"
+    en_path.write_text("1\nhello\n", encoding="utf-8")
+    ru_path.write_text("1\nпривет\n", encoding="utf-8")
 
     runtime = create_mid_word_detection_runtime(
-        dictionary=dictionary,
+        auto_switch=True,
         mid_word_min_prefix_len=5,
-        system_dict_enabled=False,
+        system_dict_enabled=True,
+        system_dict_en_path=str(en_path),
+        system_dict_ru_path=str(ru_path),
     )
 
     assert isinstance(runtime, MidWordDetectionRuntime)
@@ -1893,29 +1904,29 @@ def test_create_mid_word_detection_runtime_uses_configured_prefix_len():
 
 
 def test_disabled_mid_word_runtime_does_not_load_system_dictionaries(monkeypatch):
-    dictionary = MagicMock()
-    dictionary.words_for_lang.side_effect = lambda lang: {
-        "en": {"hello"},
-        "ru": {"привет"},
-    }.get(lang, set())
     loader = MagicMock()
-    loader.get_status.side_effect = lambda lang, enabled: SystemDictionaryStatus(
-        lang=lang,
-        enabled=enabled,
+    snapshot = SystemLexiconSnapshot(
+        en_words=frozenset(),
+        ru_words=frozenset(),
+        statuses=tuple(
+            SystemDictionaryStatus(lang=lang, enabled=False)
+            for lang in ("en", "ru")
+        ),
     )
+    loader.load_snapshot.return_value = snapshot
     monkeypatch.setattr(
         "lswitch.intelligence.system_dictionary_loader.SystemDictionaryLoader",
         MagicMock(return_value=loader),
     )
 
     runtime = create_mid_word_detection_runtime(
-        dictionary=dictionary,
-        auto_switch_mid_word=False,
+        auto_switch=False,
         system_dict_enabled=True,
     )
 
+    loader.load_snapshot.assert_called_once_with(enabled=False)
     loader.load.assert_not_called()
-    assert runtime.prefix_dictionary.in_lang("en", "hello") is True
+    assert runtime.prefix_dictionary.in_lang("en", "hello") is False
     assert [status.enabled for status in runtime.system_dictionaries] == [
         False,
         False,
@@ -1925,25 +1936,25 @@ def test_disabled_mid_word_runtime_does_not_load_system_dictionaries(monkeypatch
 def test_enabled_mid_word_runtime_loads_system_dictionaries_and_user_protection(
     monkeypatch,
 ):
-    dictionary = MagicMock()
-    dictionary.words_for_lang.side_effect = lambda lang: {
-        "en": {"hello"},
-        "ru": {"привет"},
-    }.get(lang, set())
     loader = MagicMock()
-    loader.load.side_effect = lambda lang: types.SimpleNamespace(
-        words={"world"} if lang == "en" else {"пример"},
-    )
-    loader.get_status.side_effect = lambda lang, enabled: SystemDictionaryStatus(
-        lang=lang,
-        enabled=enabled,
-        path=(
-            Path("/usr/share/hunspell/en_US.dic")
-            if lang == "en"
-            else Path("/usr/share/hunspell/ru_RU.dic")
+    snapshot = SystemLexiconSnapshot(
+        en_words=frozenset({"world"}),
+        ru_words=frozenset({"пример"}),
+        statuses=tuple(
+            SystemDictionaryStatus(
+                lang=lang,
+                enabled=True,
+                path=(
+                    Path("/usr/share/hunspell/en_US.dic")
+                    if lang == "en"
+                    else Path("/usr/share/hunspell/ru_RU.dic")
+                ),
+                word_count=1,
+            )
+            for lang in ("en", "ru")
         ),
-        word_count=1,
     )
+    loader.load_snapshot.return_value = snapshot
     loader_factory = MagicMock(return_value=loader)
     monkeypatch.setattr(
         "lswitch.intelligence.system_dictionary_loader.SystemDictionaryLoader",
@@ -1952,14 +1963,13 @@ def test_enabled_mid_word_runtime_loads_system_dictionaries_and_user_protection(
     user_dict = object()
 
     runtime = create_mid_word_detection_runtime(
-        dictionary=dictionary,
-        auto_switch_mid_word=True,
+        auto_switch=True,
         system_dict_enabled=True,
         user_dict=user_dict,
         user_dict_min_weight=5,
     )
 
-    assert [call.args for call in loader.load.call_args_list] == [("en",), ("ru",)]
+    loader.load_snapshot.assert_called_once_with(enabled=True)
     assert runtime.prefix_dictionary.in_lang("en", "world") is True
     assert runtime.prefix_dictionary.in_lang("ru", "пример") is True
     assert runtime.mid_word_detector.user_dict is user_dict
@@ -2032,6 +2042,7 @@ def test_create_platform_runtime_components_wires_platform_conversion_and_input(
         virtual_kb=object(),
     )
     conversion = ConversionRuntimeComponents(
+        system_lexicon=object(),
         dictionary=object(),
         ngrams=object(),
         auto_detector=object(),
@@ -2072,7 +2083,7 @@ def test_create_platform_runtime_components_wires_platform_conversion_and_input(
         event_bus=event_bus,
         user_dict=user_dict,
         user_dict_min_weight=7,
-        auto_switch_mid_word=True,
+        auto_switch=True,
         mid_word_min_prefix_len=5,
         system_dict_enabled=True,
         system_dict_en_path="/tmp/en_US.dic",
@@ -2101,7 +2112,7 @@ def test_create_platform_runtime_components_wires_platform_conversion_and_input(
         user_dict_min_weight=7,
         debug=True,
         timing=timing,
-        auto_switch_mid_word=True,
+        auto_switch=True,
         mid_word_min_prefix_len=5,
         system_dict_enabled=True,
         system_dict_en_path="/tmp/en_US.dic",

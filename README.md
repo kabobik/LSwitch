@@ -40,7 +40,10 @@ git clone https://github.com/kabobik/lswitch.git && cd lswitch && bash scripts/i
 | PyQt6 + QtDBus | GUI и KDE Wayland layout backend | **Критично для Wayland** |
 | wl-clipboard | Clipboard fallback для Wayland (`wl-copy`/`wl-paste`) | **Критично для Wayland** |
 | qt6-wayland | Qt Wayland platform plugin | **Критично для Wayland** |
-| Hunspell EN/RU `.dic` | Расширенные префиксы для mid-word определения | Опционально |
+| Hunspell EN/RU `.dic` | Системные префиксы и защита исходных слов | Опционально* |
+
+\* Без полной пары EN/RU безопасная системная префиксная конвертация
+отключается; `user_dict` и n-gram fallback остаются доступны.
 
 **Display Server:** X11 и KDE Plasma Wayland
 
@@ -117,9 +120,10 @@ sudo apt remove lswitch
 буфера и событий.
 
 Пока слово вводится, его MID_WORD-трасса явно помечена как активная и
-обновляется на месте. На границе слова она финализируется. Если ранняя
-mid-word конвертация разделила ввод на несколько trace-сегментов, они сохраняют
-общий correlation ID и показываются как связанные части одного слова.
+обновляется на месте. Если произошло раннее преобразование, трасса сразу
+финализируется, а хвост видимого слова и завершающий `Space` повторно не
+подаются детекторам. Для неконвертированного слова mid-word и boundary-записи
+сохраняют общий correlation ID.
 
 История трассировки хранится только в памяти (до 200 записей), собирается при
 эффективном `debug`/`--trace` и полностью очищается при его выключении. В
@@ -195,15 +199,13 @@ debug = false
 switch_layout_after_convert = true
 # Verified fallback shortcut; direct XKB/D-Bus target switching has priority.
 layout_switch_key = "Alt+Shift"
-# Enable automatic wrong-layout conversion at a word boundary.
+# Enable user/system decisions while typing and n-gram fallback at a boundary.
 auto_switch = false
-# Minimum buffered characters before automatic conversion; 0 adds no restriction.
+# Minimum whole-word length for boundary n-gram fallback; 0 adds no restriction.
 auto_switch_threshold = 0
-# Enable automatic conversion while the current word is being typed.
-auto_switch_mid_word = false
-# Minimum prefix length before mid-word detection starts.
+# Minimum prefix length before system dictionary detection starts.
 mid_word_min_prefix_len = 4
-# Use system Hunspell/MySpell dictionaries for mid-word detection.
+# Use system Hunspell/MySpell dictionaries while typing and for source veto.
 system_dict_enabled = true
 # Optional readable .dic paths; empty values enable auto-discovery.
 system_dict_en_path = ""
@@ -274,14 +276,14 @@ expand_selection_delay = 0.2
   сохраняются в каноническом виде
 - `debug` — live-переключение уровня `INFO`/`DEBUG` и пункта Debug Monitor;
   запущенный с `--trace` процесс сохраняет уровень `TRACE`
-- `auto_switch` — автоматически определять и конвертировать раскладку
-- `auto_switch_threshold` — минимальное число символов в буфере до
-  автоконвертации на границе слова; `0` не добавляет ограничения
-- `auto_switch_mid_word` — переключать раскладку до завершения слова; агрессивный
-  opt-in режим, по умолчанию выключен
-- `mid_word_min_prefix_len` — минимальная длина префикса для mid-word проверки
-- `system_dict_enabled` — подмешивать системные Hunspell/MySpell словари только
-  при включенном mid-word режиме
+- `auto_switch` — единый переключатель автоматического pipeline: точные решения
+  `user_dict`, системные префиксы во время набора и n-gram fallback на границе
+- `auto_switch_threshold` — минимальная длина целого слова только для n-gram
+  fallback; точные пользовательские и системные mid-word решения от неё не зависят
+- `mid_word_min_prefix_len` — минимальная длина префикса только для проверки по
+  системным словарям
+- `system_dict_enabled` — использовать системные Hunspell/MySpell словари для
+  префиксов во время набора и точной защиты исходного слова на границе
 - `system_dict_en_path`, `system_dict_ru_path` — необязательные явные пути к
   английскому и русскому `.dic`; путь должен указывать на существующий
   читаемый обычный файл, пустое значение включает автоопределение. Под полями
@@ -298,13 +300,18 @@ expand_selection_delay = 0.2
 - `[wayland_timing]` — Wayland-only системные задержки clipboard backend-а
 - `[wayland_selection_timing]` — Wayland-only задержки copy/paste/restore и expand для selection
 
-Для первой проверки mid-word режима включите `auto_switch_mid_word = true`.
-Он работает независимо от `auto_switch`, который отвечает за конвертацию после
-нажатия пробела.
-LSwitch использует встроенный EN/RU словарь и, если доступно и разрешено,
-добавляет `/usr/share/hunspell/*.dic` или MySpell-словари. Большие системные
-индексы не загружаются, пока mid-word режим выключен. Сценарии проверки описаны
-в `docs/PLANS/MID_WORD_SYSTEM_DICTIONARY_PLAN.md`.
+Для автоматической обработки включите `auto_switch = true`. LSwitch использует
+только обнаруженные `/usr/share/hunspell/*.dic`, MySpell-словари или явно
+указанные `.dic`; встроенного мини-словаря больше нет. Оба языка загружаются
+одним снимком. Если отсутствует хотя бы один системный словарь, безопасная
+префиксная конвертация отключается, но точные решения `user_dict` и строгий
+n-gram fallback на `Space` продолжают работать.
+
+Порядок во время набора: точное решение `user_dict` → резервирование его
+префикса → системные source/target-префиксы. На `Space`, если слово ещё не было
+конвертировано: точный `user_dict` → точная защита исходным системным словарём →
+n-gram (`target_score > 0` и разница оценок `> 0.05`). Целевой системный словарь
+на `Space` повторно не запускает конвертацию.
 
 Пользовательский словарь хранится отдельно: `~/.config/lswitch/user_dict.toml`.
 Он запоминает не "правильные слова", а решения для текста, набранного в конкретной раскладке:
@@ -324,6 +331,8 @@ LSwitch использует встроенный EN/RU словарь и, ес�
 ```
 
 Число — это уверенность. Итоговый score считается как `convert - keep`; когда `abs(score)` достигает `user_dict_min_weight`, правило начинает влиять на автоопределение.
+Словарь изменяется только явными действиями Shift+Shift: ручной конвертацией
+или отменой автоматической. Автоматического подтверждения по следующему пробелу нет.
 
 Все изменения из окна настроек и быстрых переключателей tray применяются без
 перезапуска. Если TOML изменён внешним редактором, отправьте работающему

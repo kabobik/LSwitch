@@ -17,7 +17,13 @@ from lswitch.intelligence.user_dictionary import UserDictionary
 
 @pytest.fixture(scope="module")
 def detector() -> AutoDetector:
-    return AutoDetector(dictionary=DictionaryService(), ngrams=NgramAnalyzer())
+    return AutoDetector(
+        dictionary=DictionaryService(
+            en_words={"hello"},
+            ru_words={"привет"},
+        ),
+        ngrams=NgramAnalyzer(),
+    )
 
 
 def test_ghbdtn_should_convert(detector):
@@ -91,7 +97,13 @@ def test_unknown_layout_no_crash(detector):
 
 def test_user_dict_positive_override():
     # word "hello" is valid EN word, so normally shouldn't be converted
-    detector = AutoDetector(dictionary=DictionaryService(), ngrams=NgramAnalyzer())
+    detector = AutoDetector(
+        dictionary=DictionaryService(
+            en_words={"hello"},
+            ru_words={"привет"},
+        ),
+        ngrams=NgramAnalyzer(),
+    )
     ok, _ = detector.should_convert("hello", "en")
     assert ok is False  # baseline
     
@@ -105,7 +117,13 @@ def test_user_dict_positive_override():
 
 def test_user_dict_negative_protection():
     # word "ghbdtn" is generic typo, normally converted
-    detector = AutoDetector(dictionary=DictionaryService(), ngrams=NgramAnalyzer())
+    detector = AutoDetector(
+        dictionary=DictionaryService(
+            en_words={"hello"},
+            ru_words={"привет"},
+        ),
+        ngrams=NgramAnalyzer(),
+    )
     ok, _ = detector.should_convert("ghbdtn", "en")
     assert ok is True  # baseline
     
@@ -116,4 +134,3 @@ def test_user_dict_negative_protection():
     ok, reason = detector.should_convert("ghbdtn", "en")
     assert ok is False
     assert "user_dict: weight=" in reason
-

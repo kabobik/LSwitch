@@ -9,16 +9,14 @@ switch_layout_after_convert = true
 # Verified fallback shortcut; direct XKB/D-Bus target switching has priority.
 layout_switch_key = "Alt+Shift"
 
-# Enable automatic wrong-layout detection at a word boundary.
+# Enable automatic dictionary decisions while typing and n-gram fallback at a boundary.
 auto_switch = false
-# Minimum buffered characters before automatic conversion; 0 adds no restriction.
+# Minimum word length for boundary n-gram fallback; 0 adds no restriction.
 auto_switch_threshold = 0
 
-# Aggressive opt-in mode: convert while the current word is being typed.
-auto_switch_mid_word = false
-# Minimum prefix length before mid-word detection starts.
+# Minimum prefix length before system dictionary detection starts.
 mid_word_min_prefix_len = 4
-# Use system Hunspell/MySpell dictionaries for mid-word detection.
+# Use system Hunspell/MySpell dictionaries while typing and for source protection.
 system_dict_enabled = true
 # Optional explicit readable .dic paths; empty values enable auto-discovery.
 system_dict_en_path = ""

@@ -32,6 +32,32 @@ class SystemDictionaryStatus:
         return self.enabled and self.path is not None
 
 
+@dataclass(frozen=True)
+class SystemLexiconSnapshot:
+    """Immutable EN/RU word sets and their load statuses."""
+
+    en_words: frozenset[str]
+    ru_words: frozenset[str]
+    statuses: tuple[SystemDictionaryStatus, ...]
+
+    def words_for_lang(self, lang: str) -> frozenset[str]:
+        if lang == "en":
+            return self.en_words
+        if lang == "ru":
+            return self.ru_words
+        return frozenset()
+
+    def status_for_lang(self, lang: str) -> SystemDictionaryStatus | None:
+        return next(
+            (status for status in self.statuses if status.lang == lang),
+            None,
+        )
+
+    def available(self, lang: str) -> bool:
+        status = self.status_for_lang(lang)
+        return bool(status and status.loaded)
+
+
 class SystemDictionaryLoader:
     """Loads plain word forms from Hunspell/MySpell .dic files."""
 
@@ -90,6 +116,24 @@ class SystemDictionaryLoader:
             path,
         )
         return LoadedSystemDictionary(lang=lang, path=path, words=words)
+
+    def load_snapshot(self, *, enabled: bool = True) -> SystemLexiconSnapshot:
+        """Load both supported languages once into one immutable snapshot."""
+        words: dict[str, frozenset[str]] = {
+            "en": frozenset(),
+            "ru": frozenset(),
+        }
+        statuses: list[SystemDictionaryStatus] = []
+        for lang in ("en", "ru"):
+            loaded = self.load(lang) if enabled else None
+            if loaded is not None:
+                words[lang] = frozenset(loaded.words)
+            statuses.append(self.get_status(lang, enabled=enabled))
+        return SystemLexiconSnapshot(
+            en_words=words["en"],
+            ru_words=words["ru"],
+            statuses=tuple(statuses),
+        )
 
     def get_status(
         self,

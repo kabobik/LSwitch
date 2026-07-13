@@ -72,6 +72,7 @@ class InputEventRouter:
         self.selection = selection
         self._pressed_text_keys: set[int] = set()
         self._active_word_session_id: int | None = None
+        self._word_was_auto_converted = False
         self._next_word_session_id = 1
 
     @property
@@ -115,12 +116,18 @@ class InputEventRouter:
             self._pressed_text_keys.clear()
             correlation_id = self._word_session_for_boundary()
             try:
-                consumed = (
-                    self.conversion.auto_conversion_enabled()
-                    and self.conversion.try_auto_conversion_at_space(
-                        correlation_id,
+                if self._word_was_auto_converted:
+                    # A user/system mid-word decision already handled this
+                    # visible word. Space only finalizes it and expires undo.
+                    self.conversion.clear_last_auto_marker()
+                    consumed = False
+                else:
+                    consumed = (
+                        self.conversion.auto_conversion_enabled()
+                        and self.conversion.try_auto_conversion_at_space(
+                            correlation_id,
+                        )
                     )
-                )
             finally:
                 self._close_word_session()
             if consumed:
@@ -164,6 +171,7 @@ class InputEventRouter:
             self._pressed_text_keys.discard(data.code)
             if (
                 not self._pressed_text_keys
+                and not self._word_was_auto_converted
                 and self.conversion.mid_word_auto_conversion_enabled()
             ):
                 logger.trace(  # type: ignore[attr-defined]
@@ -173,6 +181,7 @@ class InputEventRouter:
                 )
                 correlation_id = self._ensure_word_session()
                 if self.conversion.try_mid_word_auto_conversion(correlation_id):
+                    self._word_was_auto_converted = True
                     self.selection_tracker.clear_repeat()
                     # Retype resets the input buffer, so finalize this trace
                     # segment.  The visible word is still being typed: keep
@@ -292,6 +301,7 @@ class InputEventRouter:
 
     def _close_word_session(self) -> None:
         correlation_id = self._active_word_session_id
+        self._word_was_auto_converted = False
         if correlation_id is None:
             return
         self._active_word_session_id = None

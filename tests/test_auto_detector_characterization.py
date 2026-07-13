@@ -136,16 +136,16 @@ def test_source_dictionary_match_short_circuits_ngrams():
     assert ngrams.calls == []
 
 
-def test_target_dictionary_match_short_circuits_ngrams():
+def test_target_dictionary_match_does_not_decide_at_boundary():
     dictionary = _Dictionary((True, "converted to Russian word 'привет'"))
     ngrams = _Ngrams({})
     detector = _detector(dictionary=dictionary, ngrams=ngrams)
 
     assert detector.should_convert("ghbdtn", "en") == (
-        True,
-        "converted to Russian word 'привет'",
+        False,
+        "no evidence of wrong layout",
     )
-    assert ngrams.calls == []
+    assert ngrams.calls == [("привет", "ru"), ("ghbdtn", "en")]
 
 
 def test_ngram_delta_converts_after_dictionary_miss():
@@ -163,7 +163,7 @@ def test_ngram_delta_converts_after_dictionary_miss():
     )
 
 
-def test_zero_source_fallback_converts_long_word():
+def test_zero_source_without_positive_target_evidence_keeps_word():
     ngrams = _Ngrams(
         {
             ("фывф", "ru"): 0.0,
@@ -173,8 +173,8 @@ def test_zero_source_fallback_converts_long_word():
     detector = _detector(ngrams=ngrams)
 
     assert detector.should_convert("asdf", "en") == (
-        True,
-        "ngram: zero source score, likely wrong layout",
+        False,
+        "no evidence of wrong layout",
     )
 
 

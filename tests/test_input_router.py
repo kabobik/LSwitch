@@ -223,10 +223,15 @@ def test_successful_mid_word_switch_finalizes_segment_but_keeps_word_session():
 
 def test_text_after_mid_word_switch_keeps_correlation_until_space():
     try_mid_word_auto_conversion = MagicMock(side_effect=[True, False])
+    try_auto_conversion_at_space = MagicMock(return_value=False)
+    clear_last_auto_marker = MagicMock()
     close_trace_session = MagicMock()
     router, _state_manager, _selection_tracker = _router(
+        auto_conversion_enabled=lambda: True,
+        try_auto_conversion_at_space=try_auto_conversion_at_space,
         mid_word_auto_conversion_enabled=lambda: True,
         try_mid_word_auto_conversion=try_mid_word_auto_conversion,
+        clear_last_auto_marker=clear_last_auto_marker,
         close_trace_session=close_trace_session,
     )
     key_b = 48
@@ -238,16 +243,17 @@ def test_text_after_mid_word_switch_keeps_correlation_until_space():
 
     assert [call.args[0] for call in try_mid_word_auto_conversion.call_args_list] == [
         1,
-        1,
     ]
 
     router.on_key_press(_event(EventType.KEY_PRESS, KEY_SPACE))
 
+    try_auto_conversion_at_space.assert_not_called()
+    clear_last_auto_marker.assert_called_once_with()
     assert close_trace_session.call_args_list[-1].args == (1,)
     assert router.active_word_session_id is None
 
 
-def test_mid_word_conversion_tail_and_boundary_trace_lifecycle():
+def test_mid_word_conversion_suppresses_tail_and_boundary_decisions():
     recorder = DecisionTraceRecorder(enabled=True)
     attempts = iter(
         (
@@ -280,17 +286,7 @@ def test_mid_word_conversion_tail_and_boundary_trace_lifecycle():
             return True
         return False
 
-    def try_space(correlation_id):
-        recorder.upsert_attempt(
-            correlation_id,
-            TraceTrigger.SPACE_AUTO,
-            DecisionAttempt(candidate="hello", outcome=DecisionOutcome.KEEP),
-        )
-        recorder.finalize_session(
-            correlation_id,
-            TraceTrigger.SPACE_AUTO,
-        )
-        return False
+    try_space = MagicMock(return_value=False)
 
     router, _state_manager, _selection_tracker = _router(
         auto_conversion_enabled=lambda: True,
@@ -306,28 +302,20 @@ def test_mid_word_conversion_tail_and_boundary_trace_lifecycle():
     router.on_key_press(_event(EventType.KEY_PRESS, key_b))
     router.on_key_release(_event(EventType.KEY_RELEASE, key_b))
 
-    converted, tail = recorder.snapshot()
-    assert converted.correlation_id == tail.correlation_id == 1
+    (converted,) = recorder.snapshot()
+    assert converted.correlation_id == 1
     assert converted.lifecycle is TraceLifecycle.FINALIZED
-    assert tail.lifecycle is TraceLifecycle.ACTIVE
 
     router.on_key_press(_event(EventType.KEY_PRESS, KEY_SPACE))
 
-    converted, tail, boundary = recorder.snapshot()
-    assert (
-        converted.correlation_id
-        == tail.correlation_id
-        == boundary.correlation_id
-        == 1
-    )
-    assert tail.lifecycle is TraceLifecycle.FINALIZED
-    assert boundary.trigger is TraceTrigger.SPACE_AUTO
-    assert boundary.lifecycle is TraceLifecycle.FINALIZED
+    (converted,) = recorder.snapshot()
+    assert converted.correlation_id == 1
+    try_space.assert_not_called()
 
     router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
     router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
 
-    next_word = recorder.snapshot()[3]
+    next_word = recorder.snapshot()[1]
     assert next_word.correlation_id == 2
     assert next_word.lifecycle is TraceLifecycle.ACTIVE
 
