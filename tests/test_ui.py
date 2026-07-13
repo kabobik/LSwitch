@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 import types
+from html import escape
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
@@ -645,9 +646,12 @@ class TestConfigDialog:
 
         for binding in SETTINGS_BINDINGS:
             icon = dlg._setting_help_icons[binding.path]
+            tooltip = icon.toolTip()
             assert icon.text() == "ⓘ"
-            assert icon.toolTip() == t(binding.help_key)
-            assert icon.toolTip() != binding.help_key
+            assert 'width="260"' in tooltip
+            assert 'font-size: 11px' in tooltip
+            assert escape(t(binding.help_key)) in tooltip
+            assert binding.help_key not in tooltip
 
     def test_help_remains_available_for_disabled_child_setting(
         self,

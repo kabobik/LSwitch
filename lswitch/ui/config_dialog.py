@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from html import escape
 
 from PyQt6.QtGui import QKeySequence
 from PyQt6.QtWidgets import (
@@ -56,6 +57,8 @@ _STRATEGY_LABEL_KEYS = {
     "primary_selection": "settings_strategy_primary",
     "disabled": "settings_strategy_disabled",
 }
+_HELP_TOOLTIP_WIDTH_PX = 260
+_HELP_TOOLTIP_FONT_SIZE_PX = 11
 
 
 class ConfigDialog(QDialog):
@@ -256,7 +259,7 @@ class ConfigDialog(QDialog):
     def _create_help_icon(self, binding) -> QLabel:
         description = t(binding.help_key)
         icon = QLabel("ⓘ")
-        icon.setToolTip(description)
+        icon.setToolTip(self._format_help_tooltip(description))
         if hasattr(icon, "setToolTipDuration"):
             icon.setToolTipDuration(30_000)
         if hasattr(icon, "setStyleSheet"):
@@ -268,6 +271,15 @@ class ConfigDialog(QDialog):
         if hasattr(icon, "setAccessibleDescription"):
             icon.setAccessibleDescription(description)
         return icon
+
+    @staticmethod
+    def _format_help_tooltip(description: str) -> str:
+        return (
+            f'<table width="{_HELP_TOOLTIP_WIDTH_PX}" '
+            'cellspacing="0" cellpadding="0"><tr><td>'
+            f'<span style="font-size: {_HELP_TOOLTIP_FONT_SIZE_PX}px;">'
+            f'{escape(description)}</span></td></tr></table>'
+        )
 
     def _create_control(self, binding):
         if binding.widget == "bool":
