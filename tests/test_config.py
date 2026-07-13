@@ -89,6 +89,7 @@ class TestValidateConfig:
         })
         assert result['double_click_timeout'] == 0.5
         assert result['debug'] is True
+        assert result['layout_switch_key'] == 'CapsLock'
         assert result['auto_switch_threshold'] == 5
         assert result['auto_switch_mid_word'] is True
         assert result['mid_word_min_prefix_len'] == 5
@@ -118,6 +119,15 @@ class TestValidateConfig:
     def test_invalid_layout_switch_key_empty(self):
         with pytest.raises(ValueError, match="layout_switch_key"):
             validate_config({'layout_switch_key': ''})
+
+    def test_invalid_layout_switch_key_name(self):
+        with pytest.raises(ValueError, match="layout_switch_key"):
+            validate_config({'layout_switch_key': 'Hyper+Moon'})
+
+    def test_legacy_layout_switch_key_is_canonicalized(self):
+        result = validate_config({'layout_switch_key': 'Alt_L+Shift_L'})
+
+        assert result['layout_switch_key'] == 'Alt+Shift'
 
     def test_invalid_auto_switch_threshold_negative(self):
         with pytest.raises(ValueError, match="auto_switch_threshold"):

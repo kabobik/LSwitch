@@ -5,7 +5,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from lswitch.core.retype_service import KEY_BACKSPACE, RetypeService
+from lswitch.core.layout_switch_controller import LayoutSwitchController
 from lswitch.platform.xkb_adapter import LayoutInfo
+from tests.conftest import MockXKBAdapter
 
 
 def _event(code: int):
@@ -84,3 +86,55 @@ def test_retype_events_returns_false_when_layout_switch_fails():
     assert ok is False
     virtual_kb.tap_key.assert_called_once_with(KEY_BACKSPACE, 1)
     virtual_kb.replay_events.assert_not_called()
+
+
+def test_retype_policy_restores_source_layout_after_successful_replay():
+    virtual_kb = MagicMock()
+    xkb = MockXKBAdapter()
+    controller = LayoutSwitchController(
+        xkb=xkb,
+        virtual_kb=virtual_kb,
+        keep_target_after_conversion=False,
+    )
+    service = RetypeService(
+        virtual_kb,
+        xkb,
+        layout_switch_controller=controller,
+    )
+
+    ok = service.retype_events(
+        [_event(16)],
+        delete_count=1,
+        target_layout=xkb.get_layouts()[1],
+        before_replay_delay=0,
+    )
+
+    assert ok is True
+    assert xkb.get_current_layout().name == "en"
+    assert [target.name for target in xkb.switch_calls] == ["ru", "en"]
+
+
+def test_retype_policy_keeps_target_layout_after_successful_replay():
+    virtual_kb = MagicMock()
+    xkb = MockXKBAdapter()
+    controller = LayoutSwitchController(
+        xkb=xkb,
+        virtual_kb=virtual_kb,
+        keep_target_after_conversion=True,
+    )
+    service = RetypeService(
+        virtual_kb,
+        xkb,
+        layout_switch_controller=controller,
+    )
+
+    ok = service.retype_events(
+        [_event(16)],
+        delete_count=1,
+        target_layout=xkb.get_layouts()[1],
+        before_replay_delay=0,
+    )
+
+    assert ok is True
+    assert xkb.get_current_layout().name == "ru"
+    assert [target.name for target in xkb.switch_calls] == ["ru"]

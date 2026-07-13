@@ -23,11 +23,15 @@ def create_space_auto_conversion_use_case(
     learning_service,
     timing: dict,
     debug: bool,
+    layout_switch_controller=None,
 ):
     """Create the space-triggered auto-conversion use case."""
     from lswitch.core.conversion_use_cases import SpaceAutoConversionUseCase
     from lswitch.core.retype_service import RetypeService
 
+    retype_kwargs = {"debug": debug}
+    if layout_switch_controller is not None:
+        retype_kwargs["layout_switch_controller"] = layout_switch_controller
     return SpaceAutoConversionUseCase(
         auto_detector=auto_detector,
         typed_buffer=typed_buffer,
@@ -35,7 +39,7 @@ def create_space_auto_conversion_use_case(
         retype_service=RetypeService(
             virtual_kb,
             xkb,
-            debug=debug,
+            **retype_kwargs,
         ),
         learning_service=learning_service,
         timing=timing,
@@ -51,11 +55,15 @@ def create_mid_word_auto_conversion_use_case(
     virtual_kb,
     timing: dict,
     debug: bool,
+    layout_switch_controller=None,
 ):
     """Create the mid-word auto-conversion use case."""
     from lswitch.core.conversion_use_cases import MidWordAutoConversionUseCase
     from lswitch.core.retype_service import RetypeService
 
+    retype_kwargs = {"debug": debug}
+    if layout_switch_controller is not None:
+        retype_kwargs["layout_switch_controller"] = layout_switch_controller
     return MidWordAutoConversionUseCase(
         mid_word_detector=mid_word_detector,
         typed_buffer=typed_buffer,
@@ -63,7 +71,7 @@ def create_mid_word_auto_conversion_use_case(
         retype_service=RetypeService(
             virtual_kb,
             xkb,
-            debug=debug,
+            **retype_kwargs,
         ),
         timing=timing,
         debug=debug,
@@ -82,6 +90,7 @@ def create_synced_space_auto_conversion_use_case(
     timing: dict,
     debug: bool,
     manual_weight_step: int,
+    layout_switch_controller=None,
 ):
     """Create space auto-conversion use case with learning service synced first."""
     return create_space_auto_conversion_use_case(
@@ -98,6 +107,7 @@ def create_synced_space_auto_conversion_use_case(
         ),
         timing=timing,
         debug=debug,
+        layout_switch_controller=layout_switch_controller,
     )
 
 
@@ -116,24 +126,30 @@ def create_manual_conversion_controller(
     decode_events,
     extract_last_word,
     update_selection_baseline,
+    layout_switch_controller=None,
 ):
     """Create the manual conversion orchestration controller."""
     from lswitch.core.manual_conversion_controller import ManualConversionController
 
+    kwargs = {
+        "state_manager": state_manager,
+        "selection_tracker": selection_tracker,
+        "typed_buffer": typed_buffer,
+        "learning_service": learning_service,
+        "conversion_engine": conversion_engine,
+        "virtual_kb": virtual_kb,
+        "xkb": xkb,
+        "selection": selection,
+        "timing": timing,
+        "debug": debug,
+        "decode_events": decode_events,
+        "extract_last_word": extract_last_word,
+        "update_selection_baseline": update_selection_baseline,
+    }
+    if layout_switch_controller is not None:
+        kwargs["layout_switch_controller"] = layout_switch_controller
     return ManualConversionController(
-        state_manager=state_manager,
-        selection_tracker=selection_tracker,
-        typed_buffer=typed_buffer,
-        learning_service=learning_service,
-        conversion_engine=conversion_engine,
-        virtual_kb=virtual_kb,
-        xkb=xkb,
-        selection=selection,
-        timing=timing,
-        debug=debug,
-        decode_events=decode_events,
-        extract_last_word=extract_last_word,
-        update_selection_baseline=update_selection_baseline,
+        **kwargs,
     )
 
 
@@ -155,6 +171,7 @@ def create_synced_manual_conversion_controller(
     decode_events,
     extract_last_word,
     update_selection_baseline,
+    layout_switch_controller=None,
 ):
     """Create manual conversion controller with learning service synced first."""
     return create_manual_conversion_controller(
@@ -177,6 +194,7 @@ def create_synced_manual_conversion_controller(
         decode_events=decode_events,
         extract_last_word=extract_last_word,
         update_selection_baseline=update_selection_baseline,
+        layout_switch_controller=layout_switch_controller,
     )
 
 
@@ -312,6 +330,7 @@ class ConversionRuntimeFacade:
         get_timing,
         debug: bool,
         manual_weight_step: int,
+        get_layout_switch_controller=None,
     ):
         self.state_manager = state_manager
         self.selection_tracker = selection_tracker
@@ -328,6 +347,9 @@ class ConversionRuntimeFacade:
         self.get_platform = get_platform
         self.get_user_dict = get_user_dict
         self.get_timing = get_timing
+        self.get_layout_switch_controller = (
+            get_layout_switch_controller or (lambda: None)
+        )
         self.debug = debug
         self.manual_weight_step = manual_weight_step
 
@@ -351,6 +373,7 @@ class ConversionRuntimeFacade:
                 decode_events=self.decode_buffer,
                 extract_last_word=self.extract_last_word,
                 update_selection_baseline=self.update_selection_baseline,
+                layout_switch_controller=self.get_layout_switch_controller(),
             ),
             session=self.auto_conversion_session,
         )
@@ -435,6 +458,7 @@ class ConversionRuntimeFacade:
             timing=self.get_timing(),
             debug=self.debug,
             manual_weight_step=self.manual_weight_step,
+            layout_switch_controller=self.get_layout_switch_controller(),
         )
 
     def create_mid_word_auto_conversion_use_case(self):
@@ -446,4 +470,5 @@ class ConversionRuntimeFacade:
             virtual_kb=self.get_virtual_kb(),
             timing=self.get_timing(),
             debug=self.debug,
+            layout_switch_controller=self.get_layout_switch_controller(),
         )

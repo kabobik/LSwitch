@@ -9,6 +9,7 @@ import pytest
 
 from lswitch.app import LSwitchApp
 from lswitch.runtime import PidLock
+from lswitch.core.layout_switch_controller import LayoutSwitchController
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.states import State
 
@@ -190,6 +191,30 @@ class TestRuntimeConfig:
         assert app.conversion_engine.debug is False
         assert app.learning_service.debug is False
         root_logger.setLevel.assert_called_once_with(20)
+
+    def test_layout_policy_and_fallback_shortcut_update_without_restart(self):
+        app = _make_app()
+        app.layout_switch_controller = LayoutSwitchController(
+            xkb=app.xkb,
+            virtual_kb=app.virtual_kb,
+        )
+        controller_identity = id(app.layout_switch_controller)
+        candidate = app.config.get_all()
+        candidate["switch_layout_after_convert"] = False
+        candidate["layout_switch_key"] = "Caps_Lock"
+
+        result = app.config_controller.apply(
+            candidate,
+            source="test",
+            persist=False,
+        )
+
+        policy = app.layout_switch_controller.policy_snapshot()
+        assert result.ok is True
+        assert id(app.layout_switch_controller) == controller_identity
+        assert policy.keep_target_after_conversion is False
+        assert policy.fallback_shortcut.canonical == "CapsLock"
+        assert app.config.get("layout_switch_key") == "CapsLock"
 
     def test_unrelated_config_change_does_not_rebuild_mid_word_runtime(self):
         app = _make_app()

@@ -364,6 +364,7 @@ def apply_runtime_config_update(
     selection_tracker=None,
     event_manager=None,
     device_manager=None,
+    layout_switch_controller=None,
 ) -> AppliedRuntimeConfig:
     """Apply runtime config changes and sync mutable services."""
     timing = apply_runtime_timing_config(
@@ -374,6 +375,17 @@ def apply_runtime_config_update(
     state_manager.debug = bool(debug)
     if conversion_engine is not None:
         conversion_engine.debug = bool(debug)
+    if layout_switch_controller is not None:
+        layout_switch_controller.reconfigure(
+            keep_target_after_conversion=config.get(
+                "switch_layout_after_convert",
+                True,
+            ),
+            fallback_shortcut=config.get(
+                "layout_switch_key",
+                "Alt+Shift",
+            ),
+        )
     strategy_changed = apply_platform_runtime_config(
         config=config,
         snapshot=timing,

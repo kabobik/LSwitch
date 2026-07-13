@@ -40,6 +40,7 @@ class ManualConversionController:
         decode_events,
         extract_last_word,
         update_selection_baseline,
+        layout_switch_controller=None,
     ):
         self.state_manager = state_manager
         self.selection_tracker = selection_tracker
@@ -54,6 +55,7 @@ class ManualConversionController:
         self.decode_events = decode_events
         self.extract_last_word = extract_last_word
         self.update_selection_baseline = update_selection_baseline
+        self.layout_switch_controller = layout_switch_controller
 
     def execute(
         self,
@@ -79,6 +81,7 @@ class ManualConversionController:
                     learning_service=self.learning_service,
                     timing=self.timing,
                     debug=self.debug,
+                    layout_switch_controller=self.layout_switch_controller,
                 )
             )
             result = recent_auto.execute(

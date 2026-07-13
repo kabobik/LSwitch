@@ -12,6 +12,15 @@ from lswitch.core.input_router import (
     InputSelectionPort,
 )
 from lswitch.core.learning_service import LearningService
+from lswitch.core.layout_switch_controller import (
+    LayoutSwitchController,
+    LayoutSwitchError,
+    LayoutSwitchOperation,
+    LayoutSwitchPolicy,
+    ParsedKeySequence,
+    normalize_key_sequence,
+    parse_key_sequence,
+)
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
 from lswitch.core.typed_buffer import TypedBufferService

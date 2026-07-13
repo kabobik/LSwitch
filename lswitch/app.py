@@ -11,6 +11,7 @@ from lswitch.core.auto_conversion_session import AutoConversionSessionState
 from lswitch.runtime import (
     ConversionRuntimeFacade,
     PidLock,
+    LayoutSwitchController,
     RuntimeConfigController,
     RuntimeLoggingController,
     SelectionPollerThread,
@@ -104,6 +105,7 @@ class LSwitchApp:
             get_platform=lambda: self._platform,
             get_user_dict=lambda: self.user_dict,
             get_timing=lambda: self.timing,
+            get_layout_switch_controller=lambda: self.layout_switch_controller,
             debug=self.debug,
             manual_weight_step=self.MANUAL_WEIGHT_STEP,
         )
@@ -138,6 +140,7 @@ class LSwitchApp:
         self.user_dict = None
         self._mid_word_runtime_signature = None
         self._platform = None
+        self.layout_switch_controller = None
         self._selection_poller: SelectionPollerThread | None = None
         self.config_controller = RuntimeConfigController(
             config=self.config,
@@ -188,6 +191,18 @@ class LSwitchApp:
         self.xkb = self._platform.xkb
         self.selection = self._platform.selection
         self.virtual_kb = self._platform.virtual_kb
+        self.layout_switch_controller = LayoutSwitchController(
+            xkb=self.xkb,
+            virtual_kb=self.virtual_kb,
+            keep_target_after_conversion=self.config.get(
+                "switch_layout_after_convert",
+                True,
+            ),
+            fallback_shortcut=self.config.get(
+                "layout_switch_key",
+                "Alt+Shift",
+            ),
+        )
 
         conversion_runtime = platform_runtime.conversion
         self.dictionary = conversion_runtime.dictionary
@@ -195,6 +210,9 @@ class LSwitchApp:
         self.auto_detector = conversion_runtime.auto_detector
         self.mid_word_detector = conversion_runtime.mid_word_detector
         self.conversion_engine = conversion_runtime.conversion_engine
+        self.conversion_engine.layout_switch_controller = (
+            self.layout_switch_controller
+        )
         self._mid_word_runtime_signature = (
             self._current_mid_word_runtime_signature()
         )
@@ -258,6 +276,7 @@ class LSwitchApp:
             selection_tracker=self.selection_tracker,
             event_manager=self.event_manager,
             device_manager=self.device_manager,
+            layout_switch_controller=self.layout_switch_controller,
         )
         timing_config = applied.timing
         self.timing = timing_config.timing

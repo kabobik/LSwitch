@@ -131,7 +131,7 @@ DEFAULT_CONFIG: dict = {
     'double_click_timeout': 0.3,
     'debug': False,
     'switch_layout_after_convert': True,
-    'layout_switch_key': 'Alt_L+Shift_L',
+    'layout_switch_key': 'Alt+Shift',
     'auto_switch': False,
     'auto_switch_threshold': 0,
     'auto_switch_mid_word': False,
@@ -353,11 +353,14 @@ def validate_config(conf: dict | None) -> dict:
         raise ValueError("Invalid 'switch_layout_after_convert': must be boolean")
     out['switch_layout_after_convert'] = sl
 
-    # layout_switch_key — non-empty string
+    # layout_switch_key — validated canonical shortcut
     lsk = conf.get('layout_switch_key', defaults['layout_switch_key'])
-    if not isinstance(lsk, str) or not lsk:
-        raise ValueError("Invalid 'layout_switch_key': must be a non-empty string")
-    out['layout_switch_key'] = lsk
+    try:
+        from lswitch.core.layout_switch_controller import normalize_key_sequence
+
+        out['layout_switch_key'] = normalize_key_sequence(lsk)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid 'layout_switch_key': {exc}") from exc
 
     # auto_switch — boolean
     autos = conf.get('auto_switch', defaults['auto_switch'])

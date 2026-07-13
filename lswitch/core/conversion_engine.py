@@ -30,6 +30,7 @@ class ConversionEngine:
         user_dict: "UserDictionary | None" = None,
         debug: bool = False,
         timing: dict | None = None,
+        layout_switch_controller=None,
     ):
         self.xkb = xkb
         self.selection = selection
@@ -39,6 +40,7 @@ class ConversionEngine:
         self.user_dict = user_dict
         self.debug = debug
         self.timing = timing or {}
+        self.layout_switch_controller = layout_switch_controller
         self.last_conversion: dict | None = None
 
     def choose_mode(self, context: "StateContext", selection_valid: bool = False) -> str:
@@ -85,6 +87,7 @@ class ConversionEngine:
                 self.system,
                 self.debug,
                 timing=self.timing,
+                layout_switch_controller=self.layout_switch_controller,
             )
             return retype.execute(context)
         elif mode == "selection_expand":
@@ -95,6 +98,7 @@ class ConversionEngine:
                 self.debug,
                 expand=True,
                 timing=self.timing,
+                layout_switch_controller=self.layout_switch_controller,
             )
             success = sel_mode.execute(context)
             if success:
@@ -107,6 +111,7 @@ class ConversionEngine:
                 self.system,
                 self.debug,
                 timing=self.timing,
+                layout_switch_controller=self.layout_switch_controller,
             )
             success = sel_mode.execute(context)
             if success:

@@ -24,10 +24,12 @@ class RetypeService:
         xkb: "IXKBAdapter",
         *,
         debug: bool = False,
+        layout_switch_controller=None,
     ):
         self.virtual_kb = virtual_kb
         self.xkb = xkb
         self.debug = debug
+        self.layout_switch_controller = layout_switch_controller
 
     def retype_events(
         self,
@@ -44,6 +46,11 @@ class RetypeService:
             return False
 
         saved_events = list(events)
+        operation = (
+            self.layout_switch_controller.begin_operation()
+            if self.layout_switch_controller is not None
+            else None
+        )
         if self.debug:
             logger.debug(
                 "RetypeService: start — delete=%d, events=%d, codes=%s",
@@ -60,9 +67,17 @@ class RetypeService:
 
         try:
             if target_layout is not None:
-                new_layout = self.xkb.switch_layout(target=target_layout)
+                new_layout = (
+                    operation.switch_to(target_layout)
+                    if operation is not None
+                    else self.xkb.switch_layout(target=target_layout)
+                )
             elif switch_to_next:
-                new_layout = self.xkb.switch_layout()
+                new_layout = (
+                    operation.switch_to()
+                    if operation is not None
+                    else self.xkb.switch_layout()
+                )
             else:
                 new_layout = None
             if new_layout is not None:
@@ -72,6 +87,8 @@ class RetypeService:
                 )
         except Exception as exc:
             logger.error("RetypeService: switch_layout failed: %s", exc)
+            if operation is not None:
+                operation.finish(success=False)
             return False
 
         time.sleep(before_replay_delay)
@@ -82,7 +99,16 @@ class RetypeService:
                 len(saved_events),
                 [getattr(event, "code", "?") for event in saved_events],
             )
-        self.virtual_kb.replay_events(saved_events)
+        try:
+            self.virtual_kb.replay_events(saved_events)
+        except Exception as exc:
+            logger.error("RetypeService: replay failed: %s", exc)
+            if operation is not None:
+                operation.finish(success=False)
+            return False
+
+        if operation is not None:
+            operation.finish(success=True)
 
         logger.debug(
             "RetypeService: done — deleted=%d, replayed=%d",

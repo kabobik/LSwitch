@@ -19,6 +19,7 @@ from lswitch.core.conversion_use_cases import (
 )
 from lswitch.core.events import KeyEventData
 from lswitch.core.layout_service import LayoutService
+from lswitch.core.layout_switch_controller import LayoutSwitchController
 from lswitch.core.learning_service import PendingManualLearning
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.states import State, StateContext
@@ -27,7 +28,9 @@ from lswitch.intelligence.mid_word_detector import MidWordDecision, MidWordDetec
 from lswitch.intelligence.prefix_dictionary import PrefixDictionary
 from lswitch.intelligence.user_dictionary import UserDictionary
 from lswitch.input.key_mapper import keycode_to_char
+from lswitch.core.retype_service import RetypeService
 from lswitch.platform.xkb_adapter import LayoutInfo
+from tests.conftest import MockXKBAdapter
 
 
 def test_undo_auto_conversion_replays_original_events_and_records_correction():
@@ -94,6 +97,34 @@ def test_undo_auto_conversion_without_space_does_not_readd_space():
     assert ok is True
     virtual_kb.tap_key.assert_called_once_with(KEY_BACKSPACE, n_times=3)
     virtual_kb.replay_events.assert_called_once_with([])
+
+
+def test_undo_policy_restores_layout_active_before_undo():
+    marker = AutoConversionMarker.for_space_conversion(
+        original_word="ghbdtn",
+        original_lang="en",
+        direction="en_to_ru",
+        word_events=[],
+    )
+    virtual_kb = MagicMock()
+    xkb = MockXKBAdapter()
+    xkb.switch_layout(target=xkb.get_layouts()[1])
+    xkb.switch_calls.clear()
+    controller = LayoutSwitchController(
+        xkb=xkb,
+        virtual_kb=virtual_kb,
+        keep_target_after_conversion=False,
+    )
+    use_case = UndoAutoConversionUseCase(
+        virtual_kb=virtual_kb,
+        xkb=xkb,
+        timing={"undo_before_replay_delay": 0},
+        layout_switch_controller=controller,
+    )
+
+    assert use_case.execute(marker) is True
+    assert xkb.get_current_layout().name == "ru"
+    assert [target.name for target in xkb.switch_calls] == ["en", "ru"]
 
 
 def test_mid_word_undo_persists_protection_for_detector(tmp_path):
@@ -589,6 +620,39 @@ def test_space_auto_conversion_use_case_retypes_word_and_returns_marker():
     assert context.state == State.IDLE
 
 
+def test_space_auto_conversion_policy_restores_source_layout():
+    virtual_kb = MagicMock()
+    xkb = MockXKBAdapter()
+    controller = LayoutSwitchController(
+        xkb=xkb,
+        virtual_kb=virtual_kb,
+        keep_target_after_conversion=False,
+    )
+    use_case = SpaceAutoConversionUseCase(
+        auto_detector=MagicMock(),
+        typed_buffer=TypedBufferService(),
+        xkb=xkb,
+        retype_service=RetypeService(
+            virtual_kb,
+            xkb,
+            layout_switch_controller=controller,
+        ),
+        learning_service=MagicMock(),
+        timing={"auto_before_replay_delay": 0, "auto_before_space_delay": 0},
+    )
+
+    result = use_case.perform_conversion(
+        context=_context_with_events([34, 35]),
+        word_len=2,
+        word_events=[KeyEventData(code=34, value=1)],
+        direction="en_to_ru",
+    )
+
+    assert result.space_consumed is True
+    assert xkb.get_current_layout().name == "en"
+    assert [target.name for target in xkb.switch_calls] == ["ru", "en"]
+
+
 def test_space_auto_conversion_use_case_consumes_previous_marker_without_conversion():
     use_case, _xkb, retype_service, learning_service = _space_auto_use_case(
         should_convert=False
@@ -714,6 +778,45 @@ def test_mid_word_auto_conversion_use_case_retypes_prefix_and_returns_marker():
     assert context.event_buffer == []
     assert context.chars_in_buffer == 0
     assert context.state == State.IDLE
+
+
+def test_mid_word_auto_conversion_policy_restores_source_layout():
+    decision = MidWordDecision(
+        should_switch=True,
+        reason="target prefix found",
+        current_lang="en",
+        target_lang="ru",
+    )
+    candidate = AutoConversionCandidate(
+        text="ghbd",
+        events=[KeyEventData(code=34, value=1)],
+        current_lang="en",
+    )
+    virtual_kb = MagicMock()
+    xkb = MockXKBAdapter()
+    controller = LayoutSwitchController(
+        xkb=xkb,
+        virtual_kb=virtual_kb,
+        keep_target_after_conversion=False,
+    )
+    use_case = MidWordAutoConversionUseCase(
+        mid_word_detector=_MidWordDetector(decision),
+        typed_buffer=MagicMock(),
+        xkb=xkb,
+        retype_service=RetypeService(
+            virtual_kb,
+            xkb,
+            layout_switch_controller=controller,
+        ),
+        timing={"mid_word_before_replay_delay": 0},
+        candidate_provider=_CandidateProvider(candidate),
+    )
+
+    result = use_case.execute(context=_context_with_events([34]))
+
+    assert result.switched is True
+    assert xkb.get_current_layout().name == "en"
+    assert [target.name for target in xkb.switch_calls] == ["ru", "en"]
 
 
 def test_mid_word_auto_conversion_use_case_skips_when_detector_rejects():

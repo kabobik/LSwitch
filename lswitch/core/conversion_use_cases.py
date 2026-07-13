@@ -107,6 +107,7 @@ class UndoAutoConversionUseCase:
         learning_service: "LearningService | None" = None,
         timing: dict | None = None,
         debug: bool = False,
+        layout_switch_controller=None,
     ):
         self.virtual_kb = virtual_kb
         self.xkb = xkb
@@ -118,9 +119,15 @@ class UndoAutoConversionUseCase:
         self.layout_service = LayoutService(xkb)
         self.timing = timing or {}
         self.debug = debug
+        self.layout_switch_controller = layout_switch_controller
 
     def execute(self, marker: AutoConversionMarker) -> bool:
         self.learning_service.record_auto_undo_correction(marker)
+        operation = (
+            self.layout_switch_controller.begin_operation()
+            if self.layout_switch_controller is not None
+            else None
+        )
 
         try:
             self.virtual_kb.tap_key(
@@ -131,14 +138,21 @@ class UndoAutoConversionUseCase:
                 marker.original_lang
             )
             if target is not None:
-                self.xkb.switch_layout(target=target)
+                if operation is not None:
+                    operation.switch_to(target)
+                else:
+                    self.xkb.switch_layout(target=target)
             time.sleep(self.timing.get("undo_before_replay_delay", 0.03))
             self.virtual_kb.replay_events(marker.word_events)
             if marker.had_space:
                 self.virtual_kb.tap_key(KEY_SPACE)
+            if operation is not None:
+                operation.finish(success=True)
             return True
         except Exception as exc:
             logger.error("Undo auto-conversion failed: %s", exc)
+            if operation is not None:
+                operation.finish(success=False)
             return False
 
 

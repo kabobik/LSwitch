@@ -54,11 +54,13 @@ class RetypeMode(BaseMode):
         system: "ISystemAdapter",
         debug: bool = False,
         timing: dict | None = None,
+        layout_switch_controller=None,
     ):
         self.virtual_kb = virtual_kb
         self.xkb = xkb
         self.system = system
         self.debug = debug
+        self.layout_switch_controller = layout_switch_controller
         timing = timing or {}
         self.before_replay_delay = float(
             timing.get("retype_before_replay_delay", 0.05)
@@ -87,6 +89,7 @@ class RetypeMode(BaseMode):
             self.virtual_kb,
             self.xkb,
             debug=self.debug,
+            layout_switch_controller=self.layout_switch_controller,
         )
         return service.retype_events(
             saved_events,
@@ -107,12 +110,14 @@ class SelectionMode(BaseMode):
         debug: bool = False,
         expand: bool = False,
         timing: dict | None = None,
+        layout_switch_controller=None,
     ):
         self.selection = selection
         self.xkb = xkb
         self.system = system
         self.debug = debug
         self.expand = expand
+        self.layout_switch_controller = layout_switch_controller
         self.last_original: str = ""
         self.last_converted: str = ""
         self.last_target_lang: str | None = None
@@ -147,6 +152,11 @@ class SelectionMode(BaseMode):
 
         layouts = self.xkb.get_layouts()
         target_layout = self._find_layout_for_lang(layouts, final_target_lang)
+        operation = (
+            self.layout_switch_controller.begin_operation()
+            if self.layout_switch_controller is not None
+            else None
+        )
 
         direct_replacement = None
         if getattr(type(self.selection), "prefers_direct_replacement", None) is not None:
@@ -167,15 +177,40 @@ class SelectionMode(BaseMode):
                         "SelectionMode: direct replacement skipped, no target layout for %s",
                         run_lang or fallback_lang,
                     )
+                    if operation is not None:
+                        operation.finish(success=False)
                     return False
-                self.xkb.switch_layout(target=layout)
+                try:
+                    if operation is not None:
+                        operation.switch_to(layout)
+                    else:
+                        self.xkb.switch_layout(target=layout)
+                except Exception as exc:
+                    logger.error("SelectionMode: layout switch failed: %s", exc)
+                    if operation is not None:
+                        operation.finish(success=False)
+                    return False
                 time.sleep(self.direct_type_after_layout_switch_delay)
                 if not replace_by_typing(run_text, layout_name=layout.name):
+                    if operation is not None:
+                        operation.finish(success=False)
                     return False
         else:
             if not self.selection.replace_selection(converted):
                 return False
-            self.xkb.switch_layout(target=target_layout)  # None = cycle, which is ok as fallback
+            try:
+                if operation is None:
+                    self.xkb.switch_layout(target=target_layout)
+                elif operation.keep_target_after_conversion:
+                    operation.switch_to(target_layout)
+            except Exception as exc:
+                logger.error("SelectionMode: layout switch failed: %s", exc)
+                if operation is not None:
+                    operation.finish(success=False)
+                return False
+
+        if operation is not None:
+            operation.finish(success=True)
 
         logger.debug(
             "SelectionMode: '%s' → '%s', target_langs=%s, switching to layout '%s'",

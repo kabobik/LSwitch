@@ -8,8 +8,10 @@ from unittest.mock import MagicMock, call
 import pytest
 
 from lswitch.core.modes import SelectionMode
+from lswitch.core.layout_switch_controller import LayoutSwitchController
 from lswitch.core.states import StateContext
 from lswitch.platform.selection_adapter import SelectionInfo
+from tests.conftest import MockXKBAdapter
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +134,72 @@ class TestSelectionModeConvert:
             call(target=xkb.get_layouts.return_value[1]),
             call(target=xkb.get_layouts.return_value[0]),
         ]
+
+    def test_clipboard_policy_false_does_not_switch_persistently(self):
+        sel = MagicMock()
+        sel.get_selection.return_value = SelectionInfo(
+            text="ghbdtn",
+            owner_id=1,
+            timestamp=time.time(),
+        )
+        sel.replace_selection.return_value = True
+        xkb = MockXKBAdapter()
+        controller = LayoutSwitchController(
+            xkb=xkb,
+            virtual_kb=MagicMock(),
+            keep_target_after_conversion=False,
+        )
+        mode = SelectionMode(
+            sel,
+            xkb,
+            MagicMock(),
+            layout_switch_controller=controller,
+        )
+
+        assert mode.execute(StateContext()) is True
+        assert xkb.get_current_layout().name == "en"
+        assert xkb.switch_calls == []
+
+    def test_direct_typing_policy_false_restores_source_layout(self):
+        sel = _DirectSelectionAdapter("ghbdtn")
+        xkb = MockXKBAdapter()
+        controller = LayoutSwitchController(
+            xkb=xkb,
+            virtual_kb=MagicMock(),
+            keep_target_after_conversion=False,
+        )
+        mode = SelectionMode(
+            sel,
+            xkb,
+            MagicMock(),
+            timing={"direct_type_after_layout_switch_delay": 0},
+            layout_switch_controller=controller,
+        )
+
+        assert mode.execute(StateContext()) is True
+        assert sel.typed_calls == [("привет", "ru")]
+        assert xkb.get_current_layout().name == "en"
+        assert [target.name for target in xkb.switch_calls] == ["ru", "en"]
+
+    def test_mixed_direct_typing_policy_true_leaves_last_target_layout(self):
+        sel = _DirectSelectionAdapter("Ghbdtn\nПривет")
+        xkb = MockXKBAdapter()
+        controller = LayoutSwitchController(
+            xkb=xkb,
+            virtual_kb=MagicMock(),
+            keep_target_after_conversion=True,
+        )
+        mode = SelectionMode(
+            sel,
+            xkb,
+            MagicMock(),
+            timing={"direct_type_after_layout_switch_delay": 0},
+            layout_switch_controller=controller,
+        )
+
+        assert mode.execute(StateContext()) is True
+        assert xkb.get_current_layout().name == "en"
+        assert [target.name for target in xkb.switch_calls] == ["ru", "en"]
 
 
 class TestSelectionModeEmpty:
