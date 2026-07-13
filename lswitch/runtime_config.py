@@ -66,7 +66,7 @@ class RuntimeConfigController:
         self,
         *,
         config: ConfigManager,
-        apply_runtime: Callable[[ConfigChangeSet], None] | None = None,
+        apply_runtime: Callable[[object], None] | None = None,
         prepare_runtime: Callable[[ConfigChangeSet], object] | None = None,
         event_bus=None,
         log=None,
@@ -321,11 +321,7 @@ def apply_user_dictionary_config(
 ):
     """Apply runtime user dictionary enable/disable config."""
     if config.get("user_dict_enabled"):
-        try:
-            return enable_user_dictionary()
-        except Exception as exc:
-            log.error("User dictionary initialization failed: %s", exc)
-            return None
+        return enable_user_dictionary()
 
     if user_dict is not None:
         log.info("User dictionary disabled")

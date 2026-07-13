@@ -7,6 +7,8 @@ import types
 import logging
 from unittest.mock import MagicMock
 
+import pytest
+
 import lswitch.runtime as runtime_module
 import lswitch.runtime_conversion as runtime_conversion_module
 from lswitch.core.event_bus import EventBus
@@ -1002,21 +1004,21 @@ def test_apply_user_dictionary_config_enables_dictionary():
     log.error.assert_not_called()
 
 
-def test_apply_user_dictionary_config_returns_none_when_enable_fails():
+def test_apply_user_dictionary_config_propagates_enable_failure():
     config = MagicMock()
     config.get.return_value = True
     enable_user_dictionary = MagicMock(side_effect=RuntimeError("boom"))
     log = MagicMock()
 
-    result = apply_user_dictionary_config(
-        config=config,
-        user_dict=object(),
-        enable_user_dictionary=enable_user_dictionary,
-        log=log,
-    )
+    with pytest.raises(RuntimeError, match="boom"):
+        apply_user_dictionary_config(
+            config=config,
+            user_dict=object(),
+            enable_user_dictionary=enable_user_dictionary,
+            log=log,
+        )
 
-    assert result is None
-    log.error.assert_called_once()
+    log.error.assert_not_called()
 
 
 def test_apply_user_dictionary_config_disables_existing_dictionary():

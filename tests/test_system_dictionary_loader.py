@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from lswitch.intelligence.system_dictionary_loader import SystemDictionaryLoader
 
 
@@ -63,6 +65,21 @@ def test_system_dictionary_loader_returns_none_when_missing(tmp_path):
 
     assert loader.find_dictionary("ru") is None
     assert loader.load("ru") is None
+
+
+def test_system_dictionary_loader_rejects_missing_explicit_path(tmp_path):
+    missing = tmp_path / "missing.dic"
+    loader = SystemDictionaryLoader(explicit_paths={"en": missing})
+
+    with pytest.raises(ValueError, match="EN dictionary does not exist"):
+        loader.validate_explicit_paths()
+
+
+def test_system_dictionary_loader_rejects_explicit_directory(tmp_path):
+    loader = SystemDictionaryLoader(explicit_paths={"ru": tmp_path})
+
+    with pytest.raises(ValueError, match="RU dictionary is not a regular file"):
+        loader.find_dictionary("ru")
 
 
 def test_system_dictionary_loader_supports_cp1251_files(tmp_path):

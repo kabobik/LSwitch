@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from lswitch.app import LSwitchApp
-from lswitch.runtime import PidLock
+from lswitch.runtime import PidLock, create_mid_word_detection_runtime
 from lswitch.core.layout_switch_controller import LayoutSwitchController
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.states import State
@@ -169,6 +169,76 @@ class TestRuntimeConfig:
         assert result.ok is True
         assert app.prefix_dictionary.has_prefix("en", "hell") is False
         assert app.prefix_dictionary.has_prefix("en", "hello") is True
+        assert app.mid_word_detector.min_prefix_len == 5
+
+    def test_invalid_explicit_dictionary_path_is_rejected_before_commit(
+        self,
+        tmp_path,
+    ):
+        config_path = tmp_path / "config.toml"
+        app = _make_app(config_path=str(config_path))
+        app.config.save()
+        old_file = config_path.read_text(encoding="utf-8")
+        candidate = app.config.get_all()
+        candidate["system_dict_en_path"] = str(tmp_path / "missing.dic")
+
+        result = app.config_controller.apply(candidate, source="test")
+
+        assert result.ok is False
+        assert "EN dictionary does not exist" in result.error
+        assert app.config.get("system_dict_en_path") == ""
+        assert config_path.read_text(encoding="utf-8") == old_file
+
+    def test_user_dictionary_failure_is_rejected_before_commit(self, tmp_path):
+        config_path = tmp_path / "config.toml"
+        app = _make_app(config_path=str(config_path))
+        app.config.save()
+        old_file = config_path.read_text(encoding="utf-8")
+        candidate = app.config.get_all()
+        candidate["user_dict_enabled"] = True
+
+        with patch(
+            "lswitch.intelligence.user_dictionary.UserDictionary",
+            side_effect=OSError("dictionary unavailable"),
+        ):
+            result = app.config_controller.apply(candidate, source="test")
+
+        assert result.ok is False
+        assert result.error == "dictionary unavailable"
+        assert app.config.get("user_dict_enabled") is False
+        assert app.user_dict is None
+        assert config_path.read_text(encoding="utf-8") == old_file
+
+    def test_mid_word_runtime_is_built_before_config_commit(self):
+        app = _make_app()
+        app.dictionary = MagicMock()
+        app.dictionary.words_for_lang.return_value = set()
+        candidate = app.config.get_all()
+        candidate["mid_word_min_prefix_len"] = 5
+        events = []
+        original_commit = app.config.commit_update
+
+        def commit(*args, **kwargs):
+            events.append("commit")
+            return original_commit(*args, **kwargs)
+
+        app.config.commit_update = commit
+        with patch(
+            "lswitch.app.create_mid_word_detection_runtime",
+            wraps=create_mid_word_detection_runtime,
+        ) as create_runtime:
+            create_runtime.side_effect = lambda **kwargs: (
+                events.append("prepare")
+                or create_mid_word_detection_runtime(**kwargs)
+            )
+            result = app.config_controller.apply(
+                candidate,
+                source="test",
+                persist=False,
+            )
+
+        assert result.ok is True
+        assert events == ["prepare", "commit"]
         assert app.mid_word_detector.min_prefix_len == 5
 
     def test_debug_config_updates_effective_runtime_without_restart(self):

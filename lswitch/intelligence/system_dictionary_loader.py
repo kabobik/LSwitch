@@ -83,7 +83,7 @@ class SystemDictionaryLoader:
     def find_dictionary(self, lang: str) -> Path | None:
         explicit = self.explicit_paths.get(lang)
         if explicit is not None:
-            return explicit if explicit.is_file() else None
+            return self._validate_explicit_path(lang, explicit)
 
         prefixes = self.CANDIDATE_PREFIXES.get(lang, ())
         candidates: list[tuple[int, str, Path]] = []
@@ -98,6 +98,31 @@ class SystemDictionaryLoader:
         if not candidates:
             return None
         return sorted(candidates)[0][2]
+
+    def validate_explicit_paths(self) -> None:
+        """Fail early when a configured dictionary cannot be read."""
+        for lang, path in self.explicit_paths.items():
+            self._validate_explicit_path(lang, path)
+
+    @staticmethod
+    def _validate_explicit_path(lang: str, path: Path) -> Path:
+        label = lang.upper()
+        if not path.exists():
+            raise ValueError(
+                f"Explicit {label} dictionary does not exist: {path}"
+            )
+        if not path.is_file():
+            raise ValueError(
+                f"Explicit {label} dictionary is not a regular file: {path}"
+            )
+        try:
+            with path.open("rb") as stream:
+                stream.read(1)
+        except OSError as exc:
+            raise ValueError(
+                f"Explicit {label} dictionary is not readable: {path}: {exc}"
+            ) from exc
+        return path
 
     def _read_lines(self, path: Path) -> list[str]:
         last_error: UnicodeDecodeError | None = None

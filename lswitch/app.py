@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import dataclass
 
 import lswitch.log  # registers TRACE level and logger.trace()
-from lswitch.config import ConfigManager
+from lswitch.config import ConfigChangeSet, ConfigManager
 from lswitch.core.auto_conversion_session import AutoConversionSessionState
 from lswitch.runtime import (
     ConversionRuntimeFacade,
@@ -35,6 +36,16 @@ from lswitch.runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _PreparedRuntimeConfig:
+    """Fallible resources built before the config snapshot is committed."""
+
+    change_set: ConfigChangeSet
+    user_dict: object | None
+    mid_word_runtime: object | None
+    mid_word_signature: tuple | None
 
 
 class LSwitchApp:
@@ -144,6 +155,7 @@ class LSwitchApp:
         self._selection_poller: SelectionPollerThread | None = None
         self.config_controller = RuntimeConfigController(
             config=self.config,
+            prepare_runtime=self._prepare_runtime_config,
             apply_runtime=self._apply_runtime_config,
             event_bus=self.event_bus,
             log=logger,
@@ -250,8 +262,69 @@ class LSwitchApp:
         )
         return self.user_dict
 
-    def _apply_runtime_config(self, change_set=None) -> None:
+    def _prepare_runtime_config(
+        self,
+        change_set: ConfigChangeSet,
+    ) -> _PreparedRuntimeConfig:
+        """Validate and build resources without changing active references."""
+        values = change_set.new.to_dict()
+
+        from lswitch.intelligence.system_dictionary_loader import (
+            SystemDictionaryLoader,
+        )
+
+        SystemDictionaryLoader(
+            explicit_paths={
+                "en": values.get("system_dict_en_path", ""),
+                "ru": values.get("system_dict_ru_path", ""),
+            },
+        ).validate_explicit_paths()
+
+        prepared_user_dict = None
+        if values.get("user_dict_enabled", False):
+            prepared_user_dict = enable_user_dictionary_if_needed(
+                user_dict=self.user_dict,
+                log=logger,
+            )
+
+        signature = self._mid_word_runtime_signature_for(
+            values,
+            prepared_user_dict,
+        )
+        mid_word_runtime = None
+        if (
+            self.dictionary is not None
+            and signature != self._mid_word_runtime_signature
+        ):
+            mid_word_runtime = create_mid_word_detection_runtime(
+                dictionary=self.dictionary,
+                auto_switch_mid_word=values.get(
+                    'auto_switch_mid_word',
+                    False,
+                ),
+                mid_word_min_prefix_len=values.get(
+                    'mid_word_min_prefix_len',
+                    4,
+                ),
+                system_dict_enabled=values.get('system_dict_enabled', True),
+                system_dict_en_path=values.get('system_dict_en_path', ''),
+                system_dict_ru_path=values.get('system_dict_ru_path', ''),
+                user_dict=prepared_user_dict,
+                user_dict_min_weight=values.get('user_dict_min_weight', 2),
+            )
+
+        return _PreparedRuntimeConfig(
+            change_set=change_set,
+            user_dict=prepared_user_dict,
+            mid_word_runtime=mid_word_runtime,
+            mid_word_signature=signature,
+        )
+
+    def _apply_runtime_config(self, prepared=None) -> None:
         """Apply config values that affect already-created runtime objects."""
+        prepared_update = (
+            prepared if isinstance(prepared, _PreparedRuntimeConfig) else None
+        )
         self.debug = self.logging_controller.reconfigure(
             self.config.get("debug", False),
         )
@@ -262,7 +335,11 @@ class LSwitchApp:
             state_manager=self.state_manager,
             conversion_engine=self.conversion_engine,
             user_dict=self.user_dict,
-            enable_user_dictionary=self._enable_user_dictionary,
+            enable_user_dictionary=(
+                (lambda: prepared_update.user_dict)
+                if prepared_update is not None
+                else self._enable_user_dictionary
+            ),
             auto_detector=self.auto_detector,
             learning_service=self.learning_service,
             debug=self.debug,
@@ -284,7 +361,19 @@ class LSwitchApp:
         self.wayland_timing = timing_config.wayland_timing
         self.wayland_selection_timing = timing_config.wayland_selection_timing
         self.user_dict = applied.user_dict
-        self._apply_mid_word_runtime_config()
+        if (
+            prepared_update is not None
+            and prepared_update.mid_word_runtime is not None
+        ):
+            self.prefix_dictionary = (
+                prepared_update.mid_word_runtime.prefix_dictionary
+            )
+            self.mid_word_detector = (
+                prepared_update.mid_word_runtime.mid_word_detector
+            )
+            self._mid_word_runtime_signature = prepared_update.mid_word_signature
+        else:
+            self._apply_mid_word_runtime_config()
 
     def _apply_mid_word_runtime_config(self) -> None:
         """Rebuild mid-word detection runtime after relevant config changes."""
@@ -309,18 +398,26 @@ class LSwitchApp:
 
     def _current_mid_word_runtime_signature(self) -> tuple:
         """Return config inputs that require rebuilding the prefix detector."""
-        enabled = bool(self.config.get('auto_switch_mid_word', False))
+        return self._mid_word_runtime_signature_for(
+            self.config.get_all(),
+            self.user_dict,
+        )
+
+    @staticmethod
+    def _mid_word_runtime_signature_for(values: dict, user_dict) -> tuple:
+        """Return detector inputs for a candidate config and user dictionary."""
+        enabled = bool(values.get('auto_switch_mid_word', False))
         include_system = enabled and bool(
-            self.config.get('system_dict_enabled', True)
+            values.get('system_dict_enabled', True)
         )
         return (
             enabled,
-            self.config.get('mid_word_min_prefix_len', 4),
+            values.get('mid_word_min_prefix_len', 4),
             include_system,
-            self.config.get('system_dict_en_path', '') if include_system else '',
-            self.config.get('system_dict_ru_path', '') if include_system else '',
-            id(self.user_dict),
-            self.config.get('user_dict_min_weight', 2),
+            values.get('system_dict_en_path', '') if include_system else '',
+            values.get('system_dict_ru_path', '') if include_system else '',
+            id(user_dict),
+            values.get('user_dict_min_weight', 2),
         )
 
     # ------------------------------------------------------------------
