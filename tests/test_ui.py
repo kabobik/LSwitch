@@ -47,6 +47,28 @@ def _build_pyqt6_mocks():
     # --- QtWidgets ---
     qtwidgets = types.ModuleType("PyQt6.QtWidgets")
 
+    class _MockSignal:
+        def __init__(self):
+            self._callbacks = []
+        def connect(self, callback):
+            self._callbacks.append(callback)
+        def emit(self, *args):
+            for callback in list(self._callbacks):
+                callback(*args)
+
+    class _EnabledMixin:
+        def _init_enabled(self):
+            self._enabled = True
+            self._tooltip = ""
+            self._visible = True
+        def setEnabled(self, value): self._enabled = bool(value)
+        def isEnabled(self): return self._enabled
+        def setToolTip(self, value): self._tooltip = value
+        def toolTip(self): return self._tooltip
+        def show(self): self._visible = True
+        def hide(self): self._visible = False
+        def isVisible(self): return self._visible
+
     class _MockQSystemTrayIcon:
         ActivationReason = MagicMock()
         def __init__(self, *a, **kw):
@@ -72,7 +94,8 @@ def _build_pyqt6_mocks():
             self._result = 0
         def setWindowTitle(self, t): self._title = t
         def setMinimumWidth(self, w): pass
-        def show(self): pass
+        def setMinimumSize(self, *a): pass
+        def show(self): self._visible = True
         def exec(self): return self._result
         def accept(self): self._result = self.Accepted
         def reject(self): self._result = self.Rejected
@@ -115,41 +138,54 @@ def _build_pyqt6_mocks():
         def setIcon(self, i): self._icon = i
         def trigger(self): self.triggered.emit()
 
-    class _MockQCheckBox:
+    class _MockQCheckBox(_EnabledMixin):
         def __init__(self, *a, **kw):
+            self._init_enabled()
             self._checked = False
+            self.toggled = _MockSignal()
         def isChecked(self): return self._checked
-        def setChecked(self, c): self._checked = c
+        def setChecked(self, c):
+            self._checked = bool(c)
+            self.toggled.emit(self._checked)
         def setFixedSize(self, *a): pass
         def setAttribute(self, *a): pass
         def setFocusPolicy(self, *a): pass
         def setStyleSheet(self, *a): pass
 
-    class _MockQSpinBox:
+    class _MockQSpinBox(_EnabledMixin):
         def __init__(self, *a, **kw):
+            self._init_enabled()
             self._value = 0
             self._min = 0
             self._max = 100
+            self.valueChanged = _MockSignal()
         def value(self): return self._value
-        def setValue(self, v): self._value = max(self._min, min(self._max, v))
+        def setValue(self, v):
+            self._value = max(self._min, min(self._max, v))
+            self.valueChanged.emit(self._value)
         def setRange(self, lo, hi):
             self._min, self._max = lo, hi
         def setSingleStep(self, s): pass
 
-    class _MockQDoubleSpinBox:
+    class _MockQDoubleSpinBox(_EnabledMixin):
         def __init__(self, *a, **kw):
+            self._init_enabled()
             self._value = 0.0
             self._min = 0.0
             self._max = 100.0
+            self.valueChanged = _MockSignal()
         def value(self): return self._value
-        def setValue(self, v): self._value = max(self._min, min(self._max, float(v)))
+        def setValue(self, v):
+            self._value = max(self._min, min(self._max, float(v)))
+            self.valueChanged.emit(self._value)
         def setRange(self, lo, hi):
             self._min, self._max = float(lo), float(hi)
         def setSingleStep(self, s): pass
         def setDecimals(self, d): pass
+        def setSuffix(self, s): self._suffix = s
 
-    class _MockQWidget:
-        def __init__(self, *a, **kw): pass
+    class _MockQWidget(_EnabledMixin):
+        def __init__(self, *a, **kw): self._init_enabled()
         def setWindowFlags(self, *a): pass
         def setAttribute(self, *a): pass
         def setStyleSheet(self, *a): pass
@@ -158,8 +194,6 @@ def _build_pyqt6_mocks():
         def setFixedHeight(self, *a): pass
         def setFixedSize(self, *a): pass
         def setScaledContents(self, *a): pass
-        def show(self): pass
-        def hide(self): pass
         def raise_(self): pass
         def activateWindow(self): pass
         def adjustSize(self): pass
@@ -180,7 +214,89 @@ def _build_pyqt6_mocks():
         pass
 
     class _MockQFormLayout(_MockQVBoxLayout):
-        def addRow(self, label, widget): self._widgets.append(widget)
+        def addRow(self, label, widget): self._widgets.extend([label, widget])
+
+    class _MockQLabel(_MockQWidget):
+        def __init__(self, text="", *a, **kw):
+            super().__init__(*a, **kw)
+            self._text = text
+        def setText(self, text): self._text = text
+        def text(self): return self._text
+        def setWordWrap(self, value): pass
+
+    class _MockQLineEdit(_MockQWidget):
+        def __init__(self, text="", *a, **kw):
+            super().__init__(*a, **kw)
+            self._text = text
+            self._read_only = False
+            self.textChanged = _MockSignal()
+        def setText(self, text):
+            self._text = str(text)
+            self.textChanged.emit(self._text)
+        def text(self): return self._text
+        def setReadOnly(self, value): self._read_only = bool(value)
+
+    class _MockQComboBox(_MockQWidget):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._items = []
+            self._index = -1
+            self.currentIndexChanged = _MockSignal()
+        def addItem(self, text, data=None):
+            self._items.append((text, data))
+            if self._index < 0:
+                self._index = 0
+        def findData(self, data):
+            for index, (_text, value) in enumerate(self._items):
+                if value == data:
+                    return index
+            return -1
+        def setCurrentIndex(self, index):
+            self._index = index
+            self.currentIndexChanged.emit(index)
+        def currentData(self):
+            return self._items[self._index][1] if self._index >= 0 else None
+
+    class _MockQListWidget(_MockQWidget):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._items = []
+            self._row = -1
+            self.currentRowChanged = _MockSignal()
+        def addItems(self, items): self._items.extend(items)
+        def setCurrentRow(self, row):
+            self._row = row
+            self.currentRowChanged.emit(row)
+        def currentRow(self): return self._row
+        def setFixedWidth(self, value): pass
+
+    class _MockQStackedWidget(_MockQWidget):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._widgets = []
+            self._index = 0
+        def addWidget(self, widget): self._widgets.append(widget)
+        def setCurrentIndex(self, index): self._index = index
+        def count(self): return len(self._widgets)
+
+    class _MockQScrollArea(_MockQWidget):
+        def setWidgetResizable(self, value): pass
+        def setWidget(self, widget): self._widget = widget
+
+    class _MockQKeySequence:
+        SequenceFormat = types.SimpleNamespace(PortableText=1)
+        def __init__(self, text=""): self._text = str(text)
+        def toString(self, *args): return self._text
+
+    class _MockQKeySequenceEdit(_MockQWidget):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._sequence = _MockQKeySequence()
+            self.keySequenceChanged = _MockSignal()
+        def setKeySequence(self, sequence):
+            self._sequence = sequence
+            self.keySequenceChanged.emit(sequence)
+        def keySequence(self): return self._sequence
 
     class _MockScreen:
         def availableGeometry(self): return MagicMock(width=lambda: 1920, height=lambda: 1080)
@@ -200,10 +316,11 @@ def _build_pyqt6_mocks():
     qtwidgets.QVBoxLayout = _MockQVBoxLayout
     qtwidgets.QHBoxLayout = _MockQHBoxLayout
     qtwidgets.QFormLayout = _MockQFormLayout
-    qtwidgets.QLabel = MagicMock
-    class _MockQPushButton:
+    qtwidgets.QLabel = _MockQLabel
+    class _MockQPushButton(_MockQWidget):
         def __init__(self, *a, **kw):
-            self.clicked = MagicMock()
+            super().__init__(*a, **kw)
+            self.clicked = _MockSignal()
         def connect(self, *a): pass
     qtwidgets.QPushButton = _MockQPushButton
     qtwidgets.QDialogButtonBox = MagicMock()
@@ -214,6 +331,14 @@ def _build_pyqt6_mocks():
     qtwidgets.QWidgetAction = MagicMock
     qtwidgets.QMessageBox = MagicMock()
     qtwidgets.QInputDialog = MagicMock
+    qtwidgets.QLineEdit = _MockQLineEdit
+    qtwidgets.QComboBox = _MockQComboBox
+    qtwidgets.QListWidget = _MockQListWidget
+    qtwidgets.QStackedWidget = _MockQStackedWidget
+    qtwidgets.QScrollArea = _MockQScrollArea
+    qtwidgets.QKeySequenceEdit = _MockQKeySequenceEdit
+    qtwidgets.QFileDialog = MagicMock()
+    qtwidgets.QFileDialog.getOpenFileName.return_value = ("", "")
 
     # --- QtGui ---
     qtgui = types.ModuleType("PyQt6.QtGui")
@@ -236,6 +361,7 @@ def _build_pyqt6_mocks():
     qtgui.QFont.StyleHint = types.SimpleNamespace(Monospace=1)
     qtgui.QFont.Weight = types.SimpleNamespace(Bold=75)
     qtgui.QCursor = MagicMock
+    qtgui.QKeySequence = _MockQKeySequence
 
     qtwidgets.QHeaderView = MagicMock()
     qtwidgets.QHeaderView.ResizeMode = types.SimpleNamespace(Stretch=1)
@@ -414,8 +540,113 @@ class TestConfigDialog:
         dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
         received = []
         event_bus_ui.subscribe(EventType.CONFIG_CHANGED, lambda e: received.append(e))
+        dlg._auto_switch_cb.setChecked(True)
         dlg.accept()
         assert len(received) == 1
+
+    def test_builds_five_pages_and_binds_all_33_settings(self, config_mgr, event_bus_ui):
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
+
+        assert dlg._stack.count() == 5
+        assert len(dlg._widgets) == 33
+
+    def test_apply_updates_nested_setting_without_closing(self, config_mgr, event_bus_ui):
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
+        widget = dlg._widgets["timing.key_press_delay"]
+        widget.setValue(0.123456789)
+
+        assert dlg.apply() is True
+
+        assert config_mgr.get("timing")["key_press_delay"] == 0.123456789
+        assert dlg._result == dlg.Rejected
+        assert dlg.model.is_dirty is False
+
+    def test_unchanged_ok_does_not_write_or_publish(self, config_mgr, event_bus_ui, monkeypatch):
+        save = MagicMock()
+        monkeypatch.setattr("lswitch.config._save_toml", save)
+        received = []
+        event_bus_ui.subscribe(EventType.CONFIG_CHANGED, received.append)
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
+
+        dlg.accept()
+
+        assert dlg._result == dlg.Accepted
+        save.assert_not_called()
+        assert received == []
+
+    def test_save_error_keeps_dialog_open_and_preserves_draft(
+        self,
+        config_mgr,
+        event_bus_ui,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            "lswitch.config._save_toml",
+            MagicMock(side_effect=OSError("disk full")),
+        )
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
+        dlg._auto_switch_cb.setChecked(True)
+
+        dlg.accept()
+
+        assert dlg._result == dlg.Rejected
+        assert config_mgr.get("auto_switch") is False
+        assert dlg.model.get("auto_switch") is True
+        assert dlg.model.is_dirty is True
+        assert dlg._last_error == "disk full"
+
+    def test_dependencies_disable_controls_without_losing_values(self, config_mgr, event_bus_ui):
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
+        threshold = dlg._widgets["auto_switch_threshold"]
+        threshold.setValue(19)
+
+        assert threshold.isEnabled() is False
+        assert dlg.model.get("auto_switch_threshold") == 19
+
+        dlg._auto_switch_cb.setChecked(True)
+
+        assert threshold.isEnabled() is True
+        assert threshold.value() == 19
+
+    def test_dirty_dialog_rebases_external_change_and_merges_on_apply(
+        self,
+        config_mgr,
+        event_bus_ui,
+    ):
+        from lswitch.runtime_config import RuntimeConfigController
+
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
+        dlg._threshold_spin.setValue(27)
+        external = config_mgr.get_all()
+        external["user_dict_enabled"] = True
+        external_result = RuntimeConfigController(
+            config=config_mgr,
+            event_bus=event_bus_ui,
+        ).apply(external, source="tray")
+
+        assert external_result.ok is True
+        assert dlg.model.get("auto_switch_threshold") == 27
+        assert dlg.model.get("user_dict_enabled") is True
+        assert dlg.model.external_change_pending is True
+
+        assert dlg.apply() is True
+        assert config_mgr.get("auto_switch_threshold") == 27
+        assert config_mgr.get("user_dict_enabled") is True
+
+    def test_clean_dialog_refreshes_after_external_change(self, config_mgr, event_bus_ui):
+        from lswitch.runtime_config import RuntimeConfigController
+
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
+        external = config_mgr.get_all()
+        external["auto_switch"] = True
+        RuntimeConfigController(
+            config=config_mgr,
+            event_bus=event_bus_ui,
+        ).apply(external, source="tray")
+
+        assert dlg.model.get("auto_switch") is True
+        assert dlg._auto_switch_cb.isChecked() is True
+        assert dlg.model.is_dirty is False
 
     def test_reject_does_not_save(self, config_mgr, event_bus_ui):
         original_auto = config_mgr.get("auto_switch")

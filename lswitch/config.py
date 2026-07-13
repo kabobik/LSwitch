@@ -600,6 +600,10 @@ class ConfigManager:
 
     # -- public ---------------------------------------------------------
 
+    @property
+    def config_path(self) -> str:
+        return self._config_path
+
     def reload(self) -> bool:
         """Reload configuration from file. Returns True on success."""
         try:

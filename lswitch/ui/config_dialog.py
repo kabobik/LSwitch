@@ -1,133 +1,491 @@
-"""ConfigDialog — settings window."""
+"""Modeless five-page settings dialog backed by a mergeable draft."""
 
 from __future__ import annotations
 
-import time
+import os
 
+from PyQt6.QtGui import QKeySequence
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QCheckBox, QSpinBox, QDoubleSpinBox,
-    QPushButton, QDialogButtonBox, QLabel,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QKeySequenceEdit,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
-from lswitch.config import DEFAULT_CONFIG
-from lswitch.core.events import Event, EventType
+from lswitch.core.events import EventType
 from lswitch.i18n import t
+from lswitch.runtime_config import RuntimeConfigController
+from lswitch.ui.settings_model import (
+    PAGE_ADVANCED,
+    PAGE_AUTO,
+    PAGE_DICTIONARIES,
+    PAGE_GENERAL,
+    PAGE_SELECTION,
+    SETTINGS_BINDINGS,
+    SETTINGS_BINDING_BY_PATH,
+    SETTINGS_PAGES,
+    SettingsDraftModel,
+)
+
+
+_PAGE_LABEL_KEYS = {
+    PAGE_GENERAL: "settings_page_general",
+    PAGE_AUTO: "settings_page_auto",
+    PAGE_DICTIONARIES: "settings_page_dictionaries",
+    PAGE_SELECTION: "settings_page_selection",
+    PAGE_ADVANCED: "settings_page_advanced",
+}
+_STRATEGY_LABEL_KEYS = {
+    "auto": "settings_strategy_auto",
+    "clipboard_copy": "settings_strategy_clipboard",
+    "primary_selection": "settings_strategy_primary",
+    "disabled": "settings_strategy_disabled",
+}
 
 
 class ConfigDialog(QDialog):
-    """Settings dialog opened from the tray menu.
+    """Edit a local draft and commit it through RuntimeConfigController."""
 
-    Displays all user-configurable options and saves via ConfigManager.
-    """
-
-    def __init__(self, config=None, event_bus=None, parent=None):
+    def __init__(
+        self,
+        config=None,
+        event_bus=None,
+        parent=None,
+        config_controller=None,
+        app=None,
+    ):
         super().__init__(parent)
         self.config = config
         self.event_bus = event_bus
+        self.app = app
+        self.config_controller = config_controller
+        if self.config_controller is None and self.config is not None:
+            self.config_controller = RuntimeConfigController(
+                config=self.config,
+                event_bus=self.event_bus,
+            )
 
-        self.setWindowTitle(t('lswitch_control'))
-        self.setMinimumWidth(360)
+        committed = self.config.get_all() if self.config is not None else None
+        self.model = SettingsDraftModel(committed)
+        self._widgets: dict[str, object] = {}
+        self._control_groups: dict[str, list[object]] = {}
+        self._rendered_values: dict[str, object] = {}
+        self._page_widgets: dict[str, object] = {}
+        self._loading = False
+        self._applying = False
+        self._last_error: str | None = None
+        self._subscribed = False
+
+        self.setWindowTitle(t("settings_title"))
+        if hasattr(self, "setMinimumSize"):
+            self.setMinimumSize(720, 560)
+        else:
+            self.setMinimumWidth(720)
 
         self._build_ui()
-        self._load_values()
+        self._auto_switch_cb = self._widgets["auto_switch"]
+        self._threshold_spin = self._widgets["auto_switch_threshold"]
+        self._user_dict_cb = self._widgets["user_dict_enabled"]
+        self._dct_spin = self._widgets["double_click_timeout"]
+        self._populate_widgets()
+        self._subscribe()
 
-    # -- UI construction ---------------------------------------------------
+    # -- UI construction -------------------------------------------------
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        root = QVBoxLayout(self)
 
-        form = QFormLayout()
+        self._conflict_label = QLabel(t("settings_external_change"))
+        if hasattr(self._conflict_label, "setWordWrap"):
+            self._conflict_label.setWordWrap(True)
+        self._conflict_label.hide()
+        root.addWidget(self._conflict_label)
 
-        # auto_switch
-        self._auto_switch_cb = QCheckBox()
-        form.addRow(f"{t('auto_switch')}:", self._auto_switch_cb)
-
-        # auto_switch_threshold
-        self._threshold_spin = QSpinBox()
-        self._threshold_spin.setRange(0, 100)
-        self._threshold_spin.setSingleStep(1)
-        form.addRow(f"{t('auto_switch_threshold')}:", self._threshold_spin)
-
-        # user_dict_enabled
-        self._user_dict_cb = QCheckBox()
-        form.addRow(f"{t('self_learning_dict')}:", self._user_dict_cb)
-
-        # double_click_timeout
-        self._dct_spin = QDoubleSpinBox()
-        self._dct_spin.setRange(0.05, 10.0)
-        self._dct_spin.setSingleStep(0.05)
-        self._dct_spin.setDecimals(2)
-        form.addRow(f"{t('double_click_timeout')}:", self._dct_spin)
-
-        layout.addLayout(form)
-
-        # Buttons
-        btn_layout = QHBoxLayout()
-
-        reset_btn = QPushButton(t('reset_defaults'))
-        reset_btn.clicked.connect(self._reset_defaults)
-        btn_layout.addWidget(reset_btn)
-
-        btn_layout.addStretch()
-
-        buttons = (
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+        body = QHBoxLayout()
+        self._navigation = QListWidget()
+        self._navigation.addItems(
+            [t(_PAGE_LABEL_KEYS[page]) for page in SETTINGS_PAGES]
         )
-        button_box = QDialogButtonBox(buttons)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        btn_layout.addWidget(button_box)
+        if hasattr(self._navigation, "setFixedWidth"):
+            self._navigation.setFixedWidth(190)
+        body.addWidget(self._navigation)
 
-        layout.addLayout(btn_layout)
+        self._stack = QStackedWidget()
+        for page in SETTINGS_PAGES:
+            self._stack.addWidget(self._build_page(page))
+        body.addWidget(self._stack)
+        root.addLayout(body)
 
-    # -- value management --------------------------------------------------
+        self._navigation.currentRowChanged.connect(self._stack.setCurrentIndex)
+        self._navigation.setCurrentRow(0)
 
-    def _load_values(self) -> None:
-        """Load current config values into widgets."""
-        cfg = self.config
-        if cfg is None:
+        self._status_label = QLabel("")
+        if hasattr(self._status_label, "setWordWrap"):
+            self._status_label.setWordWrap(True)
+        root.addWidget(self._status_label)
+
+        buttons = QHBoxLayout()
+        self._reset_page_btn = QPushButton(t("settings_reset_page"))
+        self._reset_all_btn = QPushButton(t("settings_reset_all"))
+        self._cancel_btn = QPushButton(t("settings_cancel"))
+        self._apply_btn = QPushButton(t("settings_apply"))
+        self._ok_btn = QPushButton(t("settings_ok"))
+        buttons.addWidget(self._reset_page_btn)
+        buttons.addWidget(self._reset_all_btn)
+        buttons.addStretch()
+        buttons.addWidget(self._cancel_btn)
+        buttons.addWidget(self._apply_btn)
+        buttons.addWidget(self._ok_btn)
+        root.addLayout(buttons)
+
+        self._reset_page_btn.clicked.connect(self._reset_current_page)
+        self._reset_all_btn.clicked.connect(self._reset_defaults)
+        self._cancel_btn.clicked.connect(self.reject)
+        self._apply_btn.clicked.connect(self.apply)
+        self._ok_btn.clicked.connect(self.accept)
+
+    def _build_page(self, page: str):
+        content = QWidget()
+        form = QFormLayout(content)
+        for binding in SETTINGS_BINDINGS:
+            if binding.page != page:
+                continue
+            label = QLabel(t(binding.label_key))
+            control, group = self._create_control(binding)
+            self._widgets[binding.path] = control
+            self._control_groups[binding.path] = [label, *group]
+            form.addRow(label, group[0] if len(group) == 1 else group[-1])
+
+        if page == PAGE_GENERAL:
+            shortcut_note = QLabel(t("settings_shortcut_help"))
+            if hasattr(shortcut_note, "setWordWrap"):
+                shortcut_note.setWordWrap(True)
+            form.addRow(QLabel(""), shortcut_note)
+            form.addRow(
+                QLabel(t("settings_platform")),
+                QLabel(self._platform_description()),
+            )
+        elif page == PAGE_SELECTION:
+            self._strategy_help = QLabel("")
+            if hasattr(self._strategy_help, "setWordWrap"):
+                self._strategy_help.setWordWrap(True)
+            form.addRow(QLabel(""), self._strategy_help)
+        elif page == PAGE_ADVANCED:
+            path = self.config.config_path if self.config is not None else ""
+            path_widget = QLineEdit(path)
+            path_widget.setReadOnly(True)
+            form.addRow(QLabel(t("settings_config_path")), path_widget)
+            if self._trace_override_active():
+                trace_note = QLabel(t("settings_trace_override"))
+                if hasattr(trace_note, "setWordWrap"):
+                    trace_note.setWordWrap(True)
+                form.addRow(QLabel(""), trace_note)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        self._page_widgets[page] = content
+        return scroll
+
+    def _create_control(self, binding):
+        if binding.widget == "bool":
+            widget = QCheckBox()
+            widget.toggled.connect(
+                lambda _value, path=binding.path: self._on_widget_changed(path)
+            )
+            return widget, [widget]
+
+        if binding.widget == "int":
+            widget = QSpinBox()
+            widget.setRange(int(binding.minimum), int(binding.maximum))
+            widget.setSingleStep(1)
+            widget.valueChanged.connect(
+                lambda _value, path=binding.path: self._on_widget_changed(path)
+            )
+            return widget, [widget]
+
+        if binding.widget == "float":
+            widget = QDoubleSpinBox()
+            widget.setRange(float(binding.minimum), float(binding.maximum))
+            widget.setDecimals(max(9, int(binding.decimals or 6)))
+            widget.setSingleStep(0.001)
+            if hasattr(widget, "setSuffix"):
+                widget.setSuffix(f" {t('settings_seconds')}")
+            widget.valueChanged.connect(
+                lambda _value, path=binding.path: self._on_widget_changed(path)
+            )
+            return widget, [widget]
+
+        if binding.widget == "choice":
+            widget = QComboBox()
+            for option in binding.options:
+                widget.addItem(t(_STRATEGY_LABEL_KEYS[option]), option)
+            widget.currentIndexChanged.connect(
+                lambda _index, path=binding.path: self._on_widget_changed(path)
+            )
+            return widget, [widget]
+
+        if binding.widget == "shortcut":
+            widget = QKeySequenceEdit()
+            widget.keySequenceChanged.connect(
+                lambda _sequence, path=binding.path: self._on_widget_changed(path)
+            )
+            return widget, [widget]
+
+        if binding.widget == "path":
+            line_edit = QLineEdit()
+            browse = QPushButton(t("settings_browse"))
+            container = QWidget()
+            layout = QHBoxLayout(container)
+            if hasattr(layout, "setContentsMargins"):
+                layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(line_edit)
+            layout.addWidget(browse)
+            line_edit.textChanged.connect(
+                lambda _text, path=binding.path: self._on_widget_changed(path)
+            )
+            browse.clicked.connect(
+                lambda _checked=False, path=binding.path: self._browse_dictionary(path)
+            )
+            return line_edit, [line_edit, browse, container]
+
+        raise ValueError(f"Unsupported settings widget: {binding.widget}")
+
+    # -- draft/widget synchronization -----------------------------------
+
+    def _populate_widgets(self) -> None:
+        self._loading = True
+        try:
+            for binding in SETTINGS_BINDINGS:
+                widget = self._widgets[binding.path]
+                value = self.model.get(binding.path)
+                self._write_widget(binding, widget, value)
+                self._rendered_values[binding.path] = self._read_widget(
+                    binding,
+                    widget,
+                )
+        finally:
+            self._loading = False
+        self._apply_dependencies()
+        self._update_dirty_state()
+
+    def _write_widget(self, binding, widget, value) -> None:
+        if binding.widget == "bool":
+            widget.setChecked(bool(value))
+        elif binding.widget in {"int", "float"}:
+            widget.setValue(value)
+        elif binding.widget == "choice":
+            index = widget.findData(value)
+            widget.setCurrentIndex(max(0, index))
+        elif binding.widget == "shortcut":
+            widget.setKeySequence(QKeySequence(str(value)))
+        elif binding.widget == "path":
+            widget.setText(str(value or ""))
+
+    def _read_widget(self, binding, widget):
+        if binding.widget == "bool":
+            return bool(widget.isChecked())
+        if binding.widget == "int":
+            return int(widget.value())
+        if binding.widget == "float":
+            return float(widget.value())
+        if binding.widget == "choice":
+            return widget.currentData()
+        if binding.widget == "shortcut":
+            sequence = widget.keySequence()
+            try:
+                return sequence.toString(QKeySequence.SequenceFormat.PortableText)
+            except (AttributeError, TypeError):
+                return sequence.toString()
+        if binding.widget == "path":
+            return widget.text()
+        raise ValueError(f"Unsupported settings widget: {binding.widget}")
+
+    def _on_widget_changed(self, path: str) -> None:
+        if self._loading:
             return
-        self._auto_switch_cb.setChecked(cfg.get("auto_switch", False))
-        self._threshold_spin.setValue(int(cfg.get("auto_switch_threshold", 10)))
-        self._user_dict_cb.setChecked(cfg.get("user_dict_enabled", False))
-        self._dct_spin.setValue(float(cfg.get("double_click_timeout", 0.3)))
+        binding = SETTINGS_BINDING_BY_PATH[path]
+        self.model.set(path, self._read_widget(binding, self._widgets[path]))
+        self._apply_dependencies()
+        self._update_dirty_state()
 
-    def _apply_values(self) -> None:
-        """Write widget values back to ConfigManager and save."""
-        if self.config is None:
-            return
-        self.config.set("auto_switch", self._auto_switch_cb.isChecked())
-        self.config.set("auto_switch_threshold", self._threshold_spin.value())
-        self.config.set("user_dict_enabled", self._user_dict_cb.isChecked())
-        self.config.set("double_click_timeout", self._dct_spin.value())
-        self.config.save()
+    def _sync_changed_widgets(self) -> None:
+        """Support programmatic edits while avoiding float roundtrip churn."""
+        for binding in SETTINGS_BINDINGS:
+            current = self._read_widget(binding, self._widgets[binding.path])
+            if current != self._rendered_values.get(binding.path):
+                self.model.set(binding.path, current)
+
+    def _apply_dependencies(self) -> None:
+        enabled = self.model.enabled_paths()
+        for path, group in self._control_groups.items():
+            is_enabled = enabled[path]
+            for item in group:
+                if hasattr(item, "setEnabled"):
+                    item.setEnabled(is_enabled)
+                if hasattr(item, "setToolTip"):
+                    item.setToolTip(
+                        "" if is_enabled else t("settings_dependency_disabled")
+                    )
+        strategy = self.model.get("wayland_selection_strategy", "auto")
+        if hasattr(self, "_strategy_help"):
+            self._strategy_help.setText(
+                t(f"settings_strategy_help_{strategy}")
+            )
+
+    def _update_dirty_state(self) -> None:
+        if hasattr(self._apply_btn, "setEnabled"):
+            self._apply_btn.setEnabled(self.model.is_dirty)
+        if self.model.external_change_pending:
+            self._conflict_label.show()
+        else:
+            self._conflict_label.hide()
+
+    # -- commands --------------------------------------------------------
+
+    def apply(self) -> bool:
+        return self._commit(close_on_success=False)
+
+    def _apply_values(self) -> bool:
+        """Compatibility wrapper used by older callers/tests."""
+        return self.apply()
+
+    def _commit(self, *, close_on_success: bool) -> bool:
+        self._sync_changed_widgets()
+        if self.config is None or self.config_controller is None:
+            if close_on_success:
+                super().accept()
+            return True
+
+        candidate = self.model.build_candidate(self.config.get_all())
+        self._set_busy(True)
+        self._applying = True
+        try:
+            result = self.config_controller.apply(candidate, source="gui")
+        finally:
+            self._applying = False
+            self._set_busy(False)
+
+        if not result.ok:
+            self._last_error = result.error or t("settings_unknown_error")
+            self._status_label.setText(self._last_error)
+            QMessageBox.critical(
+                self,
+                t("settings_error_title"),
+                self._last_error,
+            )
+            self._update_dirty_state()
+            return False
+
+        self._last_error = None
+        self._status_label.setText(t("settings_applied"))
+        self.model.mark_committed(self.config.get_all())
+        self._populate_widgets()
+        if close_on_success:
+            super().accept()
+        return True
+
+    def _set_busy(self, busy: bool) -> None:
+        for button in (self._apply_btn, self._ok_btn, self._reset_page_btn, self._reset_all_btn):
+            if hasattr(button, "setEnabled"):
+                button.setEnabled(not busy)
+        if busy:
+            self._status_label.setText(t("settings_applying"))
+
+    def _reset_current_page(self) -> None:
+        index = self._navigation.currentRow()
+        page = SETTINGS_PAGES[index if 0 <= index < len(SETTINGS_PAGES) else 0]
+        self.model.reset_page(page)
+        self._populate_widgets()
 
     def _reset_defaults(self) -> None:
-        """Reset widgets to DEFAULT_CONFIG values."""
-        self._auto_switch_cb.setChecked(DEFAULT_CONFIG["auto_switch"])
-        self._threshold_spin.setValue(DEFAULT_CONFIG["auto_switch_threshold"])
-        self._user_dict_cb.setChecked(DEFAULT_CONFIG["user_dict_enabled"])
-        self._dct_spin.setValue(DEFAULT_CONFIG["double_click_timeout"])
+        self.model.reset_all()
+        self._populate_widgets()
 
-    # -- QDialog overrides -------------------------------------------------
+    def _browse_dictionary(self, path: str) -> None:
+        current = str(self.model.get(path, "") or "")
+        filename, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            t("settings_choose_dictionary"),
+            os.path.dirname(current) if current else "",
+            t("settings_dictionary_filter"),
+        )
+        if filename:
+            self._widgets[path].setText(filename)
+            self._on_widget_changed(path)
+
+    # -- external synchronization ---------------------------------------
+
+    def _subscribe(self) -> None:
+        if self.event_bus is not None and not self._subscribed:
+            self.event_bus.subscribe(EventType.CONFIG_CHANGED, self._on_config_changed)
+            self._subscribed = True
+
+    def cleanup(self) -> None:
+        if self.event_bus is not None and self._subscribed:
+            self.event_bus.unsubscribe(EventType.CONFIG_CHANGED, self._on_config_changed)
+            self._subscribed = False
+
+    def _on_config_changed(self, event) -> None:
+        data = getattr(event, "data", None) or {}
+        if self._applying and data.get("source") == "gui":
+            return
+        if self.config is None:
+            return
+        self.model.handle_external_change(self.config.get_all())
+        self._populate_widgets()
+
+    def refresh_from_config(self) -> None:
+        if self.config is not None:
+            self.model.handle_external_change(self.config.get_all())
+            self._populate_widgets()
+
+    def _load_values(self) -> None:
+        """Compatibility wrapper that reloads the current committed snapshot."""
+        if self.config is not None:
+            self.model.load(self.config.get_all())
+            self._populate_widgets()
+
+    # -- dialog overrides ------------------------------------------------
 
     def accept(self) -> None:
-        """Save config and publish CONFIG_CHANGED event."""
-        self._apply_values()
-        if self.event_bus is not None:
-            self.event_bus.publish(
-                Event(type=EventType.CONFIG_CHANGED, data=None, timestamp=time.time())
-            )
-        super().accept()
+        self._commit(close_on_success=True)
 
     def reject(self) -> None:
-        """Close without saving."""
+        if self.config is not None:
+            self.model.load(self.config.get_all())
+            self._populate_widgets()
         super().reject()
 
-    # -- convenience -------------------------------------------------------
-
     def show(self) -> None:
-        """Show the dialog (non-modal)."""
+        if not self.model.is_dirty:
+            self.refresh_from_config()
         super().show()
+
+    # -- informational helpers ------------------------------------------
+
+    def _platform_description(self) -> str:
+        platform = getattr(self.app, "_platform", None)
+        session = getattr(platform, "session_type", "")
+        compositor = getattr(platform, "compositor", "")
+        if session:
+            return f"{session} / {compositor or 'unknown'}"
+        return os.environ.get("XDG_SESSION_TYPE", "unknown") or "unknown"
+
+    def _trace_override_active(self) -> bool:
+        logging_controller = getattr(self.app, "logging_controller", None)
+        return bool(getattr(logging_controller, "trace_override", False))
