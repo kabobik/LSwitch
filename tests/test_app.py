@@ -9,6 +9,11 @@ import pytest
 
 from lswitch.app import LSwitchApp
 from lswitch.runtime import PidLock, create_mid_word_detection_runtime
+from lswitch.core.decision_trace import (
+    DecisionOutcome,
+    DecisionTrace,
+    TraceTrigger,
+)
 from lswitch.core.layout_switch_controller import LayoutSwitchController
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.states import State
@@ -277,6 +282,14 @@ class TestRuntimeConfig:
 
     def test_debug_config_updates_effective_runtime_without_restart(self):
         app = _make_app()
+        app.trace_recorder.record(
+            DecisionTrace(
+                correlation_id=1,
+                trigger=TraceTrigger.MANUAL,
+                original="руддщ",
+                decision=DecisionOutcome.CONVERT,
+            )
+        )
         root_logger = MagicMock()
         app.logging_controller.root_logger = root_logger
         candidate = app.config.get_all()
@@ -294,7 +307,22 @@ class TestRuntimeConfig:
         assert app.conversion_runtime.debug is False
         assert app.conversion_engine.debug is False
         assert app.learning_service.debug is False
+        assert app.trace_recorder.enabled is False
+        assert app.trace_recorder.snapshot() == ()
         root_logger.setLevel.assert_called_once_with(20)
+
+    def test_trace_override_keeps_recorder_enabled_when_debug_is_disabled(
+        self,
+        tmp_path,
+    ):
+        app = LSwitchApp(
+            trace=True,
+            config_path=str(tmp_path / "config.toml"),
+        )
+
+        assert app.config.get("debug") is False
+        assert app.debug is True
+        assert app.trace_recorder.enabled is True
 
     def test_layout_policy_and_fallback_shortcut_update_without_restart(self):
         app = _make_app()

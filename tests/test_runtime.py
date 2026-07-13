@@ -17,6 +17,7 @@ from lswitch.core.auto_conversion_session import AutoConversionSessionState
 from lswitch.core.event_manager import EventManager
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.conversion_engine import ConversionEngine
+from lswitch.core.decision_trace import DecisionTraceRecorder
 from lswitch.core.input_router import (
     InputConversionPort,
     InputEventRouter,
@@ -104,6 +105,8 @@ def test_create_core_components_builds_core_runtime_services():
 
     assert isinstance(components, RuntimeCoreComponents)
     assert isinstance(components.event_bus, EventBus)
+    assert isinstance(components.trace_recorder, DecisionTraceRecorder)
+    assert components.trace_recorder.enabled is True
     assert isinstance(components.state_manager, StateManager)
     assert isinstance(components.typed_buffer, TypedBufferService)
     assert isinstance(components.selection_tracker, SelectionFreshnessTracker)

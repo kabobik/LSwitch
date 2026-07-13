@@ -91,10 +91,11 @@ class LSwitchApp:
 
         core = create_core_components(
             double_click_timeout=self.config.get('double_click_timeout', 0.3),
-            debug=debug,
+            debug=self.debug,
             manual_weight_step=self.MANUAL_WEIGHT_STEP,
         )
         self.event_bus = core.event_bus
+        self.trace_recorder = core.trace_recorder
         self.state_manager = core.state_manager
         self.typed_buffer = core.typed_buffer
         self.selection_tracker = core.selection_tracker
@@ -117,6 +118,7 @@ class LSwitchApp:
             get_user_dict=lambda: self.user_dict,
             get_timing=lambda: self.timing,
             get_layout_switch_controller=lambda: self.layout_switch_controller,
+            trace_recorder=self.trace_recorder,
             debug=self.debug,
             manual_weight_step=self.MANUAL_WEIGHT_STEP,
         )
@@ -332,6 +334,7 @@ class LSwitchApp:
         self.debug = self.logging_controller.reconfigure(
             self.config.get("debug", False),
         )
+        self.trace_recorder.reconfigure(enabled=self.debug)
         self.config.set_debug(self.debug)
         self.conversion_runtime.debug = self.debug
         applied = apply_runtime_config_update(

@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 
 from lswitch.core.conversion_engine import ConversionEngine
+from lswitch.core.decision_trace import DecisionTraceRecorder
 from lswitch.core.event_bus import EventBus
 from lswitch.core.event_manager import EventManager
 from lswitch.core.input_router import (
@@ -92,6 +93,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class RuntimeCoreComponents:
     event_bus: EventBus
+    trace_recorder: DecisionTraceRecorder
     state_manager: StateManager
     typed_buffer: TypedBufferService
     selection_tracker: SelectionFreshnessTracker
@@ -143,8 +145,13 @@ def create_core_components(
     manual_weight_step: int,
 ) -> RuntimeCoreComponents:
     """Create core services that do not require platform adapters."""
+    event_bus = EventBus()
     return RuntimeCoreComponents(
-        event_bus=EventBus(),
+        event_bus=event_bus,
+        trace_recorder=DecisionTraceRecorder(
+            event_bus,
+            enabled=debug,
+        ),
         state_manager=StateManager(
             double_click_timeout=double_click_timeout,
             debug=debug,
