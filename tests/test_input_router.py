@@ -280,7 +280,21 @@ def test_mid_word_conversion_tail_and_boundary_trace_lifecycle():
             return True
         return False
 
+    def try_space(correlation_id):
+        recorder.upsert_attempt(
+            correlation_id,
+            TraceTrigger.SPACE_AUTO,
+            DecisionAttempt(candidate="hello", outcome=DecisionOutcome.KEEP),
+        )
+        recorder.finalize_session(
+            correlation_id,
+            TraceTrigger.SPACE_AUTO,
+        )
+        return False
+
     router, _state_manager, _selection_tracker = _router(
+        auto_conversion_enabled=lambda: True,
+        try_auto_conversion_at_space=try_space,
         mid_word_auto_conversion_enabled=lambda: True,
         try_mid_word_auto_conversion=try_mid_word,
         close_trace_session=recorder.close_session,
@@ -299,12 +313,21 @@ def test_mid_word_conversion_tail_and_boundary_trace_lifecycle():
 
     router.on_key_press(_event(EventType.KEY_PRESS, KEY_SPACE))
 
-    assert recorder.snapshot()[1].lifecycle is TraceLifecycle.FINALIZED
+    converted, tail, boundary = recorder.snapshot()
+    assert (
+        converted.correlation_id
+        == tail.correlation_id
+        == boundary.correlation_id
+        == 1
+    )
+    assert tail.lifecycle is TraceLifecycle.FINALIZED
+    assert boundary.trigger is TraceTrigger.SPACE_AUTO
+    assert boundary.lifecycle is TraceLifecycle.FINALIZED
 
     router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
     router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
 
-    next_word = recorder.snapshot()[2]
+    next_word = recorder.snapshot()[3]
     assert next_word.correlation_id == 2
     assert next_word.lifecycle is TraceLifecycle.ACTIVE
 
