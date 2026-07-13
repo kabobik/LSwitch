@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from lswitch.core.decision_trace import (
+    DecisionAttempt,
+    DecisionOutcome,
+    DecisionTraceRecorder,
+    ExecutionOutcome,
+    TraceLifecycle,
+    TraceTrigger,
+)
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.event_manager import KEY_BACKSPACE, KEY_ENTER, KEY_SPACE
 from lswitch.core.input_router import (
@@ -237,6 +245,68 @@ def test_text_after_mid_word_switch_keeps_correlation_until_space():
 
     assert close_trace_session.call_args_list[-1].args == (1,)
     assert router.active_word_session_id is None
+
+
+def test_mid_word_conversion_tail_and_boundary_trace_lifecycle():
+    recorder = DecisionTraceRecorder(enabled=True)
+    attempts = iter(
+        (
+            DecisionAttempt(
+                candidate="рудд",
+                converted_candidate="hell",
+                outcome=DecisionOutcome.CONVERT,
+            ),
+            DecisionAttempt(candidate="o", outcome=DecisionOutcome.KEEP),
+            DecisionAttempt(candidate="n", outcome=DecisionOutcome.KEEP),
+        )
+    )
+    call_number = 0
+
+    def try_mid_word(correlation_id):
+        nonlocal call_number
+        call_number += 1
+        attempt = next(attempts)
+        recorder.upsert_attempt(
+            correlation_id,
+            TraceTrigger.MID_WORD,
+            attempt,
+        )
+        if call_number == 1:
+            recorder.finalize_session(
+                correlation_id,
+                TraceTrigger.MID_WORD,
+                execution=ExecutionOutcome.SUCCEEDED,
+            )
+            return True
+        return False
+
+    router, _state_manager, _selection_tracker = _router(
+        mid_word_auto_conversion_enabled=lambda: True,
+        try_mid_word_auto_conversion=try_mid_word,
+        close_trace_session=recorder.close_session,
+    )
+    key_b = 48
+
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
+    router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
+    router.on_key_press(_event(EventType.KEY_PRESS, key_b))
+    router.on_key_release(_event(EventType.KEY_RELEASE, key_b))
+
+    converted, tail = recorder.snapshot()
+    assert converted.correlation_id == tail.correlation_id == 1
+    assert converted.lifecycle is TraceLifecycle.FINALIZED
+    assert tail.lifecycle is TraceLifecycle.ACTIVE
+
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_SPACE))
+
+    assert recorder.snapshot()[1].lifecycle is TraceLifecycle.FINALIZED
+
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
+    router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
+
+    next_word = recorder.snapshot()[2]
+    assert next_word.correlation_id == 2
+    assert next_word.lifecycle is TraceLifecycle.ACTIVE
 
 
 def test_input_router_cancels_deferred_mid_word_check_at_space_boundary():

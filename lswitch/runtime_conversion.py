@@ -427,7 +427,7 @@ class ConversionRuntimeFacade:
         )
 
     def close_trace_session(self, correlation_id: int) -> None:
-        """Close recorder aggregation for a completed typed word."""
+        """Finalize recorder aggregation for the current word segment."""
         if self.trace_recorder is not None:
             self.trace_recorder.close_session(correlation_id)
 
