@@ -112,8 +112,45 @@ def test_same_midword_trace_id_is_updated_in_place(qapp):
 
     assert tab._trace_list.count() == 1
     assert "ghb" in tab._trace_list.item(0).text()
+    assert t("trace_lifecycle_active") in tab._trace_list.item(0).text()
     assert tab._step_tree.topLevelItemCount() == 2
     assert "ghb" in tab._step_tree.topLevelItem(1).text(0)
+
+    recorder.close_session(7)
+    qapp.processEvents()
+
+    assert t("trace_lifecycle_active") not in tab._trace_list.item(0).text()
+    assert t("trace_lifecycle_finalized") in tab._detail.toPlainText()
+    tab.cleanup()
+
+
+def test_post_conversion_segment_is_active_and_related(qapp):
+    _event_bus, recorder, tab = _tab()
+    recorder.upsert_attempt(
+        8,
+        TraceTrigger.MID_WORD,
+        DecisionAttempt(
+            candidate="рудд",
+            converted_candidate="hell",
+            outcome=DecisionOutcome.CONVERT,
+        ),
+    )
+    recorder.finalize_session(
+        8,
+        TraceTrigger.MID_WORD,
+    )
+    recorder.upsert_attempt(
+        8,
+        TraceTrigger.MID_WORD,
+        DecisionAttempt(candidate="o", outcome=DecisionOutcome.KEEP),
+    )
+    qapp.processEvents()
+
+    assert tab._trace_list.count() == 2
+    assert "o" in tab._trace_list.item(0).text()
+    assert t("trace_lifecycle_active") in tab._trace_list.item(0).text()
+    assert t("trace_related") in tab._trace_list.item(0).text()
+    assert t("trace_related") in tab._trace_list.item(1).text()
     tab.cleanup()
 
 

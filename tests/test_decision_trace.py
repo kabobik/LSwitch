@@ -18,6 +18,7 @@ from lswitch.core.decision_trace import (
     ExecutionOutcome,
     StepState,
     TraceFact,
+    TraceLifecycle,
     TraceTrigger,
 )
 from lswitch.core.event_bus import EventBus
@@ -186,10 +187,16 @@ def test_upsert_attempt_replaces_one_mid_word_trace():
     assert len(recorder.snapshot()) == 1
     assert finalized.attempts == (first_attempt, final_attempt)
     assert finalized.execution is ExecutionOutcome.SUCCEEDED
+    assert first.lifecycle is TraceLifecycle.ACTIVE
+    assert updated.lifecycle is TraceLifecycle.ACTIVE
+    assert finalized.lifecycle is TraceLifecycle.FINALIZED
 
 
 def test_close_session_starts_new_trace_for_same_correlation():
-    recorder = DecisionTraceRecorder(enabled=True)
+    bus = EventBus()
+    changed = []
+    bus.subscribe(EventType.DECISION_TRACE_CHANGED, changed.append)
+    recorder = DecisionTraceRecorder(bus, enabled=True)
     attempt = DecisionAttempt(
         candidate="ghbd",
         outcome=DecisionOutcome.KEEP,
@@ -202,6 +209,35 @@ def test_close_session_starts_new_trace_for_same_correlation():
     assert first is not None
     assert second is not None
     assert first.trace_id != second.trace_id
+    assert recorder.snapshot()[0].lifecycle is TraceLifecycle.FINALIZED
+    assert recorder.snapshot()[1].lifecycle is TraceLifecycle.ACTIVE
+    assert changed[-2].data.lifecycle is TraceLifecycle.FINALIZED
+
+
+def test_finalize_session_starts_related_trace_for_later_segment():
+    recorder = DecisionTraceRecorder(enabled=True)
+    attempt = DecisionAttempt(
+        candidate="рудд",
+        converted_candidate="hell",
+        outcome=DecisionOutcome.CONVERT,
+    )
+
+    converted = recorder.upsert_attempt(12, TraceTrigger.MID_WORD, attempt)
+    recorder.finalize_session(
+        12,
+        TraceTrigger.MID_WORD,
+        execution=ExecutionOutcome.SUCCEEDED,
+    )
+    continuation = recorder.upsert_attempt(
+        12,
+        TraceTrigger.MID_WORD,
+        DecisionAttempt(candidate="o", outcome=DecisionOutcome.KEEP),
+    )
+
+    assert converted is not None
+    assert continuation is not None
+    assert continuation.trace_id != converted.trace_id
+    assert [trace.correlation_id for trace in recorder.snapshot()] == [12, 12]
 
 
 def test_recorder_is_safe_for_parallel_writers():

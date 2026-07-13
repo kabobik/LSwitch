@@ -174,7 +174,10 @@ class InputEventRouter:
                 correlation_id = self._ensure_word_session()
                 if self.conversion.try_mid_word_auto_conversion(correlation_id):
                     self.selection_tracker.clear_repeat()
-                    self._close_word_session()
+                    # Retype resets the input buffer, so finalize this trace
+                    # segment.  The visible word is still being typed: keep
+                    # its correlation ID until a real word boundary.
+                    self.conversion.close_trace_session(correlation_id)
 
     def on_key_repeat(self, event: Event) -> None:
         data = event.data

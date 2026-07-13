@@ -49,6 +49,13 @@ class ExecutionOutcome(str, Enum):
     FAILED = "failed"
 
 
+class TraceLifecycle(str, Enum):
+    """Whether a word-session trace can still receive new input."""
+
+    ACTIVE = "active"
+    FINALIZED = "finalized"
+
+
 class StepState(str, Enum):
     """Result of one rule or execution step."""
 
@@ -140,6 +147,7 @@ class DecisionTrace:
     source_lang: str | None = None
     target_lang: str | None = None
     execution: ExecutionOutcome = ExecutionOutcome.NOT_STARTED
+    lifecycle: TraceLifecycle = TraceLifecycle.FINALIZED
     conversion_mode: str | None = None
     attempts: tuple[DecisionAttempt, ...] = ()
     execution_steps: tuple[DecisionTraceStep, ...] = ()
@@ -248,6 +256,7 @@ class DecisionTraceRecorder:
                     source_lang=attempt.source_lang,
                     target_lang=attempt.target_lang,
                     decision=attempt.outcome,
+                    lifecycle=TraceLifecycle.ACTIVE,
                     attempts=(attempt,),
                     duration_ms=attempt.duration_ms,
                     truncated=attempt.truncated,
@@ -264,6 +273,7 @@ class DecisionTraceRecorder:
                     source_lang=attempt.source_lang,
                     target_lang=attempt.target_lang,
                     decision=attempt.outcome,
+                    lifecycle=TraceLifecycle.ACTIVE,
                     attempts=current.attempts + (attempt,),
                     duration_ms=current.duration_ms + attempt.duration_ms,
                     truncated=current.truncated or attempt.truncated,
@@ -298,18 +308,21 @@ class DecisionTraceRecorder:
                 current,
                 decision=decision or current.decision,
                 execution=execution,
+                lifecycle=TraceLifecycle.FINALIZED,
                 converted=converted if converted is not None else current.converted,
                 conversion_mode=conversion_mode or current.conversion_mode,
                 execution_steps=tuple(execution_steps),
                 duration_ms=current.duration_ms + max(0.0, float(duration_ms)),
             )
             self._traces[index] = stored
+            self._session_trace_ids.pop(key, None)
         self._publish_changed(stored)
         return stored
 
     def close_session(self, correlation_id: int) -> None:
-        """Stop future updates for all traces associated with a word."""
+        """Finalize active traces and stop updates for one logical word."""
         correlation_id = int(correlation_id)
+        changed: list[DecisionTrace] = []
         with self._lock:
             keys = [
                 key
@@ -317,7 +330,21 @@ class DecisionTraceRecorder:
                 if key[0] == correlation_id
             ]
             for key in keys:
-                self._session_trace_ids.pop(key, None)
+                trace_id = self._session_trace_ids.pop(key, None)
+                index = self._find_index_locked(trace_id)
+                if index is None:
+                    continue
+                current = self._traces[index]
+                if current.lifecycle is TraceLifecycle.FINALIZED:
+                    continue
+                stored = replace(
+                    current,
+                    lifecycle=TraceLifecycle.FINALIZED,
+                )
+                self._traces[index] = stored
+                changed.append(stored)
+        for trace in changed:
+            self._publish_changed(trace)
 
     def snapshot(self) -> tuple[DecisionTrace, ...]:
         """Return an oldest-to-newest immutable history snapshot."""

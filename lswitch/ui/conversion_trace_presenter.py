@@ -11,6 +11,7 @@ from lswitch.core.decision_trace import (
     DecisionTraceStep,
     ExecutionOutcome,
     StepState,
+    TraceLifecycle,
 )
 from lswitch.i18n import t
 
@@ -120,6 +121,18 @@ def step_state_label(state: StepState, translate: Translate = t) -> str:
     return _translated(key, state.value.replace("_", " ").title(), translate)
 
 
+def lifecycle_label(
+    lifecycle: TraceLifecycle,
+    translate: Translate = t,
+) -> str:
+    key = f"trace_lifecycle_{lifecycle.value}"
+    return _translated(
+        key,
+        lifecycle.value.replace("_", " ").title(),
+        translate,
+    )
+
+
 def _step_marker(step: DecisionTraceStep) -> str:
     return {
         StepState.MATCHED: "✓",
@@ -167,6 +180,8 @@ def _trace_summary_lines(
         f"{outcome_label(trace.decision, translate)}",
         f"{_translated('trace_execution', 'Execution', translate)}: "
         f"{outcome_label(trace.execution, translate)}",
+        f"{_translated('trace_lifecycle', 'Session', translate)}: "
+        f"{lifecycle_label(trace.lifecycle, translate)}",
     ]
     if trace.source_lang or trace.target_lang:
         direction = f"{trace.source_lang or '?'} → {trace.target_lang or '?'}"
@@ -264,14 +279,24 @@ def format_trace_list_item(
     if trace.converted is not None and trace.converted != trace.original:
         value = f"{value} → {trace.converted}"
     relationship = (
-        " · " + _translated("trace_related", "related", translate)
+        " · ↔ " + _translated("trace_related", "related", translate)
         if related
+        else ""
+    )
+    lifecycle = (
+        " · ⏳ "
+        + _translated(
+            "trace_lifecycle_active",
+            "Typing continues",
+            translate,
+        )
+        if trace.lifecycle is TraceLifecycle.ACTIVE
         else ""
     )
     return (
         f"{trace.created_at.astimezone().strftime('%H:%M:%S')}  {value}\n"
         f"{outcome_label(trace.decision, translate)} · "
-        f"{trigger_label(trace, translate)}{relationship}"
+        f"{trigger_label(trace, translate)}{relationship}{lifecycle}"
     )
 
 
@@ -309,6 +334,8 @@ def trace_matches(
         trace.conversion_mode or "",
         trace.decision.value,
         trace.execution.value,
+        trace.lifecycle.value,
+        lifecycle_label(trace.lifecycle, translate),
     ]
     for attempt in trace.attempts:
         values.extend((attempt.candidate, attempt.converted_candidate or ""))

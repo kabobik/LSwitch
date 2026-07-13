@@ -30,6 +30,7 @@ from lswitch.core.decision_trace import (
     DecisionTrace,
     DecisionTraceClearedData,
     ExecutionOutcome,
+    TraceLifecycle,
 )
 from lswitch.core.events import Event, EventType
 from lswitch.i18n import t
@@ -421,6 +422,8 @@ class ConversionTraceTab(QWidget):
             return QColor("#ff6b6b" if dark_theme else "#b00020")
         if name == "keep":
             return QColor("#81c784" if dark_theme else "#2e7d32")
+        if name == "active":
+            return QColor("#ffb74d" if dark_theme else "#8a5a00")
         if name == "convert":
             return self.palette().color(QPalette.ColorRole.Highlight)
         return self.palette().color(QPalette.ColorRole.Text)
@@ -447,6 +450,8 @@ class ConversionTraceTab(QWidget):
             or trace.execution is ExecutionOutcome.FAILED
         ):
             return self._semantic_color("error")
+        if trace.lifecycle is TraceLifecycle.ACTIVE:
+            return self._semantic_color("active")
         return self._decision_color(trace.decision)
 
     def _update_status(self, *, visible_count: int | None = None) -> None:

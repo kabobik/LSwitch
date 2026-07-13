@@ -197,7 +197,7 @@ def test_next_word_gets_a_new_session_after_space_boundary():
     ]
 
 
-def test_successful_mid_word_switch_closes_session():
+def test_successful_mid_word_switch_finalizes_segment_but_keeps_word_session():
     try_mid_word_auto_conversion = MagicMock(return_value=True)
     close_trace_session = MagicMock()
     router, _state_manager, _selection_tracker = _router(
@@ -210,6 +210,32 @@ def test_successful_mid_word_switch_closes_session():
     router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
 
     close_trace_session.assert_called_once_with(1)
+    assert router.active_word_session_id == 1
+
+
+def test_text_after_mid_word_switch_keeps_correlation_until_space():
+    try_mid_word_auto_conversion = MagicMock(side_effect=[True, False])
+    close_trace_session = MagicMock()
+    router, _state_manager, _selection_tracker = _router(
+        mid_word_auto_conversion_enabled=lambda: True,
+        try_mid_word_auto_conversion=try_mid_word_auto_conversion,
+        close_trace_session=close_trace_session,
+    )
+    key_b = 48
+
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_A))
+    router.on_key_release(_event(EventType.KEY_RELEASE, KEY_A))
+    router.on_key_press(_event(EventType.KEY_PRESS, key_b))
+    router.on_key_release(_event(EventType.KEY_RELEASE, key_b))
+
+    assert [call.args[0] for call in try_mid_word_auto_conversion.call_args_list] == [
+        1,
+        1,
+    ]
+
+    router.on_key_press(_event(EventType.KEY_PRESS, KEY_SPACE))
+
+    assert close_trace_session.call_args_list[-1].args == (1,)
     assert router.active_word_session_id is None
 
 

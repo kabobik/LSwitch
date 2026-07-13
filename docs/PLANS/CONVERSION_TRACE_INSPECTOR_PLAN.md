@@ -5,6 +5,11 @@
 Статус: реализовано 2026-07-13; автоматические проверки добавлены, ручная
 проверка X11/Wayland вынесена в `docs/CONVERSION_TRACE_MANUAL_TESTING.md`.
 
+Уточнение после ручной проверки: MID_WORD trace имеет lifecycle
+`ACTIVE`/`FINALIZED`. Успешная ранняя конвертация завершает текущий сегмент, но
+correlation ID логического слова сохраняется до Space/Enter/navigation, поэтому
+дописанный хвост визуально связан с конвертированным префиксом.
+
 Документ описывает инструмент, который показывает путь принятия решения для
 каждого проверенного слова: какие правила были проверены, какие факты получили
 эти правила, какое правило стало решающим и удалось ли затем выполнить
@@ -341,6 +346,7 @@ DecisionTrace
   target_lang: str | None
   decision: DecisionOutcome
   execution: ExecutionOutcome
+  lifecycle: TraceLifecycle
   conversion_mode: str | None
   attempts: tuple[DecisionAttempt, ...]
   execution_steps: tuple[DecisionTraceStep, ...]
@@ -559,8 +565,11 @@ Mid-word detector вызывается после отпускания кажд�
   закрывает сессию;
 - Space закрывает сессию после space flow, а при выключенном space auto —
   сразу на boundary;
-- Enter, navigation, mouse click, buffer reset, manual completion и успешный
-  mid-word switch также закрывают сессию;
+- Enter, navigation, mouse click, buffer reset и manual completion закрывают
+  логическую сессию;
+- успешный mid-word switch финализирует текущий trace-сегмент, но сохраняет
+  correlation ID до реальной границы слова; дописанный хвост создаёт связанную
+  активную запись;
 - Backspace продолжает ту же сессию, но следующая проверка содержит новый
   candidate snapshot;
 - новая буква после boundary открывает новый ID.

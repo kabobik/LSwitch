@@ -15,6 +15,7 @@ from lswitch.core.decision_trace import (
     ExecutionOutcome,
     StepState,
     TraceFact,
+    TraceLifecycle,
     TraceTrigger,
 )
 from lswitch.ui.conversion_trace_presenter import (
@@ -24,6 +25,7 @@ from lswitch.ui.conversion_trace_presenter import (
     KNOWN_TRACE_RULE_IDS,
     ConversionTraceViewModel,
     format_trace,
+    format_trace_list_item,
     trace_matches,
 )
 from lswitch.i18n import I18n
@@ -153,7 +155,21 @@ def test_formatter_localizes_chrome_but_keeps_stable_rule_ids():
 
     assert "Решение: Конвертировать" in rendered
     assert "Исполнение: Успешно" in rendered
+    assert "Сессия: Завершена" in rendered
     assert "unknown.rule" in rendered
+
+
+def test_active_trace_is_explicit_in_list_detail_and_search():
+    i18n = I18n()
+    i18n.lang = "ru"
+    trace = replace(_trace(1), lifecycle=TraceLifecycle.ACTIVE)
+
+    list_text = format_trace_list_item(trace, translate=i18n.t)
+    detail_text = format_trace(trace, translate=i18n.t)
+
+    assert "Набор продолжается" in list_text
+    assert "Сессия: Набор продолжается" in detail_text
+    assert trace_matches(trace, query="набор продолжается", translate=i18n.t)
 
 
 @pytest.mark.parametrize(
