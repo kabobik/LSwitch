@@ -487,8 +487,9 @@ Acceptance для policy:
 - `user_dict_auto_confirm`;
 - `user_dict_min_weight`.
 
-Желательно показывать read-only статус фактически выбранных system dictionaries
-и путь user dictionary, не превращая status в дополнительную настройку.
+GUI показывает read-only статус фактически выбранных system dictionaries:
+auto/explicit source, активный путь и число слов. Статусы `Не найден` и
+`Отключён` отличаются явно; сами status-строки не являются настройками.
 
 ### 10.4 Выделение
 
@@ -899,6 +900,7 @@ finalization и отдельно логируется.
 - [x] `switch_layout_after_convert`, `layout_switch_key`, `debug` имеют
   автоматизированно проверенное runtime-поведение.
 - [x] Все зависимости визуально отключают controls и сохраняют child values.
+- [x] GUI показывает фактически загруженные system dictionaries и число слов.
 - [x] Tray menu открывает один dialog и синхронизирован с ним.
 - [x] SIGHUP использует тот же validation/runtime application path.
 - [x] Изменение timing не требует пересоздания UInput или process.

@@ -58,6 +58,12 @@ def test_system_dictionary_loader_uses_explicit_path(tmp_path):
     assert loaded is not None
     assert loaded.path == dictionary_path
     assert loaded.words == {"привет"}
+    status = loader.get_status("ru")
+    assert status.loaded is True
+    assert status.enabled is True
+    assert status.explicit is True
+    assert status.path == dictionary_path
+    assert status.word_count == 1
 
 
 def test_system_dictionary_loader_returns_none_when_missing(tmp_path):
@@ -65,6 +71,35 @@ def test_system_dictionary_loader_returns_none_when_missing(tmp_path):
 
     assert loader.find_dictionary("ru") is None
     assert loader.load("ru") is None
+    status = loader.get_status("ru")
+    assert status.enabled is True
+    assert status.loaded is False
+    assert status.path is None
+    assert status.word_count == 0
+
+
+def test_system_dictionary_loader_reports_auto_discovered_status(tmp_path):
+    dictionary_path = tmp_path / "en_US.dic"
+    dictionary_path.write_text("2\nhello\nworld\n", encoding="utf-8")
+    loader = SystemDictionaryLoader(dictionary_dirs=[tmp_path])
+
+    loader.load("en")
+
+    status = loader.get_status("en")
+    assert status.loaded is True
+    assert status.explicit is False
+    assert status.path == dictionary_path
+    assert status.word_count == 2
+
+
+def test_system_dictionary_loader_reports_disabled_without_loading(tmp_path):
+    loader = SystemDictionaryLoader(dictionary_dirs=[tmp_path])
+
+    status = loader.get_status("en", enabled=False)
+
+    assert status.enabled is False
+    assert status.loaded is False
+    assert status.path is None
 
 
 def test_system_dictionary_loader_rejects_missing_explicit_path(tmp_path):

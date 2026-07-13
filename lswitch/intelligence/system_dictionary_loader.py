@@ -17,6 +17,21 @@ class LoadedSystemDictionary:
     words: set[str]
 
 
+@dataclass(frozen=True)
+class SystemDictionaryStatus:
+    """Small runtime summary that does not retain the loaded word set."""
+
+    lang: str
+    enabled: bool
+    path: Path | None = None
+    word_count: int = 0
+    explicit: bool = False
+
+    @property
+    def loaded(self) -> bool:
+        return self.enabled and self.path is not None
+
+
 class SystemDictionaryLoader:
     """Loads plain word forms from Hunspell/MySpell .dic files."""
 
@@ -47,14 +62,27 @@ class SystemDictionaryLoader:
             if path
         }
         self.min_word_len = max(1, min_word_len)
+        self._statuses: dict[str, SystemDictionaryStatus] = {}
 
     def load(self, lang: str) -> LoadedSystemDictionary | None:
         path = self.find_dictionary(lang)
         if path is None:
+            self._statuses[lang] = SystemDictionaryStatus(
+                lang=lang,
+                enabled=True,
+                explicit=lang in self.explicit_paths,
+            )
             logger.info("No system dictionary found for lang=%s", lang)
             return None
 
         words = self.load_words(lang, path)
+        self._statuses[lang] = SystemDictionaryStatus(
+            lang=lang,
+            enabled=True,
+            path=path,
+            word_count=len(words),
+            explicit=lang in self.explicit_paths,
+        )
         logger.info(
             "Loaded %d words for lang=%s from %s",
             len(words),
@@ -62,6 +90,28 @@ class SystemDictionaryLoader:
             path,
         )
         return LoadedSystemDictionary(lang=lang, path=path, words=words)
+
+    def get_status(
+        self,
+        lang: str,
+        *,
+        enabled: bool = True,
+    ) -> SystemDictionaryStatus:
+        """Return the latest lightweight load status for one language."""
+        if not enabled:
+            return SystemDictionaryStatus(
+                lang=lang,
+                enabled=False,
+                explicit=lang in self.explicit_paths,
+            )
+        return self._statuses.get(
+            lang,
+            SystemDictionaryStatus(
+                lang=lang,
+                enabled=True,
+                explicit=lang in self.explicit_paths,
+            ),
+        )
 
     def load_words(self, lang: str, path: str | Path) -> set[str]:
         dictionary_path = Path(path)

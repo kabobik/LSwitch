@@ -171,6 +171,40 @@ class TestRuntimeConfig:
         assert app.prefix_dictionary.has_prefix("en", "hello") is True
         assert app.mid_word_detector.min_prefix_len == 5
 
+    def test_config_changed_exposes_loaded_system_dictionary_statuses(
+        self,
+        tmp_path,
+    ):
+        app = _make_app()
+        app.dictionary = MagicMock()
+        app.dictionary.words_for_lang.return_value = set()
+        en_path = tmp_path / "custom-en.dic"
+        ru_path = tmp_path / "custom-ru.dic"
+        en_path.write_text("2\nhello\nworld\n", encoding="utf-8")
+        ru_path.write_text("2\nпривет\nпример\n", encoding="utf-8")
+        candidate = app.config.get_all()
+        candidate["auto_switch_mid_word"] = True
+        candidate["system_dict_enabled"] = True
+        candidate["system_dict_en_path"] = str(en_path)
+        candidate["system_dict_ru_path"] = str(ru_path)
+
+        result = app.config_controller.apply(
+            candidate,
+            source="test",
+            persist=False,
+        )
+
+        statuses = {
+            status.lang: status for status in app.system_dictionary_statuses
+        }
+        assert result.ok is True
+        assert statuses["en"].path == en_path
+        assert statuses["en"].word_count == 2
+        assert statuses["en"].explicit is True
+        assert statuses["ru"].path == ru_path
+        assert statuses["ru"].word_count == 2
+        assert statuses["ru"].explicit is True
+
     def test_invalid_explicit_dictionary_path_is_rejected_before_commit(
         self,
         tmp_path,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import types
 import logging
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,6 +26,7 @@ from lswitch.core.learning_service import LearningService
 from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.state_manager import StateManager
 from lswitch.core.typed_buffer import TypedBufferService
+from lswitch.intelligence.system_dictionary_loader import SystemDictionaryStatus
 from lswitch.runtime import (
     AppliedRuntimeConfig,
     ConversionRuntimeFacade,
@@ -1903,6 +1905,11 @@ def test_create_conversion_runtime_wires_detector_and_engine():
     assert components.conversion_engine.user_dict is user_dict
     assert components.conversion_engine.debug is True
     assert components.conversion_engine.timing is timing
+    assert len(components.system_dictionaries) == 2
+    assert all(
+        status.enabled is False
+        for status in components.system_dictionaries
+    )
 
 
 def test_create_mid_word_detection_runtime_uses_configured_prefix_len():
@@ -1932,6 +1939,10 @@ def test_disabled_mid_word_runtime_does_not_load_system_dictionaries(monkeypatch
         "ru": {"привет"},
     }.get(lang, set())
     loader = MagicMock()
+    loader.get_status.side_effect = lambda lang, enabled: SystemDictionaryStatus(
+        lang=lang,
+        enabled=enabled,
+    )
     monkeypatch.setattr(
         "lswitch.intelligence.system_dictionary_loader.SystemDictionaryLoader",
         MagicMock(return_value=loader),
@@ -1945,6 +1956,10 @@ def test_disabled_mid_word_runtime_does_not_load_system_dictionaries(monkeypatch
 
     loader.load.assert_not_called()
     assert runtime.prefix_dictionary.in_lang("en", "hello") is True
+    assert [status.enabled for status in runtime.system_dictionaries] == [
+        False,
+        False,
+    ]
 
 
 def test_enabled_mid_word_runtime_loads_system_dictionaries_and_user_protection(
@@ -1958,6 +1973,16 @@ def test_enabled_mid_word_runtime_loads_system_dictionaries_and_user_protection(
     loader = MagicMock()
     loader.load.side_effect = lambda lang: types.SimpleNamespace(
         words={"world"} if lang == "en" else {"пример"},
+    )
+    loader.get_status.side_effect = lambda lang, enabled: SystemDictionaryStatus(
+        lang=lang,
+        enabled=enabled,
+        path=(
+            Path("/usr/share/hunspell/en_US.dic")
+            if lang == "en"
+            else Path("/usr/share/hunspell/ru_RU.dic")
+        ),
+        word_count=1,
     )
     loader_factory = MagicMock(return_value=loader)
     monkeypatch.setattr(
@@ -1979,6 +2004,8 @@ def test_enabled_mid_word_runtime_loads_system_dictionaries_and_user_protection(
     assert runtime.prefix_dictionary.in_lang("ru", "пример") is True
     assert runtime.mid_word_detector.user_dict is user_dict
     assert runtime.mid_word_detector.user_dict_min_weight == 5
+    assert [status.lang for status in runtime.system_dictionaries] == ["en", "ru"]
+    assert all(status.loaded for status in runtime.system_dictionaries)
 
 
 def test_create_input_device_runtime_wires_device_services():

@@ -85,6 +85,7 @@ class ConfigDialog(QDialog):
         self._control_groups: dict[str, list[object]] = {}
         self._rendered_values: dict[str, object] = {}
         self._page_widgets: dict[str, object] = {}
+        self._dictionary_status_labels: dict[str, QLabel] = {}
         self._loading = False
         self._applying = False
         self._last_error: str | None = None
@@ -169,6 +170,23 @@ class ConfigDialog(QDialog):
             self._widgets[binding.path] = control
             self._control_groups[binding.path] = [label, *group]
             form.addRow(label, group[0] if len(group) == 1 else group[-1])
+            if binding.path in {
+                "system_dict_en_path",
+                "system_dict_ru_path",
+            }:
+                lang = (
+                    "en"
+                    if binding.path == "system_dict_en_path"
+                    else "ru"
+                )
+                status_label = QLabel("")
+                if hasattr(status_label, "setWordWrap"):
+                    status_label.setWordWrap(True)
+                self._dictionary_status_labels[lang] = status_label
+                form.addRow(
+                    QLabel(t(f"settings_system_dict_{lang}_status")),
+                    status_label,
+                )
 
         if page == PAGE_GENERAL:
             shortcut_note = QLabel(t("settings_shortcut_help"))
@@ -248,6 +266,10 @@ class ConfigDialog(QDialog):
 
         if binding.widget == "path":
             line_edit = QLineEdit()
+            if hasattr(line_edit, "setPlaceholderText"):
+                line_edit.setPlaceholderText(
+                    t("settings_dictionary_path_auto_placeholder")
+                )
             browse = QPushButton(t("settings_browse"))
             container = QWidget()
             layout = QHBoxLayout(container)
@@ -281,6 +303,7 @@ class ConfigDialog(QDialog):
         finally:
             self._loading = False
         self._apply_dependencies()
+        self._update_dictionary_status()
         self._update_dirty_state()
 
     def _write_widget(self, binding, widget, value) -> None:
@@ -321,6 +344,7 @@ class ConfigDialog(QDialog):
         binding = SETTINGS_BINDING_BY_PATH[path]
         self.model.set(path, self._read_widget(binding, self._widgets[path]))
         self._apply_dependencies()
+        self._update_dictionary_status()
         self._update_dirty_state()
 
     def _sync_changed_widgets(self) -> None:
@@ -354,6 +378,51 @@ class ConfigDialog(QDialog):
             self._conflict_label.show()
         else:
             self._conflict_label.hide()
+
+    def _update_dictionary_status(self) -> None:
+        statuses = {
+            getattr(status, "lang", ""): status
+            for status in (
+                getattr(self.app, "system_dictionary_statuses", ()) or ()
+            )
+        }
+        active_in_draft = bool(
+            self.model.get("auto_switch_mid_word", False)
+            and self.model.get("system_dict_enabled", False)
+        )
+        for lang, label in self._dictionary_status_labels.items():
+            status = statuses.get(lang)
+            if status is None:
+                key = (
+                    "settings_dictionary_status_unavailable"
+                    if active_in_draft
+                    else "settings_dictionary_status_disabled"
+                )
+                label.setText(t(key))
+                continue
+            if not getattr(status, "enabled", False):
+                label.setText(t("settings_dictionary_status_disabled"))
+                continue
+            path = getattr(status, "path", None)
+            if path is None:
+                label.setText(t("settings_dictionary_status_not_found"))
+                continue
+            count = f"{int(getattr(status, 'word_count', 0)):,}".replace(
+                ",",
+                " ",
+            )
+            source = (
+                "explicit"
+                if getattr(status, "explicit", False)
+                else "auto"
+            )
+            label.setText(
+                t(
+                    f"settings_dictionary_status_loaded_{source}",
+                    path=str(path),
+                    count=count,
+                )
+            )
 
     # -- commands --------------------------------------------------------
 

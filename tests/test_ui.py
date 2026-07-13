@@ -240,6 +240,8 @@ def _build_pyqt6_mocks():
             self.textChanged.emit(self._text)
         def text(self): return self._text
         def setReadOnly(self, value): self._read_only = bool(value)
+        def setPlaceholderText(self, value): self._placeholder = value
+        def placeholderText(self): return getattr(self, "_placeholder", "")
 
     class _MockQComboBox(_MockQWidget):
         def __init__(self, *a, **kw):
@@ -396,6 +398,7 @@ for mod_name, mod_obj in _qt_mocks.items():
 from lswitch.core.event_bus import EventBus
 from lswitch.core.events import Event, EventType
 from lswitch.config import ConfigManager, DEFAULT_CONFIG
+from lswitch.intelligence.system_dictionary_loader import SystemDictionaryStatus
 
 from lswitch.ui.tray_icon import TrayIcon, create_simple_icon, create_adaptive_icon
 from lswitch.ui.context_menu import ContextMenu
@@ -627,6 +630,117 @@ class TestConfigDialog:
 
         assert dlg._stack.count() == 5
         assert len(dlg._widgets) == 33
+
+    def test_shows_effective_system_dictionary_paths_and_counts(
+        self,
+        config_mgr,
+        event_bus_ui,
+    ):
+        owner = types.SimpleNamespace(
+            system_dictionary_statuses=(
+                SystemDictionaryStatus(
+                    lang="en",
+                    enabled=True,
+                    path="/usr/share/hunspell/en_US.dic",
+                    word_count=73_959,
+                    explicit=False,
+                ),
+                SystemDictionaryStatus(
+                    lang="ru",
+                    enabled=True,
+                    path="/usr/share/hunspell/ru_RU.dic",
+                    word_count=146_229,
+                    explicit=True,
+                ),
+            ),
+        )
+
+        dlg = ConfigDialog(
+            config=config_mgr,
+            event_bus=event_bus_ui,
+            app=owner,
+        )
+
+        en_text = dlg._dictionary_status_labels["en"].text()
+        ru_text = dlg._dictionary_status_labels["ru"].text()
+        assert "/usr/share/hunspell/en_US.dic" in en_text
+        assert "73 959" in en_text
+        assert "/usr/share/hunspell/ru_RU.dic" in ru_text
+        assert "146 229" in ru_text
+        assert en_text != ru_text
+        from lswitch.i18n import t
+
+        assert (
+            dlg._widgets["system_dict_en_path"].placeholderText()
+            == t("settings_dictionary_path_auto_placeholder")
+        )
+
+    def test_shows_disabled_and_not_found_dictionary_statuses(
+        self,
+        config_mgr,
+        event_bus_ui,
+    ):
+        from lswitch.i18n import t
+
+        owner = types.SimpleNamespace(
+            system_dictionary_statuses=(
+                SystemDictionaryStatus(lang="en", enabled=False),
+                SystemDictionaryStatus(lang="ru", enabled=True),
+            ),
+        )
+
+        dlg = ConfigDialog(
+            config=config_mgr,
+            event_bus=event_bus_ui,
+            app=owner,
+        )
+
+        assert (
+            dlg._dictionary_status_labels["en"].text()
+            == t("settings_dictionary_status_disabled")
+        )
+        assert (
+            dlg._dictionary_status_labels["ru"].text()
+            == t("settings_dictionary_status_not_found")
+        )
+
+    def test_refreshes_dictionary_status_after_runtime_change(
+        self,
+        config_mgr,
+        event_bus_ui,
+    ):
+        owner = types.SimpleNamespace(
+            system_dictionary_statuses=(
+                SystemDictionaryStatus(lang="en", enabled=False),
+                SystemDictionaryStatus(lang="ru", enabled=False),
+            ),
+        )
+        dlg = ConfigDialog(
+            config=config_mgr,
+            event_bus=event_bus_ui,
+            app=owner,
+        )
+        owner.system_dictionary_statuses = (
+            SystemDictionaryStatus(
+                lang="en",
+                enabled=True,
+                path="/usr/share/hunspell/en_US.dic",
+                word_count=73_959,
+            ),
+            SystemDictionaryStatus(
+                lang="ru",
+                enabled=True,
+                path="/usr/share/hunspell/ru_RU.dic",
+                word_count=146_229,
+            ),
+        )
+
+        dlg._on_config_changed(
+            Event(EventType.CONFIG_CHANGED, {}, time.time())
+        )
+
+        assert "en_US.dic" in dlg._dictionary_status_labels["en"].text()
+        assert "ru_RU.dic" in dlg._dictionary_status_labels["ru"].text()
 
     def test_apply_updates_nested_setting_without_closing(self, config_mgr, event_bus_ui):
         dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)

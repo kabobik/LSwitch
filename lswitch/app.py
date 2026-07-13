@@ -148,6 +148,7 @@ class LSwitchApp:
         self.prefix_dictionary = None
         self.auto_detector = None
         self.mid_word_detector = None
+        self.system_dictionary_statuses: tuple = ()
         self.user_dict = None
         self._mid_word_runtime_signature = None
         self._platform = None
@@ -221,6 +222,9 @@ class LSwitchApp:
         self.prefix_dictionary = conversion_runtime.prefix_dictionary
         self.auto_detector = conversion_runtime.auto_detector
         self.mid_word_detector = conversion_runtime.mid_word_detector
+        self.system_dictionary_statuses = (
+            conversion_runtime.system_dictionaries
+        )
         self.conversion_engine = conversion_runtime.conversion_engine
         self.conversion_engine.layout_switch_controller = (
             self.layout_switch_controller
@@ -371,6 +375,9 @@ class LSwitchApp:
             self.mid_word_detector = (
                 prepared_update.mid_word_runtime.mid_word_detector
             )
+            self.system_dictionary_statuses = (
+                prepared_update.mid_word_runtime.system_dictionaries
+            )
             self._mid_word_runtime_signature = prepared_update.mid_word_signature
         else:
             self._apply_mid_word_runtime_config()
@@ -394,6 +401,7 @@ class LSwitchApp:
         )
         self.prefix_dictionary = mid_word_runtime.prefix_dictionary
         self.mid_word_detector = mid_word_runtime.mid_word_detector
+        self.system_dictionary_statuses = mid_word_runtime.system_dictionaries
         self._mid_word_runtime_signature = signature
 
     def _current_mid_word_runtime_signature(self) -> tuple:

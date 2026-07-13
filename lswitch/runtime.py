@@ -112,12 +112,14 @@ class ConversionRuntimeComponents:
     prefix_dictionary: object
     mid_word_detector: object
     conversion_engine: ConversionEngine
+    system_dictionaries: tuple = ()
 
 
 @dataclass(frozen=True)
 class MidWordDetectionRuntime:
     prefix_dictionary: object
     mid_word_detector: object
+    system_dictionaries: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -310,6 +312,7 @@ def create_conversion_runtime(
             debug=debug,
             timing=timing,
         ),
+        system_dictionaries=mid_word_runtime.system_dictionaries,
     )
 
 
@@ -335,11 +338,12 @@ def create_mid_word_detection_runtime(
             "ru": system_dict_ru_path,
         },
     )
+    include_system = bool(auto_switch_mid_word and system_dict_enabled)
     prefix_dictionary = PrefixDictionary.from_dictionary_service(
         dictionary,
         min_prefix_len=mid_word_min_prefix_len,
         system_loader=system_loader,
-        include_system=bool(auto_switch_mid_word and system_dict_enabled),
+        include_system=include_system,
     )
     return MidWordDetectionRuntime(
         prefix_dictionary=prefix_dictionary,
@@ -348,6 +352,10 @@ def create_mid_word_detection_runtime(
             min_prefix_len=mid_word_min_prefix_len,
             user_dict=user_dict,
             user_dict_min_weight=user_dict_min_weight,
+        ),
+        system_dictionaries=tuple(
+            system_loader.get_status(lang, enabled=include_system)
+            for lang in ("en", "ru")
         ),
     )
 
