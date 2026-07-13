@@ -631,6 +631,37 @@ class TestConfigDialog:
 
         assert dlg._stack.count() == 5
         assert len(dlg._widgets) == 33
+        assert len(dlg._setting_help_icons) == 33
+
+    def test_every_setting_has_localized_help_icon(
+        self,
+        config_mgr,
+        event_bus_ui,
+    ):
+        from lswitch.i18n import t
+        from lswitch.ui.settings_model import SETTINGS_BINDINGS
+
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
+
+        for binding in SETTINGS_BINDINGS:
+            icon = dlg._setting_help_icons[binding.path]
+            assert icon.text() == "ⓘ"
+            assert icon.toolTip() == t(binding.help_key)
+            assert icon.toolTip() != binding.help_key
+
+    def test_help_remains_available_for_disabled_child_setting(
+        self,
+        config_mgr,
+        event_bus_ui,
+    ):
+        dlg = ConfigDialog(config=config_mgr, event_bus=event_bus_ui)
+
+        dlg._widgets["auto_switch"].setChecked(False)
+
+        assert dlg._widgets["auto_switch_threshold"].isEnabled() is False
+        assert dlg._setting_help_icons[
+            "auto_switch_threshold"
+        ].isEnabled() is True
 
     def test_x11_hides_wayland_settings(self, config_mgr, event_bus_ui):
         owner = types.SimpleNamespace(
@@ -651,6 +682,9 @@ class TestConfigDialog:
             elif path.startswith("x11_selection_timing."):
                 assert all(item.isVisible() for item in group)
         assert dlg._strategy_help.isVisible() is False
+        assert dlg._setting_help_icons[
+            "wayland_selection_strategy"
+        ].isVisible() is False
         assert dlg._platform_warning_label is None
 
     def test_wayland_hides_x11_settings(self, config_mgr, event_bus_ui):
@@ -672,6 +706,9 @@ class TestConfigDialog:
             ):
                 assert all(item.isVisible() for item in group)
         assert dlg._strategy_help.isVisible() is True
+        assert dlg._setting_help_icons[
+            "wayland_selection_strategy"
+        ].isVisible() is True
         assert dlg._platform_warning_label is None
 
     def test_unknown_session_shows_all_settings_and_warning(

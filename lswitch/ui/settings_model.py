@@ -29,6 +29,7 @@ class SettingsBinding:
     page: str
     widget: str
     label_key: str
+    help_key: str
     minimum: float | int | None = None
     maximum: float | int | None = None
     decimals: int | None = None
@@ -52,6 +53,7 @@ def _binding(
         page=page,
         widget=widget,
         label_key=f"settings_{path.replace('.', '_')}",
+        help_key=f"settings_{path.replace('.', '_')}_help",
         minimum=minimum,
         maximum=maximum,
         decimals=decimals,

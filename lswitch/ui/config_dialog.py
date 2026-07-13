@@ -84,6 +84,8 @@ class ConfigDialog(QDialog):
         self.model = SettingsDraftModel(committed)
         self._widgets: dict[str, object] = {}
         self._control_groups: dict[str, list[object]] = {}
+        self._row_groups: dict[str, list[object]] = {}
+        self._setting_help_icons: dict[str, QLabel] = {}
         self._rendered_values: dict[str, object] = {}
         self._page_widgets: dict[str, object] = {}
         self._dictionary_status_labels: dict[str, QLabel] = {}
@@ -170,10 +172,30 @@ class ConfigDialog(QDialog):
             if binding.page != page:
                 continue
             label = QLabel(t(binding.label_key))
+            help_icon = self._create_help_icon(binding)
+            label_container = QWidget()
+            label_layout = QHBoxLayout(label_container)
+            if hasattr(label_layout, "setContentsMargins"):
+                label_layout.setContentsMargins(0, 0, 0, 0)
+            if hasattr(label_layout, "setSpacing"):
+                label_layout.setSpacing(4)
+            label_layout.addWidget(label)
+            label_layout.addWidget(help_icon)
+            label_layout.addStretch()
             control, group = self._create_control(binding)
             self._widgets[binding.path] = control
             self._control_groups[binding.path] = [label, *group]
-            form.addRow(label, group[0] if len(group) == 1 else group[-1])
+            self._row_groups[binding.path] = [
+                label_container,
+                label,
+                help_icon,
+                *group,
+            ]
+            self._setting_help_icons[binding.path] = help_icon
+            form.addRow(
+                label_container,
+                group[0] if len(group) == 1 else group[-1],
+            )
             if binding.path in {
                 "system_dict_en_path",
                 "system_dict_ru_path",
@@ -230,6 +252,22 @@ class ConfigDialog(QDialog):
         scroll.setWidget(content)
         self._page_widgets[page] = content
         return scroll
+
+    def _create_help_icon(self, binding) -> QLabel:
+        description = t(binding.help_key)
+        icon = QLabel("ⓘ")
+        icon.setToolTip(description)
+        if hasattr(icon, "setToolTipDuration"):
+            icon.setToolTipDuration(30_000)
+        if hasattr(icon, "setStyleSheet"):
+            icon.setStyleSheet("font-size: 16px;")
+        if hasattr(icon, "setAccessibleName"):
+            icon.setAccessibleName(
+                t("settings_help_accessible", setting=t(binding.label_key))
+            )
+        if hasattr(icon, "setAccessibleDescription"):
+            icon.setAccessibleDescription(description)
+        return icon
 
     def _create_control(self, binding):
         if binding.widget == "bool":
@@ -385,7 +423,7 @@ class ConfigDialog(QDialog):
 
     def _apply_platform_visibility(self) -> None:
         visible_paths = platform_visibility(self._session_type)
-        for path, group in self._control_groups.items():
+        for path, group in self._row_groups.items():
             visible = visible_paths[path]
             for item in group:
                 if hasattr(item, "setVisible"):
