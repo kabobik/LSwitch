@@ -2,7 +2,16 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from lswitch.core.decision_trace import (
+    DecisionOutcome,
+    DecisionTraceStep,
+    StepState,
+    TraceFact,
+)
+from lswitch.intelligence.dictionary_service import DictionaryDecision
 
 if TYPE_CHECKING:
     from lswitch.intelligence.dictionary_service import DictionaryService
@@ -10,6 +19,24 @@ if TYPE_CHECKING:
     from lswitch.intelligence.user_dictionary import UserDictionary
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AutoDecision:
+    """Structured automatic-layout decision with ordered rule evidence."""
+
+    outcome: DecisionOutcome
+    reason_id: str
+    reason: str
+    original: str
+    source_lang: str
+    converted: str | None = None
+    target_lang: str | None = None
+    steps: tuple[DecisionTraceStep, ...] = ()
+
+    @property
+    def should_convert(self) -> bool:
+        return self.outcome is DecisionOutcome.CONVERT
 
 
 class AutoDetector:
@@ -30,83 +57,361 @@ class AutoDetector:
         self.user_dict = user_dict
         self.user_dict_min_weight = user_dict_min_weight
 
-    def should_convert(self, word: str | None, current_layout: str) -> tuple[bool, str]:
-        """Return (should_convert, reason).
+    def evaluate(self, word: str | None, current_layout: str) -> AutoDecision:
+        """Evaluate a candidate once and retain every reached rule."""
+        steps: list[DecisionTraceStep] = []
 
-        Args:
-            word: the word as typed (e.g. "ghbdtn"), or None.
-            current_layout: layout the word was typed in ("en" or "ru").
-
-        Returns:
-            (should_convert: bool, reason: str)
-        """
-        # Guard: None or non-string
         if not isinstance(word, str):
-            return (False, "empty or invalid input")
+            return AutoDecision(
+                outcome=DecisionOutcome.SKIP,
+                reason_id="candidate.invalid",
+                reason="empty or invalid input",
+                original="",
+                source_lang=current_layout,
+                steps=(
+                    self._step(
+                        "candidate.invalid",
+                        StepState.MATCHED,
+                        decisive=True,
+                        input_type=type(word).__name__,
+                    ),
+                ),
+            )
 
         word_clean = word.strip()
         if not word_clean:
-            return (False, "empty input")
+            return AutoDecision(
+                outcome=DecisionOutcome.SKIP,
+                reason_id="candidate.empty",
+                reason="empty input",
+                original="",
+                source_lang=current_layout,
+                steps=(
+                    self._step(
+                        "candidate.empty",
+                        StepState.MATCHED,
+                        decisive=True,
+                    ),
+                ),
+            )
 
-        # Guard: reject words that contain characters which are neither
-        # alphabetic nor valid "letter keys" for the given layout.
-        # On EN keyboard ',' / '.' / ';' etc. are the physical keys for
-        # Cyrillic letters б / ю / ж — they must not block conversion.
         from lswitch.intelligence.maps import EN_TO_RU, RU_TO_EN
-        if current_layout == "en":
-            if not all(c.isalpha() or EN_TO_RU.get(c.lower(), "").isalpha()
-                       for c in word_clean):
-                return (False, "non-alphabetic input")
-        elif current_layout == "ru":
-            if not all(c.isalpha() or RU_TO_EN.get(c.lower(), "").isalpha()
-                       for c in word_clean):
-                return (False, "non-alphabetic input")
-        else:
-            if not word_clean.isalpha():
-                return (False, "non-alphabetic input")
 
-        # Priority 0: UserDictionary override & protection
+        if current_layout == "en":
+            valid_characters = all(
+                c.isalpha() or EN_TO_RU.get(c.lower(), "").isalpha()
+                for c in word_clean
+            )
+        elif current_layout == "ru":
+            valid_characters = all(
+                c.isalpha() or RU_TO_EN.get(c.lower(), "").isalpha()
+                for c in word_clean
+            )
+        else:
+            valid_characters = word_clean.isalpha()
+
+        if not valid_characters:
+            return AutoDecision(
+                outcome=DecisionOutcome.SKIP,
+                reason_id="candidate.non_alphabetic",
+                reason="non-alphabetic input",
+                original=word_clean,
+                source_lang=current_layout,
+                steps=(
+                    self._step(
+                        "candidate.non_alphabetic",
+                        StepState.MATCHED,
+                        decisive=True,
+                        length=len(word_clean),
+                    ),
+                ),
+            )
+
+        steps.append(
+            self._step(
+                "candidate.valid",
+                StepState.MATCHED,
+                length=len(word_clean),
+                layout=current_layout,
+            )
+        )
+
+        normalized = word_clean.lower()
+        converted, target_lang = self._converted_word(
+            normalized,
+            current_layout,
+        )
+
         if self.user_dict:
-            w_lower = word_clean.lower()
-            
-            weight = self.user_dict.get_weight(w_lower, current_layout)
+            weight = self.user_dict.get_weight(normalized, current_layout)
             min_w = self.user_dict_min_weight
-            
+
             if weight >= min_w:
-                return (True, "User dict override")
+                steps.append(
+                    self._step(
+                        "auto.user_dictionary.override",
+                        StepState.MATCHED,
+                        decisive=True,
+                        weight=weight,
+                        threshold=min_w,
+                    )
+                )
+                return AutoDecision(
+                    outcome=DecisionOutcome.CONVERT,
+                    reason_id="auto.user_dictionary.override",
+                    reason="User dict override",
+                    original=word_clean,
+                    converted=converted,
+                    source_lang=current_layout,
+                    target_lang=target_lang,
+                    steps=tuple(steps),
+                )
             if weight <= -min_w:
-                return (False, f"user_dict: weight={weight} <= -{min_w}")
-
-        # Priority 1 & 2: dictionary-based detection
-        dict_convert, dict_reason = self.dictionary.should_convert(word_clean, current_layout)
-
-        # Priority 1: word is already correct → keep as-is
-        if not dict_convert and "already correct" in dict_reason:
-            return (False, dict_reason)
-
-        # Priority 2: converted form is a known word → convert
-        if dict_convert:
-            return (True, dict_reason)
-
-        # Priority 3: N-gram analysis on the converted text
-        w = word_clean.lower()
-        if current_layout == "en":
-            converted = "".join(EN_TO_RU.get(c, c) for c in w)
-            score_target = self.ngrams.score(converted, "ru")
-            score_source = self.ngrams.score(w, "en")
-        elif current_layout == "ru":
-            converted = "".join(RU_TO_EN.get(c, c) for c in w)
-            score_target = self.ngrams.score(converted, "en")
-            score_source = self.ngrams.score(w, "ru")
+                steps.append(
+                    self._step(
+                        "auto.user_dictionary.protection",
+                        StepState.MATCHED,
+                        decisive=True,
+                        weight=weight,
+                        threshold=-min_w,
+                    )
+                )
+                return AutoDecision(
+                    outcome=DecisionOutcome.KEEP,
+                    reason_id="auto.user_dictionary.protection",
+                    reason=f"user_dict: weight={weight} <= -{min_w}",
+                    original=word_clean,
+                    converted=converted,
+                    source_lang=current_layout,
+                    target_lang=target_lang,
+                    steps=tuple(steps),
+                )
+            steps.append(
+                self._step(
+                    "auto.user_dictionary.neutral",
+                    StepState.NOT_MATCHED,
+                    weight=weight,
+                    threshold=min_w,
+                )
+            )
         else:
-            return (False, f"unknown layout: {current_layout}")
+            steps.append(
+                self._step(
+                    "auto.user_dictionary.disabled",
+                    StepState.SKIPPED,
+                )
+            )
+
+        dictionary_decision = self.dictionary.evaluate(
+            word_clean,
+            current_layout,
+        )
+        if not isinstance(dictionary_decision, DictionaryDecision):
+            raise TypeError("DictionaryService.evaluate() returned invalid result")
+
+        if dictionary_decision.reason_id == "dictionary.layout.unknown":
+            steps.append(
+                self._step(
+                    "auto.layout.unknown",
+                    StepState.MATCHED,
+                    decisive=True,
+                    layout=current_layout,
+                )
+            )
+            return AutoDecision(
+                outcome=DecisionOutcome.SKIP,
+                reason_id="auto.layout.unknown",
+                reason=dictionary_decision.reason,
+                original=word_clean,
+                source_lang=current_layout,
+                steps=tuple(steps),
+            )
+
+        source_state = (
+            StepState.MATCHED
+            if dictionary_decision.source_match
+            else StepState.NOT_MATCHED
+        )
+        steps.append(
+            self._step(
+                "auto.source_dictionary.match",
+                source_state,
+                decisive=bool(dictionary_decision.source_match),
+                available=dictionary_decision.source_available,
+                lang=current_layout,
+                word=normalized,
+            )
+        )
+        if dictionary_decision.source_match:
+            return AutoDecision(
+                outcome=DecisionOutcome.KEEP,
+                reason_id="auto.source_dictionary.match",
+                reason=dictionary_decision.reason,
+                original=word_clean,
+                converted=converted,
+                source_lang=current_layout,
+                target_lang=target_lang,
+                steps=tuple(steps),
+            )
+
+        target_state = (
+            StepState.MATCHED
+            if dictionary_decision.target_match
+            else StepState.NOT_MATCHED
+        )
+        steps.append(
+            self._step(
+                "auto.target_dictionary.match",
+                target_state,
+                decisive=bool(dictionary_decision.target_match),
+                available=dictionary_decision.target_available,
+                lang=target_lang,
+                word=converted,
+            )
+        )
+        if dictionary_decision.target_match:
+            return AutoDecision(
+                outcome=DecisionOutcome.CONVERT,
+                reason_id="auto.target_dictionary.match",
+                reason=dictionary_decision.reason,
+                original=word_clean,
+                converted=converted,
+                source_lang=current_layout,
+                target_lang=target_lang,
+                steps=tuple(steps),
+            )
+
+        if converted is None or target_lang is None:
+            steps.append(
+                self._step(
+                    "auto.layout.unknown",
+                    StepState.MATCHED,
+                    decisive=True,
+                    layout=current_layout,
+                )
+            )
+            return AutoDecision(
+                outcome=DecisionOutcome.SKIP,
+                reason_id="auto.layout.unknown",
+                reason=f"unknown layout: {current_layout}",
+                original=word_clean,
+                source_lang=current_layout,
+                steps=tuple(steps),
+            )
+
+        score_target = self.ngrams.score(converted, target_lang)
+        score_source = self.ngrams.score(normalized, current_layout)
 
         threshold = 0.05
-        if score_target - score_source > threshold:
-            return (True, f"ngram: target={score_target:.3f} > source={score_source:.3f}")
+        delta = score_target - score_source
+        ngram_matches = delta > threshold
+        steps.append(
+            self._step(
+                "auto.ngram.delta",
+                StepState.MATCHED if ngram_matches else StepState.NOT_MATCHED,
+                decisive=ngram_matches,
+                source_score=score_source,
+                target_score=score_target,
+                delta=delta,
+                threshold=threshold,
+            )
+        )
+        if ngram_matches:
+            return AutoDecision(
+                outcome=DecisionOutcome.CONVERT,
+                reason_id="auto.ngram.delta",
+                reason=(
+                    f"ngram: target={score_target:.3f} "
+                    f"> source={score_source:.3f}"
+                ),
+                original=word_clean,
+                converted=converted,
+                source_lang=current_layout,
+                target_lang=target_lang,
+                steps=tuple(steps),
+            )
 
-        # Heuristic: zero source score + long enough word → likely wrong layout
-        if score_source == 0.0 and len(w) >= 4:
-            return (True, "ngram: zero source score, likely wrong layout")
+        zero_source_matches = score_source == 0.0 and len(normalized) >= 4
+        steps.append(
+            self._step(
+                "auto.ngram.zero_source",
+                (
+                    StepState.MATCHED
+                    if zero_source_matches
+                    else StepState.NOT_MATCHED
+                ),
+                decisive=zero_source_matches,
+                source_score=score_source,
+                length=len(normalized),
+                minimum_length=4,
+            )
+        )
+        if zero_source_matches:
+            return AutoDecision(
+                outcome=DecisionOutcome.CONVERT,
+                reason_id="auto.ngram.zero_source",
+                reason="ngram: zero source score, likely wrong layout",
+                original=word_clean,
+                converted=converted,
+                source_lang=current_layout,
+                target_lang=target_lang,
+                steps=tuple(steps),
+            )
 
-        return (False, "no evidence of wrong layout")
+        steps.append(
+            self._step(
+                "auto.no_evidence",
+                StepState.MATCHED,
+                decisive=True,
+            )
+        )
+        return AutoDecision(
+            outcome=DecisionOutcome.KEEP,
+            reason_id="auto.no_evidence",
+            reason="no evidence of wrong layout",
+            original=word_clean,
+            converted=converted,
+            source_lang=current_layout,
+            target_lang=target_lang,
+            steps=tuple(steps),
+        )
+
+    def should_convert(
+        self,
+        word: str | None,
+        current_layout: str,
+    ) -> tuple[bool, str]:
+        """Compatibility wrapper preserving the legacy tuple contract."""
+        decision = self.evaluate(word, current_layout)
+        return decision.should_convert, decision.reason
+
+    @staticmethod
+    def _converted_word(
+        word: str,
+        current_layout: str,
+    ) -> tuple[str | None, str | None]:
+        from lswitch.intelligence.maps import EN_TO_RU, RU_TO_EN
+
+        if current_layout == "en":
+            return "".join(EN_TO_RU.get(char, char) for char in word), "ru"
+        if current_layout == "ru":
+            return "".join(RU_TO_EN.get(char, char) for char in word), "en"
+        return None, None
+
+    @staticmethod
+    def _step(
+        rule_id: str,
+        state: StepState,
+        *,
+        decisive: bool = False,
+        **facts,
+    ) -> DecisionTraceStep:
+        return DecisionTraceStep(
+            rule_id=rule_id,
+            state=state,
+            decisive=decisive,
+            facts=tuple(
+                TraceFact(key=key, value=value)
+                for key, value in facts.items()
+            ),
+        )

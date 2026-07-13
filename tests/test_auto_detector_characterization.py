@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from lswitch.intelligence.auto_detector import AutoDetector
+from lswitch.intelligence.dictionary_service import DictionaryDecision
 
 
 @dataclass
@@ -15,6 +16,39 @@ class _Dictionary:
     def should_convert(self, word: str, layout: str) -> tuple[bool, str]:
         self.calls.append((word, layout))
         return self.result
+
+    def evaluate(self, word: str, layout: str) -> DictionaryDecision:
+        self.calls.append((word, layout))
+        should_convert, reason = self.result
+        if reason.startswith("unknown layout"):
+            reason_id = "dictionary.layout.unknown"
+            source_match = None
+            target_match = None
+        elif should_convert:
+            reason_id = "dictionary.target.match"
+            source_match = False
+            target_match = True
+        elif reason.startswith("already correct"):
+            reason_id = "dictionary.source.match"
+            source_match = True
+            target_match = None
+        else:
+            reason_id = "dictionary.no_match"
+            source_match = False
+            target_match = False
+        return DictionaryDecision(
+            should_convert=should_convert,
+            reason_id=reason_id,
+            reason=reason,
+            word=word,
+            current_lang=layout,
+            target_lang="ru" if layout == "en" else "en",
+            converted_word="привет" if word == "ghbdtn" else None,
+            source_match=source_match,
+            target_match=target_match,
+            source_available=True,
+            target_available=True,
+        )
 
 
 @dataclass

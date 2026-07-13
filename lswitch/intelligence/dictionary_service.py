@@ -3,8 +3,26 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DictionaryDecision:
+    """Structured full-word dictionary evidence."""
+
+    should_convert: bool
+    reason_id: str
+    reason: str
+    word: str
+    current_lang: str
+    target_lang: str | None = None
+    converted_word: str | None = None
+    source_match: bool | None = None
+    target_match: bool | None = None
+    source_available: bool | None = None
+    target_available: bool | None = None
 
 
 class DictionaryService:
@@ -16,14 +34,18 @@ class DictionaryService:
     def __init__(self):
         self._ru_words: set[str] | None = None
         self._en_words: set[str] | None = None
+        self._ru_available: bool | None = None
+        self._en_available: bool | None = None
 
     def _load_ru(self) -> set[str]:
         if self._ru_words is None:
             try:
                 from lswitch.intelligence.ru_words import RUSSIAN_WORDS
                 self._ru_words = RUSSIAN_WORDS
+                self._ru_available = True
             except ImportError:
                 self._ru_words = set()
+                self._ru_available = False
         return self._ru_words
 
     def _load_en(self) -> set[str]:
@@ -31,8 +53,10 @@ class DictionaryService:
             try:
                 from lswitch.intelligence.en_words import ENGLISH_WORDS
                 self._en_words = ENGLISH_WORDS
+                self._en_available = True
             except ImportError:
                 self._en_words = set()
+                self._en_available = False
         return self._en_words
 
     def in_ru(self, word: str) -> bool:
@@ -51,45 +75,121 @@ class DictionaryService:
             return set(self._load_ru())
         return set()
 
-    def should_convert(self, word: str, current_layout: str) -> tuple[bool, str]:
-        """Determine whether *word* typed in *current_layout* should be converted.
-
-        Decision priorities (from TECHNICAL_SPEC_v2.md §6.2):
-          1. Word is already correct for current layout → don't convert.
-          2. Converted word exists in target layout's dictionary → convert.
-          3. Otherwise → don't convert.
-
-        Args:
-            word: the word as typed (e.g. "ghbdtn" or "привет").
-            current_layout: layout the word was typed in ("en" or "ru").
-
-        Returns:
-            (should_convert: bool, reason: str)
-        """
+    def evaluate(self, word: str, current_layout: str) -> DictionaryDecision:
+        """Return structured full-word dictionary evidence."""
         from lswitch.intelligence.maps import EN_TO_RU, RU_TO_EN
 
         word_lower = word.lower() if isinstance(word, str) else ""
         if not word_lower:
-            return (False, "empty or invalid input")
+            return DictionaryDecision(
+                should_convert=False,
+                reason_id="dictionary.candidate.invalid",
+                reason="empty or invalid input",
+                word=word_lower,
+                current_lang=current_layout,
+            )
 
         if current_layout == "en":
-            # Priority 1: already a correct English word → keep it
-            if self.in_en(word_lower):
-                return (False, "already correct English word")
-            # Priority 2: convert EN→RU and check Russian dictionary
+            source_words = self._load_en()
+            source_available = bool(self._en_available)
+            if word_lower in source_words:
+                return DictionaryDecision(
+                    should_convert=False,
+                    reason_id="dictionary.source.match",
+                    reason="already correct English word",
+                    word=word_lower,
+                    current_lang="en",
+                    target_lang="ru",
+                    source_match=True,
+                    source_available=source_available,
+                )
+
             converted = "".join(EN_TO_RU.get(c, c) for c in word_lower)
-            if self.in_ru(converted):
-                return (True, f"converted to Russian word '{converted}'")
-            return (False, "not found in any dictionary")
+            target_words = self._load_ru()
+            target_available = bool(self._ru_available)
+            if converted in target_words:
+                return DictionaryDecision(
+                    should_convert=True,
+                    reason_id="dictionary.target.match",
+                    reason=f"converted to Russian word '{converted}'",
+                    word=word_lower,
+                    current_lang="en",
+                    target_lang="ru",
+                    converted_word=converted,
+                    source_match=False,
+                    target_match=True,
+                    source_available=source_available,
+                    target_available=target_available,
+                )
+            return DictionaryDecision(
+                should_convert=False,
+                reason_id="dictionary.no_match",
+                reason="not found in any dictionary",
+                word=word_lower,
+                current_lang="en",
+                target_lang="ru",
+                converted_word=converted,
+                source_match=False,
+                target_match=False,
+                source_available=source_available,
+                target_available=target_available,
+            )
 
-        elif current_layout == "ru":
-            # Priority 1: already a correct Russian word → keep it
-            if self.in_ru(word_lower):
-                return (False, "already correct Russian word")
-            # Priority 2: convert RU→EN and check English dictionary
+        if current_layout == "ru":
+            source_words = self._load_ru()
+            source_available = bool(self._ru_available)
+            if word_lower in source_words:
+                return DictionaryDecision(
+                    should_convert=False,
+                    reason_id="dictionary.source.match",
+                    reason="already correct Russian word",
+                    word=word_lower,
+                    current_lang="ru",
+                    target_lang="en",
+                    source_match=True,
+                    source_available=source_available,
+                )
+
             converted = "".join(RU_TO_EN.get(c, c) for c in word_lower)
-            if self.in_en(converted):
-                return (True, f"converted to English word '{converted}'")
-            return (False, "not found in any dictionary")
+            target_words = self._load_en()
+            target_available = bool(self._en_available)
+            if converted in target_words:
+                return DictionaryDecision(
+                    should_convert=True,
+                    reason_id="dictionary.target.match",
+                    reason=f"converted to English word '{converted}'",
+                    word=word_lower,
+                    current_lang="ru",
+                    target_lang="en",
+                    converted_word=converted,
+                    source_match=False,
+                    target_match=True,
+                    source_available=source_available,
+                    target_available=target_available,
+                )
+            return DictionaryDecision(
+                should_convert=False,
+                reason_id="dictionary.no_match",
+                reason="not found in any dictionary",
+                word=word_lower,
+                current_lang="ru",
+                target_lang="en",
+                converted_word=converted,
+                source_match=False,
+                target_match=False,
+                source_available=source_available,
+                target_available=target_available,
+            )
 
-        return (False, f"unknown layout: {current_layout}")
+        return DictionaryDecision(
+            should_convert=False,
+            reason_id="dictionary.layout.unknown",
+            reason=f"unknown layout: {current_layout}",
+            word=word_lower,
+            current_lang=current_layout,
+        )
+
+    def should_convert(self, word: str, current_layout: str) -> tuple[bool, str]:
+        """Compatibility wrapper around evaluate()."""
+        decision = self.evaluate(word, current_layout)
+        return decision.should_convert, decision.reason

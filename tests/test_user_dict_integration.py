@@ -12,6 +12,7 @@ from lswitch.core.conversion_engine import ConversionEngine
 from lswitch.core.events import Event, EventType, KeyEventData
 from lswitch.core.states import State
 from lswitch.intelligence.auto_detector import AutoDetector
+from lswitch.intelligence.dictionary_service import DictionaryDecision
 from lswitch.intelligence.user_dictionary import UserDictionary
 from lswitch.platform.xkb_adapter import LayoutInfo
 
@@ -91,6 +92,22 @@ def _make_user_dict_in_memory() -> UserDictionary:
     ud.data = UserDictionary._empty_data()
     ud.flush = MagicMock()  # suppress file writes
     return ud
+
+
+def _target_dictionary_decision() -> DictionaryDecision:
+    return DictionaryDecision(
+        should_convert=True,
+        reason_id="dictionary.target.match",
+        reason="converted found in target dict",
+        word="ghbdtn",
+        current_lang="en",
+        target_lang="ru",
+        converted_word="привет",
+        source_match=False,
+        target_match=True,
+        source_available=True,
+        target_available=True,
+    )
 
 
 def _do_double_shift(app: LSwitchApp):
@@ -207,7 +224,7 @@ class TestDoubleShiftAfterAutoCallsCorrection:
         # No correction — not protected
 
         dict_svc = MagicMock()
-        dict_svc.should_convert.return_value = (True, "converted found in target dict")
+        dict_svc.evaluate.return_value = _target_dictionary_decision()
         ngrams = MagicMock()
 
         detector = AutoDetector(dictionary=dict_svc, ngrams=ngrams, user_dict=ud)
@@ -253,7 +270,7 @@ class TestNegativeWeightBlocksConversion:
         ud.add_correction('ghbdtn', 'en')
 
         dict_svc = MagicMock()
-        dict_svc.should_convert.return_value = (True, "converted found in target dict")
+        dict_svc.evaluate.return_value = _target_dictionary_decision()
         ngrams = MagicMock()
 
         detector = AutoDetector(dictionary=dict_svc, ngrams=ngrams, user_dict=ud)
@@ -266,7 +283,7 @@ class TestNegativeWeightBlocksConversion:
         ud = _make_user_dict_in_memory()
 
         dict_svc = MagicMock()
-        dict_svc.should_convert.return_value = (True, "converted found in target dict")
+        dict_svc.evaluate.return_value = _target_dictionary_decision()
         ngrams = MagicMock()
 
         detector = AutoDetector(dictionary=dict_svc, ngrams=ngrams, user_dict=ud)
@@ -351,7 +368,7 @@ class TestUserDictDisabledNoEffect:
 
     def test_auto_detector_works_without_user_dict(self):
         dict_svc = MagicMock()
-        dict_svc.should_convert.return_value = (True, "converted found in target dict")
+        dict_svc.evaluate.return_value = _target_dictionary_decision()
         ngrams = MagicMock()
 
         detector = AutoDetector(dictionary=dict_svc, ngrams=ngrams, user_dict=None)
