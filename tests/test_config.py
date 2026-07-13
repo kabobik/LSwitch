@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import pytest
 
 from lswitch.config import (
@@ -56,6 +59,12 @@ class TestDefaultConfig:
         assert DEFAULT_CONFIG['x11_selection_timing'] == DEFAULT_X11_SELECTION_TIMING
         assert DEFAULT_CONFIG['wayland_timing'] == DEFAULT_WAYLAND_TIMING
         assert DEFAULT_CONFIG['wayland_selection_timing'] == DEFAULT_WAYLAND_SELECTION_TIMING
+
+    def test_example_toml_is_valid_and_matches_defaults(self):
+        path = Path(__file__).parents[1] / "config" / "config.toml.example"
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+
+        assert validate_config(raw) == DEFAULT_CONFIG
 
 
 # ------------------------------------------------------------------
@@ -262,6 +271,19 @@ class TestConfigManager:
     def test_get_returns_default(self, tmp_path):
         mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
         assert mgr.get('double_click_timeout') == 0.3
+
+    def test_saved_comments_describe_current_setting_semantics(self, tmp_path):
+        path = tmp_path / "cfg.toml"
+        mgr = ConfigManager(config_path=str(path))
+
+        assert mgr.save() is True
+
+        text = path.read_text(encoding="utf-8")
+        assert "false restores the previous layout" in text
+        assert "direct XKB/D-Bus target switching has priority" in text
+        assert "Minimum buffered characters" in text
+        assert "0 adds no restriction" in text
+        assert 'layout_switch_key = "Alt+Shift"' in text
 
     def test_get_missing_key_returns_default(self, tmp_path):
         mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))

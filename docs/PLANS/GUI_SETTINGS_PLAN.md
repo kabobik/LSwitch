@@ -8,6 +8,22 @@
 транзакционно, а зависимые элементы формы визуально отключаются вместе с
 родительской функцией без потери своих значений.
 
+## Статус реализации
+
+Основная реализация завершена 2026-07-13:
+
+- этапы 0–6 реализованы и покрыты automated tests;
+- все 33 leaf-параметра подключены к пяти страницам GUI;
+- GUI, tray и SIGHUP используют единый транзакционный controller;
+- словари и mid-word detector подготавливаются до commit;
+- README, TOML comments/example и RU/EN labels актуализированы;
+- отдельный manual checklist находится в
+  `docs/GUI_SETTINGS_MANUAL_TESTING.md`.
+
+Automated и offscreen Qt проверки выполнены. Реальные X11 и KDE Wayland
+manual-сценарии оставлены в статусе «ожидает соответствующей графической
+сессии» и не отмечаются как пройденные из headless окружения.
+
 ## 1. Цель
 
 Нужно получить единый путь изменения конфигурации для GUI, tray menu и SIGHUP:
@@ -42,9 +58,9 @@ GUI draft / tray action / external TOML reload
 соответствующей сессии. Если adapter текущей платформы существует, его
 параметры обязаны обновляться на лету.
 
-## 2. Текущее состояние
+## 2. Исходное состояние
 
-Сейчас есть несколько разрозненных механизмов:
+До реализации плана существовали несколько разрозненных механизмов:
 
 - `DEFAULT_CONFIG` содержит 15 верхнеуровневых значений и 18 значений в
   timing-секциях;
@@ -875,21 +891,21 @@ finalization и отдельно логируется.
 
 ## 19. Definition of Done
 
-- [ ] Все 33 текущих config values представлены в GUI и корректно roundtrip-ятся.
-- [ ] Все параметры активной platform/runtime применяются после `Применить`
+- [x] Все 33 текущих config values представлены в GUI и корректно roundtrip-ятся.
+- [x] Все параметры активной platform/runtime применяются после `Применить`
   без process restart.
-- [ ] Нет отдельного writer path, обходящего config controller.
-- [ ] Config/runtime rollback работает при validation, preparation и save errors.
-- [ ] `switch_layout_after_convert`, `layout_switch_key`, `debug` имеют
+- [x] Нет отдельного runtime writer path, обходящего config controller.
+- [x] Config/runtime rollback работает при validation, preparation и save errors.
+- [x] `switch_layout_after_convert`, `layout_switch_key`, `debug` имеют
   автоматизированно проверенное runtime-поведение.
-- [ ] Все зависимости визуально отключают controls и сохраняют child values.
-- [ ] Tray menu открывает один dialog и синхронизирован с ним.
-- [ ] SIGHUP использует тот же validation/runtime application path.
-- [ ] Изменение timing не требует пересоздания UInput или process.
-- [ ] README, TOML comments/example и RU/EN GUI labels описывают реальную
+- [x] Все зависимости визуально отключают controls и сохраняют child values.
+- [x] Tray menu открывает один dialog и синхронизирован с ним.
+- [x] SIGHUP использует тот же validation/runtime application path.
+- [x] Изменение timing не требует пересоздания UInput или process.
+- [x] README, TOML comments/example и RU/EN GUI labels описывают реальную
   семантику.
-- [ ] Полный automated test suite проходит.
-- [ ] X11 и Wayland manual QA выполнены или явно отмечены как ожидающие
+- [x] Полный automated test suite проходит.
+- [x] X11 и Wayland manual QA выполнены или явно отмечены как ожидающие
   соответствующей сессии.
 
 ## 20. Рекомендуемый порядок коммитов

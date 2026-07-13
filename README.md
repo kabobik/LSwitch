@@ -23,7 +23,8 @@ git clone https://github.com/kabobik/lswitch.git && cd lswitch && bash scripts/i
 - ✅ **EN ⟷ RU** — английский ↔ русский
 - ✅ **Автоопределение раскладки** — по n-граммам и словарю
 - ✅ **Самообучающийся словарь** — учится на истории ошибок пользователя
-- ✅ **GUI иконка в трее** — статус и управление через PyQt6
+- ✅ **GUI иконка в трее** — быстрые переключатели и полное окно настроек через PyQt6
+- ✅ **Настройки без перезапуска** — все параметры активной сессии применяются на лету
 - ✅ **systemd служба** — автозапуск GUI при входе в систему
 
 ## Установка
@@ -87,8 +88,20 @@ sudo apt remove lswitch
 После запуска иконка LSwitch появляется в системном трее. Правая кнопка мыши — меню управления:
 - Переключить авто-конвертацию
 - Переключить самообучающийся словарь
+- Открыть `Настройки…`
 - Статус текущего процесса
-- Debug Monitor (если `"debug": true` в конфиге)
+- Debug Monitor (если включено отладочное журналирование)
+
+Окно настроек содержит пять страниц и все параметры `config.toml`.
+`Применить` сохраняет значения и обновляет работающий процесс, `OK` делает то
+же и закрывает окно, а `Отмена` отбрасывает несохранённый draft. Зависимые
+поля визуально отключаются вместе с родительской функцией, но введённые в них
+значения не теряются. Ошибка проверки ресурса или записи файла не оставляет
+частично применённую конфигурацию.
+
+Параметры текущего X11/Wayland adapter-а меняются сразу. Параметры другой
+графической платформы тоже сохраняются сразу и будут использованы при запуске
+соответствующей сессии.
 
 ### Автозапуск
 
@@ -121,7 +134,10 @@ lswitch --diagnose-wayland-switch-test # диагностика + тест пе�
 3. **Получение текста:** Извлекает последнее слово из внутреннего буфера событий ИЛИ выделение (X11 PRIMARY)
 4. **Конвертация:** Посимвольное преобразование EN ↔ RU через таблицу маппинга
 5. **Вставка:** Удаляет оригинал (Backspace × N) и «перепечатывает» конвертированный текст через виртуальную клавиатуру
-6. **Переключение раскладки:** Посылает `layout_switch_key` если `switch_layout_after_convert: true`
+6. **Раскладка результата:** Переключается прямо на целевую раскладку через
+   XKB/D-Bus, а проверяемую `layout_switch_key` использует как резервный способ.
+   `switch_layout_after_convert` определяет, оставить целевую раскладку или
+   восстановить исходную после ввода результата.
 
 ## Примеры
 
@@ -147,27 +163,27 @@ lswitch --diagnose-wayland-switch-test # диагностика + тест пе�
 
 # Maximum interval between two Shift presses, seconds.
 double_click_timeout = 0.3
-# Enable verbose logging and Debug Monitor tray action.
+# Enable live DEBUG logging and Debug Monitor; --trace remains an override.
 debug = false
-# Switch keyboard layout after manual conversion.
+# Keep the result layout after conversion; false restores the previous layout.
 switch_layout_after_convert = true
-# Shortcut used by the system to switch keyboard layout.
-layout_switch_key = "Alt_L+Shift_L"
-# Enable automatic wrong-layout detection and conversion.
+# Verified fallback shortcut; direct XKB/D-Bus target switching has priority.
+layout_switch_key = "Alt+Shift"
+# Enable automatic wrong-layout conversion at a word boundary.
 auto_switch = false
-# Minimum detector confidence for automatic conversion.
-auto_switch_threshold = 40
-# Enable layout switching before the current word is finished.
+# Minimum buffered characters before automatic conversion; 0 adds no restriction.
+auto_switch_threshold = 0
+# Enable automatic conversion while the current word is being typed.
 auto_switch_mid_word = false
 # Minimum prefix length before mid-word detection starts.
 mid_word_min_prefix_len = 4
-# Use system Hunspell/MySpell dictionaries while mid-word mode is enabled.
+# Use system Hunspell/MySpell dictionaries for mid-word detection.
 system_dict_enabled = true
-# Optional explicit .dic paths; empty values enable auto-discovery.
+# Optional readable .dic paths; empty values enable auto-discovery.
 system_dict_en_path = ""
 system_dict_ru_path = ""
 # Enable the self-learning user dictionary.
-user_dict_enabled = true
+user_dict_enabled = false
 # Automatically confirm accepted auto-conversions in the user dictionary.
 user_dict_auto_confirm = false
 # Minimum user dictionary score required to affect detection.
@@ -226,18 +242,25 @@ expand_selection_delay = 0.2
 
 **Параметры:**
 - `double_click_timeout` — максимальный интервал между двумя Shift (сек)
-- `switch_layout_after_convert` — переключать раскладку после конвертации
-- `layout_switch_key` — комбинация переключения раскладки (`Alt_L+Shift_L`, `Ctrl_L+Shift_L`)
-- `debug` — отладочные сообщения + пункт Debug Monitor в трее
+- `switch_layout_after_convert` — `true` оставляет раскладку результата;
+  `false` восстанавливает раскладку, активную до конвертации
+- `layout_switch_key` — резервная комбинация (`Alt+Shift`, `Ctrl+Shift`,
+  `Meta+Space`, `CapsLock`); прямое переключение на target через XKB/D-Bus
+  имеет приоритет. Legacy-форматы вроде `Alt_L+Shift_L` принимаются и
+  сохраняются в каноническом виде
+- `debug` — live-переключение уровня `INFO`/`DEBUG` и пункта Debug Monitor;
+  запущенный с `--trace` процесс сохраняет уровень `TRACE`
 - `auto_switch` — автоматически определять и конвертировать раскладку
-- `auto_switch_threshold` — порог уверенности авто-детектора (%)
+- `auto_switch_threshold` — минимальное число символов в буфере до
+  автоконвертации на границе слова; `0` не добавляет ограничения
 - `auto_switch_mid_word` — переключать раскладку до завершения слова; агрессивный
   opt-in режим, по умолчанию выключен
 - `mid_word_min_prefix_len` — минимальная длина префикса для mid-word проверки
 - `system_dict_enabled` — подмешивать системные Hunspell/MySpell словари только
   при включенном mid-word режиме
 - `system_dict_en_path`, `system_dict_ru_path` — необязательные явные пути к
-  английскому и русскому `.dic`; пустые значения включают автоопределение
+  английскому и русскому `.dic`; путь должен указывать на существующий
+  читаемый обычный файл, пустое значение включает автоопределение
 - `user_dict_enabled` — самообучающийся словарь
 - `user_dict_auto_confirm` — записывать в словарь молчаливое принятие авто-конвертации на следующем пробеле; по умолчанию выключено
 - `wayland_selection_strategy` — стратегия selection-конвертации на Wayland:
@@ -277,10 +300,18 @@ LSwitch использует встроенный EN/RU словарь и, ес�
 
 Число — это уверенность. Итоговый score считается как `convert - keep`; когда `abs(score)` достигает `user_dict_min_weight`, правило начинает влиять на автоопределение.
 
-После изменения конфига:
+Все изменения из окна настроек и быстрых переключателей tray применяются без
+перезапуска. Если TOML изменён внешним редактором, отправьте работающему
+процессу `SIGHUP`:
+
 ```bash
-lswitch --replace
+kill -HUP "$(cat "${XDG_RUNTIME_DIR:-/run/user/$UID}/lswitch.pid")"
 ```
+
+Внешний файл проходит ту же валидацию и подготовку runtime. При ошибке текущая
+конфигурация процесса продолжает работать; исправьте TOML и повторите `SIGHUP`.
+Пошаговые проверки GUI приведены в
+[`docs/GUI_SETTINGS_MANUAL_TESTING.md`](docs/GUI_SETTINGS_MANUAL_TESTING.md).
 
 ## Архитектура
 

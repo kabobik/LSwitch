@@ -102,6 +102,17 @@ class TestI18nClass:
         ru_keys = set(i18n._translations['ru'].keys())
         assert en_keys == ru_keys
 
+    def test_every_settings_binding_has_en_and_ru_label(self):
+        """Every config widget must have a translated human-readable label."""
+        from lswitch.ui.settings_model import SETTINGS_BINDINGS
+
+        i18n = self._make_i18n('en_US.UTF-8')
+        for binding in SETTINGS_BINDINGS:
+            key = f"settings_{binding.path.replace('.', '_')}"
+            for lang in ("en", "ru"):
+                assert key in i18n._translations[lang]
+                assert i18n._translations[lang][key] != key
+
 
 class TestGlobalFunctions:
     """Tests for module-level t() and get_lang() functions."""

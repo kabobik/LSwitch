@@ -1,23 +1,34 @@
 # LSwitch configuration
 
+# Maximum interval between two Shift presses, seconds.
 double_click_timeout = 0.3
-debug = true
+# Enable live DEBUG logging and Debug Monitor; --trace remains an override.
+debug = false
+# Keep the result layout after conversion; false restores the previous layout.
 switch_layout_after_convert = true
-layout_switch_key = "Alt_L+Shift_L"
+# Verified fallback shortcut; direct XKB/D-Bus target switching has priority.
+layout_switch_key = "Alt+Shift"
 
-auto_switch = true
-auto_switch_threshold = 10
+# Enable automatic wrong-layout detection at a word boundary.
+auto_switch = false
+# Minimum buffered characters before automatic conversion; 0 adds no restriction.
+auto_switch_threshold = 0
 
-# Aggressive opt-in mode: switch layout before the current word is finished.
+# Aggressive opt-in mode: convert while the current word is being typed.
 auto_switch_mid_word = false
+# Minimum prefix length before mid-word detection starts.
 mid_word_min_prefix_len = 4
-# System dictionaries are loaded only while mid-word switching is enabled.
+# Use system Hunspell/MySpell dictionaries for mid-word detection.
 system_dict_enabled = true
+# Optional explicit readable .dic paths; empty values enable auto-discovery.
 system_dict_en_path = ""
 system_dict_ru_path = ""
 
-user_dict_enabled = true
+# Enable the self-learning user dictionary.
+user_dict_enabled = false
+# Confirm accepted automatic conversions on the next word boundary.
 user_dict_auto_confirm = false
+# Minimum learned score required to affect detection.
 user_dict_min_weight = 2
 
 # Wayland selection strategies:
