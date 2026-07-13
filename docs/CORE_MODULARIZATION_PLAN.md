@@ -6,12 +6,11 @@
 архитектуре перед разработкой новых feature-планов:
 
 - `MID_WORD_SYSTEM_DICTIONARY_PLAN.md`;
-- `PER_APP_LAYOUT_MEMORY_PLAN.md`;
 - `LAYOUT_PROFILE_ARCHITECTURE_PLAN.md`.
 
 Цель - сначала стабилизировать ядро приложения и уменьшить роль `LSwitchApp`,
-а уже потом добавлять новые режимы автопереключения, память раскладки и более
-общую модель layout profiles.
+а уже потом добавлять новые режимы автопереключения и более общую модель layout
+profiles.
 
 ## 1. Текущее состояние
 
@@ -396,8 +395,8 @@ AutoSwitchResult(kind="converted", marker=...)
   содержит config/selection/lifecycle/conversion helper blocks физически;
 - app-level tests почти не проверяют private conversion/session facade:
   остались только smoke tests для `_do_conversion()`;
-- следующий этап - feature readiness gate перед возвратом к mid-word,
-  per-app layout memory и layout profile планам.
+- следующий этап - feature readiness gate перед возвратом к mid-word и layout
+  profile планам.
 
 ## 7. Следующие крупные пакеты работ
 
@@ -580,8 +579,7 @@ Acceptance:
 Статус: выполнено.
 
 Цель: принять решение о возврате к feature-планам
-`MID_WORD_SYSTEM_DICTIONARY_PLAN.md`, `PER_APP_LAYOUT_MEMORY_PLAN.md` и
-`LAYOUT_PROFILE_ARCHITECTURE_PLAN.md`.
+`MID_WORD_SYSTEM_DICTIONARY_PLAN.md` и `LAYOUT_PROFILE_ARCHITECTURE_PLAN.md`.
 
 Feature-работы можно начинать, когда выполнены условия:
 
@@ -606,8 +604,7 @@ Feature-работы можно начинать, когда выполнены 
    рефакторингом.
 2. `PrefixDictionary` и `SystemDictionaryLoader`.
 3. `MidWordAutoConversionUseCase`.
-4. `PER_APP_LAYOUT_MEMORY_PLAN.md` через отдельный controller capability.
-5. `LAYOUT_PROFILE_ARCHITECTURE_PLAN.md` как следующий большой слой, когда
+4. `LAYOUT_PROFILE_ARCHITECTURE_PLAN.md` как следующий большой слой, когда
    EN/RU helpers уже локализованы в `LayoutService`.
 
 ## 9. Файловая структура после миграции
