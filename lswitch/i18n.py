@@ -52,6 +52,8 @@ class I18n:
                 'show_logs': 'Show Logs',
                 'about': 'About',
                 'quit_panel': 'Quit Panel',
+                'settings_menu': 'Settings…',
+                'debug_monitor': 'Debug Monitor',
 
                 # Status messages
                 'status_running': 'Running',
@@ -183,6 +185,8 @@ class I18n:
                 'show_logs': 'Показать логи',
                 'about': 'О программе',
                 'quit_panel': 'Выход из панели',
+                'settings_menu': 'Настройки…',
+                'debug_monitor': 'Монитор отладки',
 
                 # Статусы
                 'status_running': 'Запущен',

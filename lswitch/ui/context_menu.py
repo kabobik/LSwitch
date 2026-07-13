@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QMenu
+from PyQt6.QtWidgets import QMenu, QMessageBox
 from PyQt6.QtGui import QAction, QIcon
 
 from lswitch.core.events import Event, EventType
@@ -36,6 +36,8 @@ class ContextMenu:
         self._menu: QMenu | None = None
         self._status_action: QAction | None = None
         self._debug_monitor = None  # DebugMonitorWindow instance
+        self._settings_dialog = None
+        self._subscribed = False
 
     # -- public API --------------------------------------------------------
 
@@ -68,6 +70,12 @@ class ContextMenu:
 
         menu.addSeparator()
 
+        self._settings_action = QAction(t("settings_menu"), menu)
+        self._settings_action.triggered.connect(self._show_settings)
+        menu.addAction(self._settings_action)
+
+        menu.addSeparator()
+
         # Status (informational — shows this process is running)
         self._status_action = QAction(f"{t('status')}: active", menu)
         self._status_action.setEnabled(False)
@@ -75,12 +83,12 @@ class ContextMenu:
 
         menu.addSeparator()
 
-        # Debug Monitor (only when debug mode is enabled)
-        if self.config and self.config.get("debug", False):
-            debug_action = QAction("Debug Monitor", menu)
-            debug_action.triggered.connect(self._show_debug_monitor)
-            menu.addAction(debug_action)
-            menu.addSeparator()
+        # Created once; visibility follows effective live debug state.
+        self._debug_action = QAction(t("debug_monitor"), menu)
+        self._debug_action.triggered.connect(self._show_debug_monitor)
+        menu.addAction(self._debug_action)
+        self._set_debug_action_visible(self._effective_debug())
+        menu.addSeparator()
 
         # About
         about_action = QAction(t('about'), menu)
@@ -94,6 +102,7 @@ class ContextMenu:
 
         # Initial status update
         self.update_status()
+        self._subscribe()
 
         return menu
 
@@ -110,6 +119,8 @@ class ContextMenu:
         current = self.config.get("auto_switch", False)
         new_val = not current
         if not self._apply_value("auto_switch", new_val):
+            if hasattr(self, '_auto_switch_action'):
+                self._auto_switch_action.setChecked(current)
             return
         if hasattr(self, '_auto_switch_action'):
             self._auto_switch_action.setChecked(new_val)
@@ -122,6 +133,8 @@ class ContextMenu:
         current = self.config.get("user_dict_enabled", False)
         new_val = not current
         if not self._apply_value("user_dict_enabled", new_val):
+            if hasattr(self, '_user_dict_action'):
+                self._user_dict_action.setChecked(current)
             return
         if hasattr(self, '_user_dict_action'):
             self._user_dict_action.setChecked(new_val)
@@ -132,7 +145,63 @@ class ContextMenu:
         candidate = self.config.get_all()
         candidate[key] = value
         result = self.config_controller.apply(candidate, source="tray")
+        if not result.ok:
+            QMessageBox.critical(
+                None,
+                t("settings_error_title"),
+                result.error or t("settings_unknown_error"),
+            )
         return result.ok
+
+    def _show_settings(self) -> None:
+        """Create one modeless settings dialog and raise it on later calls."""
+        from lswitch.ui.config_dialog import ConfigDialog
+
+        if self._settings_dialog is None:
+            self._settings_dialog = ConfigDialog(
+                config=self.config,
+                event_bus=self.event_bus,
+                config_controller=self.config_controller,
+                app=self._app,
+            )
+        self._settings_dialog.show()
+        self._settings_dialog.raise_()
+        self._settings_dialog.activateWindow()
+
+    def _subscribe(self) -> None:
+        if self.event_bus is not None and not self._subscribed:
+            self.event_bus.subscribe(EventType.CONFIG_CHANGED, self._on_config_changed)
+            self._subscribed = True
+
+    def cleanup(self) -> None:
+        if self.event_bus is not None and self._subscribed:
+            self.event_bus.unsubscribe(EventType.CONFIG_CHANGED, self._on_config_changed)
+            self._subscribed = False
+        if self._settings_dialog is not None:
+            self._settings_dialog.cleanup()
+
+    def _on_config_changed(self, event) -> None:
+        if self.config is None:
+            return
+        if hasattr(self, "_auto_switch_action"):
+            self._auto_switch_action.setChecked(
+                self.config.get("auto_switch", False)
+            )
+        if hasattr(self, "_user_dict_action"):
+            self._user_dict_action.setChecked(
+                self.config.get("user_dict_enabled", False)
+            )
+        if hasattr(self, "_debug_action"):
+            self._set_debug_action_visible(self._effective_debug())
+
+    def _effective_debug(self) -> bool:
+        if self._app is not None:
+            return bool(getattr(self._app, "debug", False))
+        return bool(self.config and self.config.get("debug", False))
+
+    def _set_debug_action_visible(self, visible: bool) -> None:
+        if hasattr(self, "_debug_action"):
+            self._debug_action.setVisible(bool(visible))
 
     @staticmethod
     def _show_about() -> None:

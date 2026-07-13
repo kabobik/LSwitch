@@ -229,6 +229,7 @@ def create_tray_indicator(
         menu_kwargs["config_controller"] = config_controller
     menu_obj = ContextMenu(**menu_kwargs)
     menu = menu_obj.build()
+    tray._context_menu_controller = menu_obj
     tray.set_context_menu(menu)
 
     try:

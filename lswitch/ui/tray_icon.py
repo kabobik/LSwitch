@@ -80,6 +80,7 @@ class TrayIcon(QSystemTrayIcon):
         self.config = config
         self._app = app
         self._current_layout = ""
+        self._context_menu_controller = None
 
         # Subscribe to EventBus events
         if self.event_bus is not None:
@@ -112,6 +113,8 @@ class TrayIcon(QSystemTrayIcon):
 
     def cleanup(self) -> None:
         """Unsubscribe from EventBus to prevent leaks and stale callbacks."""
+        if self._context_menu_controller is not None:
+            self._context_menu_controller.cleanup()
         if self.event_bus is not None:
             self.event_bus.unsubscribe(EventType.LAYOUT_CHANGED, self._on_layout_changed)
             self.event_bus.unsubscribe(EventType.CONFIG_CHANGED, self._on_config_changed)

@@ -96,6 +96,8 @@ def _build_pyqt6_mocks():
         def setMinimumWidth(self, w): pass
         def setMinimumSize(self, *a): pass
         def show(self): self._visible = True
+        def raise_(self): self._raised = True
+        def activateWindow(self): self._activated = True
         def exec(self): return self._result
         def accept(self): self._result = self.Accepted
         def reject(self): self._result = self.Rejected
@@ -123,6 +125,7 @@ def _build_pyqt6_mocks():
             self._enabled = True
             self._checkable = False
             self._checked = False
+            self._visible = True
             self._icon = MagicMock()
             self.triggered = MagicMock()
             self.changed = MagicMock()
@@ -134,6 +137,8 @@ def _build_pyqt6_mocks():
         def setCheckable(self, c): self._checkable = c
         def isChecked(self): return self._checked
         def setChecked(self, c): self._checked = c
+        def setVisible(self, value): self._visible = bool(value)
+        def isVisible(self): return self._visible
         def icon(self): return self._icon
         def setIcon(self, i): self._icon = i
         def trigger(self): self.triggered.emit()
@@ -517,6 +522,79 @@ class TestContextMenu:
         cm.toggle_auto_switch()
         assert len(received) == 1
 
+    def test_settings_dialog_is_singleton_and_is_raised(self, config_mgr, event_bus_ui):
+        cm = ContextMenu(config=config_mgr, event_bus=event_bus_ui)
+        cm.build()
+
+        cm._show_settings()
+        first = cm._settings_dialog
+        cm._show_settings()
+
+        assert cm._settings_dialog is first
+        assert first._raised is True
+        assert first._activated is True
+
+    def test_external_change_synchronizes_quick_actions(self, config_mgr, event_bus_ui):
+        from lswitch.runtime_config import RuntimeConfigController
+
+        cm = ContextMenu(config=config_mgr, event_bus=event_bus_ui)
+        cm.build()
+        candidate = config_mgr.get_all()
+        candidate["auto_switch"] = True
+        candidate["user_dict_enabled"] = True
+
+        RuntimeConfigController(
+            config=config_mgr,
+            event_bus=event_bus_ui,
+        ).apply(candidate, source="gui")
+
+        assert cm._auto_switch_action.isChecked() is True
+        assert cm._user_dict_action.isChecked() is True
+
+    def test_failed_quick_toggle_restores_checked_state(self, config_mgr, event_bus_ui):
+        controller = MagicMock()
+        controller.apply.return_value = types.SimpleNamespace(
+            ok=False,
+            error="disk full",
+        )
+        cm = ContextMenu(
+            config=config_mgr,
+            event_bus=event_bus_ui,
+            config_controller=controller,
+        )
+        cm.build()
+
+        cm.toggle_auto_switch()
+
+        assert cm._auto_switch_action.isChecked() is False
+        assert config_mgr.get("auto_switch") is False
+
+    def test_debug_action_visibility_tracks_effective_runtime_debug(
+        self,
+        config_mgr,
+        event_bus_ui,
+    ):
+        owner = types.SimpleNamespace(debug=False)
+        cm = ContextMenu(config=config_mgr, event_bus=event_bus_ui, app=owner)
+        cm.build()
+        assert cm._debug_action.isVisible() is False
+
+        owner.debug = True
+        cm._on_config_changed(Event(EventType.CONFIG_CHANGED, {}, time.time()))
+        assert cm._debug_action.isVisible() is True
+
+        owner.debug = False
+        cm._on_config_changed(Event(EventType.CONFIG_CHANGED, {}, time.time()))
+        assert cm._debug_action.isVisible() is False
+
+    def test_cleanup_unsubscribes_context_menu(self, config_mgr, event_bus_ui):
+        cm = ContextMenu(config=config_mgr, event_bus=event_bus_ui)
+        cm.build()
+
+        cm.cleanup()
+
+        assert cm._on_config_changed not in event_bus_ui._handlers[EventType.CONFIG_CHANGED]
+
 
 # ===========================================================================
 # ConfigDialog tests
@@ -775,6 +853,15 @@ class TestTrayIconCleanup:
     def test_cleanup_idempotent_without_event_bus(self):
         tray = TrayIcon()
         tray.cleanup()  # no event_bus => must not raise
+
+    def test_cleanup_releases_context_menu_controller(self):
+        tray = TrayIcon()
+        controller = MagicMock()
+        tray._context_menu_controller = controller
+
+        tray.cleanup()
+
+        controller.cleanup.assert_called_once_with()
 
 
 # ===========================================================================
