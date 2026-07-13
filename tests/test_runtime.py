@@ -227,6 +227,7 @@ def test_conversion_runtime_facade_tries_space_auto_conversion(monkeypatch):
         context=state_manager.context,
         threshold=3,
         auto_confirm_enabled=True,
+        correlation_id=0,
     )
 
 
@@ -270,6 +271,7 @@ def test_conversion_runtime_facade_tries_mid_word_auto_conversion(monkeypatch):
         use_case=use_case,
         session=session,
         context=state_manager.context,
+        correlation_id=0,
     )
 
 
@@ -1143,6 +1145,7 @@ def test_create_space_auto_conversion_use_case_wires_retype_service(monkeypatch)
             learning_service,
             timing,
             debug,
+            trace_recorder,
         ):
             self.auto_detector = auto_detector
             self.typed_buffer = typed_buffer
@@ -1151,6 +1154,7 @@ def test_create_space_auto_conversion_use_case_wires_retype_service(monkeypatch)
             self.learning_service = learning_service
             self.timing = timing
             self.debug = debug
+            self.trace_recorder = trace_recorder
 
     conversion_module = types.ModuleType("lswitch.core.conversion_use_cases")
     conversion_module.SpaceAutoConversionUseCase = FakeSpaceAutoConversionUseCase
@@ -1261,6 +1265,7 @@ def test_create_mid_word_auto_conversion_use_case_wires_retype_service(monkeypat
             retype_service,
             timing,
             debug,
+            trace_recorder,
         ):
             self.mid_word_detector = mid_word_detector
             self.typed_buffer = typed_buffer
@@ -1268,6 +1273,7 @@ def test_create_mid_word_auto_conversion_use_case_wires_retype_service(monkeypat
             self.retype_service = retype_service
             self.timing = timing
             self.debug = debug
+            self.trace_recorder = trace_recorder
 
     conversion_module = types.ModuleType("lswitch.core.conversion_use_cases")
     conversion_module.MidWordAutoConversionUseCase = FakeMidWordAutoConversionUseCase
@@ -1326,7 +1332,10 @@ def test_try_mid_word_auto_conversion_applies_marker_to_session():
         )
         is True
     )
-    use_case.execute.assert_called_once_with(context=context)
+    use_case.execute.assert_called_once_with(
+        context=context,
+        correlation_id=0,
+    )
     assert session.last_marker is marker
 
 
@@ -1561,6 +1570,7 @@ def test_try_space_auto_conversion_at_boundary_executes_and_applies_session_stat
         threshold=3,
         last_auto_marker=marker,
         auto_confirm_enabled=True,
+        correlation_id=0,
     )
     state = session.apply_space_state.call_args.args[0]
     assert state.last_auto_marker is new_marker

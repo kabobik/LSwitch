@@ -8,6 +8,16 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lswitch.core.auto_marker import AutoConversionMarker
+from lswitch.core.decision_trace import (
+    DecisionAttempt,
+    DecisionOutcome,
+    DecisionTrace,
+    DecisionTraceStep,
+    ExecutionOutcome,
+    StepState,
+    TraceFact,
+    TraceTrigger,
+)
 from lswitch.core.layout_service import LayoutService
 
 if TYPE_CHECKING:
@@ -24,6 +34,43 @@ logger = logging.getLogger(__name__)
 
 KEY_BACKSPACE = 14
 KEY_SPACE = 57
+
+
+def _trace_step(
+    rule_id: str,
+    state: StepState,
+    *,
+    decisive: bool = False,
+    **facts,
+) -> DecisionTraceStep:
+    return DecisionTraceStep(
+        rule_id=rule_id,
+        state=state,
+        decisive=decisive,
+        facts=tuple(
+            TraceFact(
+                key=key,
+                value=(
+                    value
+                    if isinstance(
+                        value,
+                        (str, int, float, bool, type(None)),
+                    )
+                    else str(value)
+                ),
+            )
+            for key, value in facts.items()
+        ),
+    )
+
+
+def _record_trace_safely(recorder, trace: DecisionTrace) -> None:
+    if recorder is None:
+        return
+    try:
+        recorder.record(trace)
+    except Exception:
+        logger.exception("Could not record conversion decision trace")
 
 
 @dataclass(frozen=True)
@@ -51,6 +98,9 @@ class SpaceAutoConversionResult:
     pending_space: bool = False
     marker: AutoConversionMarker | None = None
     marker_changed: bool = False
+    execution_succeeded: bool | None = None
+    execution_steps: tuple[DecisionTraceStep, ...] = ()
+    duration_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -59,6 +109,9 @@ class MidWordAutoConversionResult:
     marker: AutoConversionMarker | None = None
     marker_changed: bool = False
     reason: str = ""
+    execution_succeeded: bool | None = None
+    execution_steps: tuple[DecisionTraceStep, ...] = ()
+    duration_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -369,6 +422,7 @@ class SpaceAutoConversionUseCase:
         timing: dict | None = None,
         debug: bool = False,
         candidate_provider=None,
+        trace_recorder=None,
     ):
         self.auto_detector = auto_detector
         self.typed_buffer = typed_buffer
@@ -378,6 +432,7 @@ class SpaceAutoConversionUseCase:
         self.layout_service = LayoutService(xkb)
         self.timing = timing or {}
         self.debug = debug
+        self.trace_recorder = trace_recorder
         self.candidate_provider = candidate_provider
         if self.candidate_provider is None:
             self.candidate_provider = SpaceAutoConversionCandidateProvider(
@@ -393,6 +448,7 @@ class SpaceAutoConversionUseCase:
         threshold: int,
         last_auto_marker: AutoConversionMarker | dict | None,
         auto_confirm_enabled: bool,
+        correlation_id: int = 0,
     ) -> SpaceAutoConversionResult:
         if self.auto_detector is None:
             return SpaceAutoConversionResult(space_consumed=False)
@@ -409,11 +465,33 @@ class SpaceAutoConversionUseCase:
                 context.chars_in_buffer,
                 threshold,
             )
+            self._record_gate(
+                correlation_id=correlation_id,
+                original=self._buffer_text(context),
+                outcome=DecisionOutcome.SKIP,
+                rule_id="auto.buffer_threshold",
+                state=StepState.NOT_MATCHED,
+                facts={
+                    "chars_in_buffer": context.chars_in_buffer,
+                    "threshold": threshold,
+                },
+            )
             return SpaceAutoConversionResult(space_consumed=False)
 
         try:
             current_layout_info = self.xkb.get_current_layout() if self.xkb else None
-        except Exception:
+        except Exception as exc:
+            self._record_gate(
+                correlation_id=correlation_id,
+                original=self._buffer_text(context),
+                outcome=DecisionOutcome.ERROR,
+                rule_id="execution.current_layout",
+                state=StepState.FAILED,
+                facts={
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
             return SpaceAutoConversionResult(space_consumed=False)
 
         candidate = self.candidate_provider.candidate_for_context(
@@ -435,16 +513,61 @@ class SpaceAutoConversionUseCase:
                 candidate.text,
                 len(candidate.text) if candidate.text else 0,
             )
+            self._record_gate(
+                correlation_id=correlation_id,
+                original=candidate.text or "",
+                outcome=DecisionOutcome.SKIP,
+                rule_id="candidate.min_length",
+                state=StepState.NOT_MATCHED,
+                facts={
+                    "length": len(candidate.text) if candidate.text else 0,
+                    "minimum": self.min_word_len,
+                },
+                source_lang=candidate.current_lang,
+            )
             return SpaceAutoConversionResult(space_consumed=False)
 
+        evaluation_started = time.perf_counter()
         try:
-            should, reason = self.auto_detector.should_convert(
+            should, reason, attempt = self._evaluate_candidate(
                 candidate.text,
                 candidate.current_lang,
             )
         except Exception as exc:
             logger.warning("AutoDetector error: %s", exc)
+            duration_ms = (time.perf_counter() - evaluation_started) * 1000.0
+            attempt = DecisionAttempt(
+                candidate=candidate.text,
+                outcome=DecisionOutcome.ERROR,
+                source_lang=candidate.current_lang,
+                steps=(
+                    _trace_step(
+                        "auto.detector.error",
+                        StepState.FAILED,
+                        decisive=True,
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    ),
+                ),
+                duration_ms=duration_ms,
+            )
+            self._record_attempt(
+                correlation_id=correlation_id,
+                attempt=attempt,
+            )
             return SpaceAutoConversionResult(space_consumed=False)
+
+        duration_ms = (time.perf_counter() - evaluation_started) * 1000.0
+        attempt = DecisionAttempt(
+            candidate=attempt.candidate,
+            converted_candidate=attempt.converted_candidate,
+            source_lang=attempt.source_lang,
+            target_lang=attempt.target_lang,
+            outcome=attempt.outcome,
+            steps=attempt.steps,
+            duration_ms=duration_ms,
+            truncated=attempt.truncated,
+        )
 
         marker_changed = False
         if last_auto_marker is not None:
@@ -454,6 +577,10 @@ class SpaceAutoConversionUseCase:
             marker_changed = True
 
         if not should:
+            self._record_attempt(
+                correlation_id=correlation_id,
+                attempt=attempt,
+            )
             return SpaceAutoConversionResult(
                 space_consumed=False,
                 marker=None,
@@ -475,11 +602,27 @@ class SpaceAutoConversionUseCase:
             original_word=candidate.text,
             original_lang=candidate.current_lang,
         )
+        execution = (
+            ExecutionOutcome.SUCCEEDED
+            if result.execution_succeeded
+            else ExecutionOutcome.FAILED
+        )
+        self._record_attempt(
+            correlation_id=correlation_id,
+            attempt=attempt,
+            execution=execution,
+            execution_steps=result.execution_steps,
+            duration_ms=result.duration_ms,
+            conversion_mode="retype",
+        )
         return SpaceAutoConversionResult(
             space_consumed=True,
             pending_space=result.pending_space,
             marker=result.marker,
             marker_changed=True,
+            execution_succeeded=result.execution_succeeded,
+            execution_steps=result.execution_steps,
+            duration_ms=result.duration_ms,
         )
 
     def perform_conversion(
@@ -495,10 +638,24 @@ class SpaceAutoConversionUseCase:
         from lswitch.core.states import State
 
         conversion_ok = False
+        execution_steps: list[DecisionTraceStep] = []
+        started = time.perf_counter()
 
         try:
             target_lang = "ru" if direction == "en_to_ru" else "en"
             target = self.layout_service.find_available_layout_for_lang(target_lang)
+            execution_steps.append(
+                _trace_step(
+                    "execution.target_layout",
+                    (
+                        StepState.SUCCEEDED
+                        if target is not None
+                        else StepState.NOT_MATCHED
+                    ),
+                    target_lang=target_lang,
+                    target_layout=getattr(target, "name", None),
+                )
+            )
             conversion_ok = self.retype_service.retype_events(
                 word_events,
                 delete_count=word_len + 1,
@@ -509,11 +666,54 @@ class SpaceAutoConversionUseCase:
                 ),
                 backspace_n_times_keyword=True,
             )
+            retype_steps = getattr(
+                self.retype_service,
+                "last_trace_steps",
+                (),
+            )
+            retype_step_sequence = (
+                tuple(retype_steps)
+                if isinstance(retype_steps, (tuple, list))
+                else ()
+            )
+            execution_steps.extend(retype_step_sequence)
+            if not retype_step_sequence:
+                execution_steps.append(
+                    _trace_step(
+                        "execution.retype",
+                        (
+                            StepState.SUCCEEDED
+                            if conversion_ok
+                            else StepState.FAILED
+                        ),
+                        decisive=not conversion_ok,
+                        event_count=len(word_events),
+                        delete_count=word_len + 1,
+                    )
+                )
 
             if conversion_ok:
                 time.sleep(self.timing.get("auto_before_space_delay", 0.01))
         except Exception as exc:
             logger.error("Auto-conversion at space failed: %s", exc)
+            retype_steps = getattr(
+                self.retype_service,
+                "last_trace_steps",
+                (),
+            )
+            if isinstance(retype_steps, (tuple, list)):
+                for step in tuple(retype_steps):
+                    if step not in execution_steps:
+                        execution_steps.append(step)
+            execution_steps.append(
+                _trace_step(
+                    "execution.error",
+                    StepState.FAILED,
+                    decisive=True,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+            )
         finally:
             context.reset()
             context.state = State.IDLE
@@ -532,7 +732,136 @@ class SpaceAutoConversionUseCase:
             pending_space=True,
             marker=marker,
             marker_changed=marker is not None,
+            execution_succeeded=conversion_ok,
+            execution_steps=tuple(execution_steps),
+            duration_ms=(time.perf_counter() - started) * 1000.0,
         )
+
+    def _evaluate_candidate(
+        self,
+        word: str,
+        current_lang: str,
+    ) -> tuple[bool, str, DecisionAttempt]:
+        from lswitch.intelligence.auto_detector import AutoDecision
+
+        evaluate = getattr(self.auto_detector, "evaluate", None)
+        decision = evaluate(word, current_lang) if callable(evaluate) else None
+        if isinstance(decision, AutoDecision):
+            return (
+                decision.should_convert,
+                decision.reason,
+                DecisionAttempt(
+                    candidate=decision.original,
+                    converted_candidate=decision.converted,
+                    source_lang=decision.source_lang,
+                    target_lang=decision.target_lang,
+                    outcome=decision.outcome,
+                    steps=decision.steps,
+                ),
+            )
+
+        should, reason = self.auto_detector.should_convert(word, current_lang)
+        from lswitch.intelligence.auto_detector import AutoDetector
+
+        converted, target_lang = AutoDetector._converted_word(
+            word.lower(),
+            current_lang,
+        )
+        outcome = (
+            DecisionOutcome.CONVERT if should else DecisionOutcome.KEEP
+        )
+        return (
+            bool(should),
+            reason,
+            DecisionAttempt(
+                candidate=word,
+                converted_candidate=converted,
+                source_lang=current_lang,
+                target_lang=target_lang,
+                outcome=outcome,
+                steps=(
+                    _trace_step(
+                        "auto.legacy_decision",
+                        StepState.MATCHED,
+                        decisive=True,
+                        reason=reason,
+                    ),
+                ),
+            ),
+        )
+
+    def _record_gate(
+        self,
+        *,
+        correlation_id: int,
+        original: str,
+        outcome: DecisionOutcome,
+        rule_id: str,
+        state: StepState,
+        facts: dict,
+        source_lang: str | None = None,
+    ) -> None:
+        if not self._tracing_enabled():
+            return
+        self._record_attempt(
+            correlation_id=correlation_id,
+            attempt=DecisionAttempt(
+                candidate=original,
+                source_lang=source_lang,
+                outcome=outcome,
+                steps=(
+                    _trace_step(
+                        rule_id,
+                        state,
+                        decisive=True,
+                        **facts,
+                    ),
+                ),
+            ),
+        )
+
+    def _record_attempt(
+        self,
+        *,
+        correlation_id: int,
+        attempt: DecisionAttempt,
+        execution: ExecutionOutcome = ExecutionOutcome.NOT_STARTED,
+        execution_steps: tuple[DecisionTraceStep, ...] = (),
+        duration_ms: float = 0.0,
+        conversion_mode: str | None = None,
+    ) -> None:
+        if not self._tracing_enabled():
+            return
+        _record_trace_safely(
+            self.trace_recorder,
+            DecisionTrace(
+                correlation_id=correlation_id,
+                trigger=TraceTrigger.SPACE_AUTO,
+                original=attempt.candidate,
+                converted=attempt.converted_candidate,
+                source_lang=attempt.source_lang,
+                target_lang=attempt.target_lang,
+                decision=attempt.outcome,
+                execution=execution,
+                conversion_mode=conversion_mode,
+                attempts=(attempt,),
+                execution_steps=execution_steps,
+                duration_ms=attempt.duration_ms + duration_ms,
+                truncated=attempt.truncated,
+            ),
+        )
+
+    def _tracing_enabled(self) -> bool:
+        return bool(
+            self.trace_recorder is not None
+            and self.trace_recorder.enabled
+        )
+
+    def _buffer_text(self, context: "StateContext") -> str:
+        try:
+            return self.typed_buffer.decode(context.event_buffer)
+        except Exception:
+            return ""
 
 
 class MidWordAutoConversionUseCase:
@@ -548,6 +877,7 @@ class MidWordAutoConversionUseCase:
         timing: dict | None = None,
         debug: bool = False,
         candidate_provider=None,
+        trace_recorder=None,
     ):
         self.mid_word_detector = mid_word_detector
         self.typed_buffer = typed_buffer
@@ -556,6 +886,7 @@ class MidWordAutoConversionUseCase:
         self.layout_service = LayoutService(xkb)
         self.timing = timing or {}
         self.debug = debug
+        self.trace_recorder = trace_recorder
         self.candidate_provider = candidate_provider
         if self.candidate_provider is None:
             self.candidate_provider = SpaceAutoConversionCandidateProvider(
@@ -564,7 +895,12 @@ class MidWordAutoConversionUseCase:
                 layout_service=self.layout_service,
             )
 
-    def execute(self, *, context: "StateContext") -> MidWordAutoConversionResult:
+    def execute(
+        self,
+        *,
+        context: "StateContext",
+        correlation_id: int = 0,
+    ) -> MidWordAutoConversionResult:
         if self.mid_word_detector is None:
             return MidWordAutoConversionResult(switched=False)
 
@@ -573,7 +909,23 @@ class MidWordAutoConversionUseCase:
 
         try:
             current_layout_info = self.xkb.get_current_layout() if self.xkb else None
-        except Exception:
+        except Exception as exc:
+            self._record_mid_attempt(
+                correlation_id,
+                DecisionAttempt(
+                    candidate="",
+                    outcome=DecisionOutcome.ERROR,
+                    steps=(
+                        _trace_step(
+                            "execution.current_layout",
+                            StepState.FAILED,
+                            decisive=True,
+                            error_type=type(exc).__name__,
+                            error=str(exc),
+                        ),
+                    ),
+                ),
+            )
             return MidWordAutoConversionResult(switched=False)
 
         candidate = self.candidate_provider.candidate_for_context(
@@ -581,12 +933,81 @@ class MidWordAutoConversionUseCase:
             current_layout_info=current_layout_info,
         )
         if not candidate.text:
+            self._record_mid_attempt(
+                correlation_id,
+                DecisionAttempt(
+                    candidate="",
+                    source_lang=candidate.current_lang,
+                    outcome=DecisionOutcome.SKIP,
+                    steps=(
+                        _trace_step(
+                            "candidate.empty",
+                            StepState.MATCHED,
+                            decisive=True,
+                        ),
+                    ),
+                ),
+            )
             return MidWordAutoConversionResult(switched=False, reason="empty candidate")
 
-        decision = self.mid_word_detector.should_switch(
-            candidate.text,
-            candidate.current_lang,
+        evaluation_started = time.perf_counter()
+        try:
+            decision = self.mid_word_detector.should_switch(
+                candidate.text,
+                candidate.current_lang,
+            )
+        except Exception as exc:
+            attempt = DecisionAttempt(
+                candidate=candidate.text,
+                source_lang=candidate.current_lang,
+                outcome=DecisionOutcome.ERROR,
+                steps=(
+                    _trace_step(
+                        "midword.detector.error",
+                        StepState.FAILED,
+                        decisive=True,
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    ),
+                ),
+                duration_ms=(
+                    time.perf_counter() - evaluation_started
+                ) * 1000.0,
+            )
+            self._record_mid_attempt(correlation_id, attempt)
+            raise
+
+        decision_steps = tuple(getattr(decision, "steps", ()) or ())
+        if not decision_steps:
+            decision_steps = (
+                _trace_step(
+                    "midword.legacy_decision",
+                    StepState.MATCHED,
+                    decisive=True,
+                    reason=decision.reason,
+                ),
+            )
+        outcome = getattr(decision, "outcome", None)
+        if not isinstance(outcome, DecisionOutcome):
+            outcome = (
+                DecisionOutcome.CONVERT
+                if decision.should_switch
+                else DecisionOutcome.KEEP
+            )
+        attempt = DecisionAttempt(
+            candidate=candidate.text,
+            converted_candidate=(
+                getattr(decision, "converted_prefix", "") or None
+            ),
+            source_lang=candidate.current_lang,
+            target_lang=getattr(decision, "target_lang", None),
+            outcome=outcome,
+            steps=decision_steps,
+            duration_ms=(
+                time.perf_counter() - evaluation_started
+            ) * 1000.0,
         )
+        self._record_mid_attempt(correlation_id, attempt)
         if not decision.should_switch:
             return MidWordAutoConversionResult(
                 switched=False,
@@ -600,23 +1021,95 @@ class MidWordAutoConversionUseCase:
             direction,
             decision.reason,
         )
-        target = self.layout_service.find_available_layout_for_lang(
-            decision.target_lang
-        )
-        conversion_ok = self.retype_service.retype_events(
-            candidate.events,
-            delete_count=len(candidate.events),
-            target_layout=target,
-            before_replay_delay=self.timing.get(
-                "mid_word_before_replay_delay",
-                self.timing.get("auto_before_replay_delay", 0.03),
-            ),
-            backspace_n_times_keyword=True,
-        )
+        execution_started = time.perf_counter()
+        execution_steps: list[DecisionTraceStep] = []
+        try:
+            target = self.layout_service.find_available_layout_for_lang(
+                decision.target_lang
+            )
+            execution_steps.append(
+                _trace_step(
+                    "execution.target_layout",
+                    (
+                        StepState.SUCCEEDED
+                        if target is not None
+                        else StepState.NOT_MATCHED
+                    ),
+                    target_lang=decision.target_lang,
+                    target_layout=getattr(target, "name", None),
+                )
+            )
+            conversion_ok = self.retype_service.retype_events(
+                candidate.events,
+                delete_count=len(candidate.events),
+                target_layout=target,
+                before_replay_delay=self.timing.get(
+                    "mid_word_before_replay_delay",
+                    self.timing.get("auto_before_replay_delay", 0.03),
+                ),
+                backspace_n_times_keyword=True,
+            )
+            retype_steps = getattr(
+                self.retype_service,
+                "last_trace_steps",
+                (),
+            )
+            retype_step_sequence = (
+                tuple(retype_steps)
+                if isinstance(retype_steps, (tuple, list))
+                else ()
+            )
+            execution_steps.extend(retype_step_sequence)
+            if not retype_step_sequence:
+                execution_steps.append(
+                    _trace_step(
+                        "execution.retype",
+                        (
+                            StepState.SUCCEEDED
+                            if conversion_ok
+                            else StepState.FAILED
+                        ),
+                        decisive=not conversion_ok,
+                        event_count=len(candidate.events),
+                    )
+                )
+        except Exception as exc:
+            execution_steps.append(
+                _trace_step(
+                    "execution.error",
+                    StepState.FAILED,
+                    decisive=True,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+            )
+            self._finalize_mid_trace(
+                correlation_id,
+                attempt,
+                execution=ExecutionOutcome.FAILED,
+                execution_steps=tuple(execution_steps),
+                duration_ms=(
+                    time.perf_counter() - execution_started
+                ) * 1000.0,
+            )
+            raise
         if not conversion_ok:
+            execution_duration_ms = (
+                time.perf_counter() - execution_started
+            ) * 1000.0
+            self._finalize_mid_trace(
+                correlation_id,
+                attempt,
+                execution=ExecutionOutcome.FAILED,
+                execution_steps=tuple(execution_steps),
+                duration_ms=execution_duration_ms,
+            )
             return MidWordAutoConversionResult(
                 switched=False,
                 reason="retype failed",
+                execution_succeeded=False,
+                execution_steps=tuple(execution_steps),
+                duration_ms=execution_duration_ms,
             )
 
         from lswitch.core.states import State
@@ -629,9 +1122,69 @@ class MidWordAutoConversionUseCase:
             direction=direction,
             word_events=candidate.events,
         )
+        execution_duration_ms = (
+            time.perf_counter() - execution_started
+        ) * 1000.0
+        self._finalize_mid_trace(
+            correlation_id,
+            attempt,
+            execution=ExecutionOutcome.SUCCEEDED,
+            execution_steps=tuple(execution_steps),
+            duration_ms=execution_duration_ms,
+        )
         return MidWordAutoConversionResult(
             switched=True,
             marker=marker,
             marker_changed=True,
             reason=decision.reason,
+            execution_succeeded=True,
+            execution_steps=tuple(execution_steps),
+            duration_ms=execution_duration_ms,
+        )
+
+    def _record_mid_attempt(
+        self,
+        correlation_id: int,
+        attempt: DecisionAttempt,
+    ) -> None:
+        if not self._tracing_enabled():
+            return
+        try:
+            self.trace_recorder.upsert_attempt(
+                correlation_id,
+                TraceTrigger.MID_WORD,
+                attempt,
+            )
+        except Exception:
+            logger.exception("Could not record mid-word decision trace")
+
+    def _finalize_mid_trace(
+        self,
+        correlation_id: int,
+        attempt: DecisionAttempt,
+        *,
+        execution: ExecutionOutcome,
+        execution_steps: tuple[DecisionTraceStep, ...],
+        duration_ms: float,
+    ) -> None:
+        if not self._tracing_enabled():
+            return
+        try:
+            self.trace_recorder.finalize_session(
+                correlation_id,
+                TraceTrigger.MID_WORD,
+                decision=attempt.outcome,
+                execution=execution,
+                converted=attempt.converted_candidate,
+                conversion_mode="retype",
+                execution_steps=execution_steps,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            logger.exception("Could not finalize mid-word decision trace")
+
+    def _tracing_enabled(self) -> bool:
+        return bool(
+            self.trace_recorder is not None
+            and self.trace_recorder.enabled
         )

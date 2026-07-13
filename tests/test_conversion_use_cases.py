@@ -5,6 +5,12 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from lswitch.core.auto_marker import AutoConversionMarker
+from lswitch.core.decision_trace import (
+    DecisionOutcome,
+    DecisionTraceRecorder,
+    ExecutionOutcome,
+    TraceTrigger,
+)
 from lswitch.core.conversion_use_cases import (
     AutoConversionCandidate,
     KEY_BACKSPACE,
@@ -25,6 +31,9 @@ from lswitch.core.selection_tracker import SelectionFreshnessTracker
 from lswitch.core.states import State, StateContext
 from lswitch.core.typed_buffer import TypedBufferService
 from lswitch.intelligence.mid_word_detector import MidWordDecision, MidWordDetector
+from lswitch.intelligence.auto_detector import AutoDetector
+from lswitch.intelligence.dictionary_service import DictionaryService
+from lswitch.intelligence.ngram_analyzer import NgramAnalyzer
 from lswitch.intelligence.prefix_dictionary import PrefixDictionary
 from lswitch.intelligence.user_dictionary import UserDictionary
 from lswitch.input.key_mapper import keycode_to_char
@@ -477,7 +486,11 @@ def _context_with_events(codes: list[int]) -> StateContext:
     return context
 
 
-def _space_auto_use_case(*, should_convert: bool = True):
+def _space_auto_use_case(
+    *,
+    should_convert: bool = True,
+    trace_recorder=None,
+):
     xkb = MagicMock()
     en_layout = LayoutInfo(name="en", index=0, xkb_name="us")
     ru_layout = LayoutInfo(name="ru", index=1, xkb_name="ru")
@@ -498,6 +511,7 @@ def _space_auto_use_case(*, should_convert: bool = True):
             "auto_before_replay_delay": 0,
             "auto_before_space_delay": 0,
         },
+        trace_recorder=trace_recorder,
     )
     return use_case, xkb, retype_service, learning_service
 
@@ -707,6 +721,7 @@ def _mid_word_use_case(
     decision: MidWordDecision,
     candidate: AutoConversionCandidate | None = None,
     retype_ok: bool = True,
+    trace_recorder=None,
 ):
     xkb = MagicMock()
     en_layout = LayoutInfo(name="en", index=0, xkb_name="us")
@@ -736,6 +751,7 @@ def _mid_word_use_case(
         retype_service=retype_service,
         timing={"mid_word_before_replay_delay": 0},
         candidate_provider=provider,
+        trace_recorder=trace_recorder,
     )
     return use_case, detector, provider, retype_service, ru_layout
 
@@ -860,3 +876,185 @@ def test_mid_word_auto_conversion_use_case_keeps_context_when_retype_fails():
     assert result.marker is None
     retype_service.retype_events.assert_called_once()
     assert context.event_buffer
+
+
+def test_space_auto_trace_keeps_decision_separate_from_execution_success():
+    recorder = DecisionTraceRecorder(enabled=True)
+    xkb = MagicMock()
+    en_layout = LayoutInfo(name="en", index=0, xkb_name="us")
+    ru_layout = LayoutInfo(name="ru", index=1, xkb_name="ru")
+    xkb.get_current_layout.return_value = en_layout
+    xkb.get_layouts.return_value = [en_layout, ru_layout]
+    events = [KeyEventData(code=code, value=1) for code in [34, 35, 48, 32, 20, 49]]
+    provider = _CandidateProvider(
+        AutoConversionCandidate(
+            text="ghbdtn",
+            events=events,
+            current_lang="en",
+        )
+    )
+    retype_service = MagicMock()
+    retype_service.retype_events.return_value = True
+    retype_service.last_trace_steps = ()
+    use_case = SpaceAutoConversionUseCase(
+        auto_detector=AutoDetector(DictionaryService(), NgramAnalyzer()),
+        typed_buffer=MagicMock(),
+        xkb=xkb,
+        retype_service=retype_service,
+        learning_service=MagicMock(),
+        timing={"auto_before_replay_delay": 0, "auto_before_space_delay": 0},
+        candidate_provider=provider,
+        trace_recorder=recorder,
+    )
+
+    result = use_case.execute(
+        context=_context_with_events([34, 35, 48, 32, 20, 49]),
+        threshold=0,
+        last_auto_marker=None,
+        auto_confirm_enabled=False,
+        correlation_id=42,
+    )
+
+    assert result.execution_succeeded is True
+    trace = recorder.snapshot()[0]
+    assert trace.correlation_id == 42
+    assert trace.trigger is TraceTrigger.SPACE_AUTO
+    assert trace.decision is DecisionOutcome.CONVERT
+    assert trace.execution is ExecutionOutcome.SUCCEEDED
+    assert trace.converted == "привет"
+    assert trace.conversion_mode == "retype"
+    assert trace.attempts[0].steps[-1].rule_id == "auto.target_dictionary.match"
+    assert trace.execution_steps[-1].rule_id == "execution.retype"
+
+
+def test_space_auto_trace_preserves_convert_decision_when_retype_fails():
+    recorder = DecisionTraceRecorder(enabled=True)
+    use_case, _xkb, retype_service, _learning = _space_auto_use_case(
+        trace_recorder=recorder
+    )
+    retype_service.retype_events.return_value = False
+    retype_service.last_trace_steps = ()
+
+    result = use_case.execute(
+        context=_context_with_events([34, 35, 48]),
+        threshold=0,
+        last_auto_marker=None,
+        auto_confirm_enabled=False,
+        correlation_id=5,
+    )
+
+    trace = recorder.snapshot()[0]
+    assert result.execution_succeeded is False
+    assert trace.decision is DecisionOutcome.CONVERT
+    assert trace.execution is ExecutionOutcome.FAILED
+
+
+def test_space_auto_threshold_skip_records_gate_without_detector_call():
+    recorder = DecisionTraceRecorder(enabled=True)
+    use_case, _xkb, retype_service, _learning = _space_auto_use_case(
+        trace_recorder=recorder
+    )
+
+    use_case.execute(
+        context=_context_with_events([34, 35, 48]),
+        threshold=10,
+        last_auto_marker=None,
+        auto_confirm_enabled=False,
+        correlation_id=6,
+    )
+
+    trace = recorder.snapshot()[0]
+    assert trace.decision is DecisionOutcome.SKIP
+    assert trace.attempts[0].steps[0].rule_id == "auto.buffer_threshold"
+    retype_service.retype_events.assert_not_called()
+
+
+def test_mid_word_trace_aggregates_prefix_attempts_for_one_session():
+    recorder = DecisionTraceRecorder(enabled=True)
+    xkb = MagicMock()
+    en_layout = LayoutInfo(name="en", index=0, xkb_name="us")
+    ru_layout = LayoutInfo(name="ru", index=1, xkb_name="ru")
+    xkb.get_current_layout.return_value = en_layout
+    xkb.get_layouts.return_value = [en_layout, ru_layout]
+    provider = _CandidateProvider(
+        AutoConversionCandidate(
+            text="ghb",
+            events=[KeyEventData(code=code, value=1) for code in [34, 35, 48]],
+            current_lang="en",
+        )
+    )
+    retype_service = MagicMock()
+    retype_service.retype_events.return_value = True
+    retype_service.last_trace_steps = ()
+    use_case = MidWordAutoConversionUseCase(
+        mid_word_detector=MidWordDetector(
+            PrefixDictionary(ru_words={"привет"}),
+            min_prefix_len=4,
+        ),
+        typed_buffer=MagicMock(),
+        xkb=xkb,
+        retype_service=retype_service,
+        timing={"mid_word_before_replay_delay": 0},
+        candidate_provider=provider,
+        trace_recorder=recorder,
+    )
+
+    first = use_case.execute(
+        context=_context_with_events([34, 35, 48]),
+        correlation_id=9,
+    )
+    provider.candidate = AutoConversionCandidate(
+        text="ghbd",
+        events=[KeyEventData(code=code, value=1) for code in [34, 35, 48, 32]],
+        current_lang="en",
+    )
+    second = use_case.execute(
+        context=_context_with_events([34, 35, 48, 32]),
+        correlation_id=9,
+    )
+
+    assert first.switched is False
+    assert second.switched is True
+    assert len(recorder.snapshot()) == 1
+    trace = recorder.snapshot()[0]
+    assert trace.trigger is TraceTrigger.MID_WORD
+    assert [attempt.candidate for attempt in trace.attempts] == ["ghb", "ghbd"]
+    assert trace.decision is DecisionOutcome.CONVERT
+    assert trace.execution is ExecutionOutcome.SUCCEEDED
+
+
+def test_related_mid_word_and_space_traces_share_correlation_id():
+    recorder = DecisionTraceRecorder(enabled=True)
+    mid_decision = MidWordDecision(
+        should_switch=False,
+        reason="prefix below threshold",
+        current_lang="en",
+    )
+    mid_use_case, _detector, _provider, _retype, _layout = _mid_word_use_case(
+        decision=mid_decision,
+        trace_recorder=recorder,
+    )
+    mid_use_case.execute(
+        context=_context_with_events([34, 35, 48, 32]),
+        correlation_id=77,
+    )
+
+    space_use_case, _xkb, _retype, _learning = _space_auto_use_case(
+        should_convert=False,
+        trace_recorder=recorder,
+    )
+    space_use_case.execute(
+        context=_context_with_events([34, 35, 48]),
+        threshold=0,
+        last_auto_marker=None,
+        auto_confirm_enabled=False,
+        correlation_id=77,
+    )
+
+    traces = recorder.snapshot()
+    assert len(traces) == 2
+    assert {trace.trigger for trace in traces} == {
+        TraceTrigger.MID_WORD,
+        TraceTrigger.SPACE_AUTO,
+    }
+    assert {trace.correlation_id for trace in traces} == {77}

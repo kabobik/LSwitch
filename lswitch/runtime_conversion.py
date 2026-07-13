@@ -24,6 +24,7 @@ def create_space_auto_conversion_use_case(
     timing: dict,
     debug: bool,
     layout_switch_controller=None,
+    trace_recorder=None,
 ):
     """Create the space-triggered auto-conversion use case."""
     from lswitch.core.conversion_use_cases import SpaceAutoConversionUseCase
@@ -44,6 +45,7 @@ def create_space_auto_conversion_use_case(
         learning_service=learning_service,
         timing=timing,
         debug=debug,
+        trace_recorder=trace_recorder,
     )
 
 
@@ -56,6 +58,7 @@ def create_mid_word_auto_conversion_use_case(
     timing: dict,
     debug: bool,
     layout_switch_controller=None,
+    trace_recorder=None,
 ):
     """Create the mid-word auto-conversion use case."""
     from lswitch.core.conversion_use_cases import MidWordAutoConversionUseCase
@@ -75,6 +78,7 @@ def create_mid_word_auto_conversion_use_case(
         ),
         timing=timing,
         debug=debug,
+        trace_recorder=trace_recorder,
     )
 
 
@@ -91,6 +95,7 @@ def create_synced_space_auto_conversion_use_case(
     debug: bool,
     manual_weight_step: int,
     layout_switch_controller=None,
+    trace_recorder=None,
 ):
     """Create space auto-conversion use case with learning service synced first."""
     return create_space_auto_conversion_use_case(
@@ -108,6 +113,7 @@ def create_synced_space_auto_conversion_use_case(
         timing=timing,
         debug=debug,
         layout_switch_controller=layout_switch_controller,
+        trace_recorder=trace_recorder,
     )
 
 
@@ -254,6 +260,7 @@ def try_space_auto_conversion_at_boundary(
     context,
     threshold: int,
     auto_confirm_enabled: bool,
+    correlation_id: int = 0,
 ) -> bool:
     """Execute space auto-conversion and apply transient session updates."""
     result = use_case.execute(
@@ -261,6 +268,7 @@ def try_space_auto_conversion_at_boundary(
         threshold=threshold,
         last_auto_marker=session.last_marker,
         auto_confirm_enabled=auto_confirm_enabled,
+        correlation_id=correlation_id,
     )
     state = apply_space_auto_conversion_result(
         result=result,
@@ -299,9 +307,18 @@ def perform_space_auto_conversion_at_boundary(
     session.apply_space_state(state)
 
 
-def try_mid_word_auto_conversion(*, use_case, session, context) -> bool:
+def try_mid_word_auto_conversion(
+    *,
+    use_case,
+    session,
+    context,
+    correlation_id: int = 0,
+) -> bool:
     """Execute mid-word auto-conversion and apply transient session updates."""
-    result = use_case.execute(context=context)
+    result = use_case.execute(
+        context=context,
+        correlation_id=correlation_id,
+    )
     if result.marker_changed:
         session.set_marker(result.marker)
     return result.switched
@@ -391,6 +408,7 @@ class ConversionRuntimeFacade:
                 "user_dict_auto_confirm",
                 False,
             ),
+            correlation_id=correlation_id,
         )
 
     def try_mid_word_auto_conversion(self, correlation_id: int = 0) -> bool:
@@ -399,6 +417,7 @@ class ConversionRuntimeFacade:
             use_case=self.create_mid_word_auto_conversion_use_case(),
             session=self.auto_conversion_session,
             context=self.state_manager.context,
+            correlation_id=correlation_id,
         )
 
     def close_trace_session(self, correlation_id: int) -> None:
@@ -466,6 +485,7 @@ class ConversionRuntimeFacade:
             debug=self.debug,
             manual_weight_step=self.manual_weight_step,
             layout_switch_controller=self.get_layout_switch_controller(),
+            trace_recorder=self.trace_recorder,
         )
 
     def create_mid_word_auto_conversion_use_case(self):
@@ -478,4 +498,5 @@ class ConversionRuntimeFacade:
             timing=self.get_timing(),
             debug=self.debug,
             layout_switch_controller=self.get_layout_switch_controller(),
+            trace_recorder=self.trace_recorder,
         )
