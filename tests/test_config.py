@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 
 from lswitch.config import (
+    ConfigConflictError,
+    ConfigSnapshot,
     DEFAULT_CONFIG,
     DEFAULT_CONFIG_PATH,
     DEFAULT_TIMING,
@@ -13,6 +15,7 @@ from lswitch.config import (
     DEFAULT_X11_SELECTION_TIMING,
     WAYLAND_SELECTION_STRATEGIES,
     ConfigManager,
+    diff_config_paths,
     load_config,
     validate_config,
 )
@@ -272,6 +275,22 @@ class TestConfigManager:
         assert '_internal' not in all_cfg
         assert 'debug' in all_cfg
 
+    def test_get_all_is_deeply_isolated(self, tmp_path):
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
+
+        draft = mgr.get_all()
+        draft["timing"]["key_press_delay"] = 9.0
+
+        assert mgr.get("timing")["key_press_delay"] == DEFAULT_CONFIG["timing"]["key_press_delay"]
+
+    def test_get_nested_value_is_deeply_isolated(self, tmp_path):
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
+
+        timing = mgr.get("timing")
+        timing["key_repeat_delay"] = 8.0
+
+        assert mgr.get("timing")["key_repeat_delay"] == DEFAULT_CONFIG["timing"]["key_repeat_delay"]
+
     def test_save_and_reload_roundtrip(self, tmp_path):
         cfg_path = str(tmp_path / "cfg.toml")
         mgr = ConfigManager(config_path=cfg_path)
@@ -367,6 +386,76 @@ class TestConfigManager:
         mgr = ConfigManager(config_path=path)
         assert mgr.config_path == path
 
+    def test_prepare_update_validates_without_mutating(self, tmp_path):
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
+        candidate = mgr.get_all()
+        candidate["debug"] = True
+        candidate["timing"]["key_press_delay"] = 0.004
+
+        change_set = mgr.prepare_update(candidate, source="test")
+
+        assert change_set.source == "test"
+        assert change_set.old.get("debug") is False
+        assert change_set.new.get("debug") is True
+        assert change_set.changed_paths == frozenset({
+            "debug",
+            "timing.key_press_delay",
+        })
+        assert mgr.get("debug") is False
+
+    def test_commit_update_writes_and_swaps_snapshot(self, tmp_path):
+        cfg_path = tmp_path / "cfg.toml"
+        mgr = ConfigManager(config_path=str(cfg_path))
+        candidate = mgr.get_all()
+        candidate["debug"] = True
+
+        change_set = mgr.prepare_update(candidate, source="test")
+        mgr.commit_update(change_set)
+
+        assert mgr.get("debug") is True
+        assert "debug = true" in cfg_path.read_text(encoding="utf-8")
+
+    def test_commit_update_rejects_stale_snapshot(self, tmp_path):
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
+        candidate = mgr.get_all()
+        candidate["debug"] = True
+        change_set = mgr.prepare_update(candidate)
+        mgr.set("auto_switch", True)
+
+        with pytest.raises(ConfigConflictError):
+            mgr.commit_update(change_set)
+
+        assert mgr.get("debug") is False
+        assert mgr.get("auto_switch") is True
+
+    def test_commit_update_save_failure_keeps_memory(self, tmp_path, monkeypatch):
+        mgr = ConfigManager(config_path=str(tmp_path / "cfg.toml"))
+        candidate = mgr.get_all()
+        candidate["debug"] = True
+        change_set = mgr.prepare_update(candidate)
+
+        def fail_save(path, config):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("lswitch.config._save_toml", fail_save)
+
+        with pytest.raises(OSError, match="disk full"):
+            mgr.commit_update(change_set)
+
+        assert mgr.get("debug") is False
+
+    def test_replace_can_commit_memory_only(self, tmp_path):
+        cfg_path = tmp_path / "cfg.toml"
+        mgr = ConfigManager(config_path=str(cfg_path))
+        candidate = mgr.get_all()
+        candidate["debug"] = True
+
+        change_set = mgr.replace(candidate, source="sighup", persist=False)
+
+        assert change_set.changed_paths == frozenset({"debug"})
+        assert mgr.get("debug") is True
+        assert not cfg_path.exists()
+
     def test_legacy_config_json_path_is_normalized_to_toml(self, tmp_path):
         legacy_path = tmp_path / "config.json"
         mgr = ConfigManager(config_path=str(legacy_path))
@@ -379,3 +468,32 @@ class TestConfigManager:
 
         loaded = load_config(config_path=str(legacy_path))
         assert loaded["auto_switch"] is True
+
+
+def test_config_snapshot_does_not_expose_nested_values():
+    snapshot = ConfigSnapshot({"section": {"value": 1}})
+
+    values = snapshot.to_dict()
+    values["section"]["value"] = 2
+
+    assert snapshot.get("section") == {"value": 1}
+
+
+def test_diff_config_paths_reports_changed_leaves():
+    old = {
+        "enabled": False,
+        "timing": {"first": 0.1, "second": 0.2},
+        "removed": {"leaf": 1},
+    }
+    new = {
+        "enabled": True,
+        "timing": {"first": 0.1, "second": 0.3},
+        "added": {"leaf": 2},
+    }
+
+    assert diff_config_paths(old, new) == frozenset({
+        "enabled",
+        "timing.second",
+        "removed.leaf",
+        "added.leaf",
+    })

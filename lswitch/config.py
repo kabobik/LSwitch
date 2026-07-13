@@ -11,6 +11,8 @@ import json
 import logging
 import os
 import tempfile
+import threading
+from dataclasses import dataclass, field
 
 try:
     import tomllib
@@ -28,6 +30,71 @@ WAYLAND_SELECTION_STRATEGIES = {
     "primary_selection",
     "disabled",
 }
+
+
+@dataclass(frozen=True)
+class ConfigSnapshot:
+    """Owned immutable-by-contract snapshot of normalized config values."""
+
+    _values: dict = field(repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_values", copy.deepcopy(self._values))
+
+    def to_dict(self) -> dict:
+        """Return a deep mutable copy suitable for a settings draft."""
+        return copy.deepcopy(self._values)
+
+    def get(self, key: str, default=None):
+        """Read a value without exposing nested mutable state."""
+        return copy.deepcopy(self._values.get(key, default))
+
+
+@dataclass(frozen=True)
+class ConfigChangeSet:
+    """Validated transition between two complete config snapshots."""
+
+    old: ConfigSnapshot
+    new: ConfigSnapshot
+    changed_paths: frozenset[str]
+    source: str = "unknown"
+
+
+class ConfigConflictError(RuntimeError):
+    """Raised when a prepared update targets a stale config snapshot."""
+
+
+_MISSING = object()
+
+
+def diff_config_paths(old: dict, new: dict) -> frozenset[str]:
+    """Return changed leaf paths using dotted TOML-style names."""
+    changed: set[str] = set()
+
+    def add_leaves(value, prefix: str) -> None:
+        if isinstance(value, dict) and value:
+            for key, child in value.items():
+                add_leaves(child, f"{prefix}.{key}" if prefix else str(key))
+            return
+        if prefix:
+            changed.add(prefix)
+
+    def visit(left: dict, right: dict, prefix: str = "") -> None:
+        for key in sorted(set(left) | set(right)):
+            path = f"{prefix}.{key}" if prefix else str(key)
+            left_value = left.get(key, _MISSING)
+            right_value = right.get(key, _MISSING)
+            if left_value is _MISSING:
+                add_leaves(right_value, path)
+            elif right_value is _MISSING:
+                add_leaves(left_value, path)
+            elif isinstance(left_value, dict) and isinstance(right_value, dict):
+                visit(left_value, right_value, path)
+            elif left_value != right_value:
+                changed.add(path)
+
+    visit(old, new)
+    return frozenset(changed)
 
 DEFAULT_TIMING: dict[str, float] = {
     'key_press_delay': 0.001,
@@ -502,6 +569,7 @@ class ConfigManager:
     def __init__(self, config_path: str | None = None, debug: bool = False):
         self._config_path = _normalize_config_path(config_path)
         self._debug = debug
+        self._lock = threading.RLock()
         self._config: dict = copy.deepcopy(DEFAULT_CONFIG)
         self._load_config()
 
@@ -509,18 +577,23 @@ class ConfigManager:
 
     def _load_config(self) -> None:
         """Reset to defaults, then overlay from TOML file if it exists."""
-        self._config = copy.deepcopy(DEFAULT_CONFIG)
+        loaded_config = copy.deepcopy(DEFAULT_CONFIG)
         if self._config_path and os.path.exists(self._config_path):
             loaded = _read_and_merge(
                 self._config_path,
-                self._config,
+                loaded_config,
                 debug=self._debug,
             )
+            with self._lock:
+                self._config = loaded_config
             if loaded and _config_file_missing_defaults(
                 self._config_path,
                 debug=self._debug,
             ):
                 self.save()
+            return
+        with self._lock:
+            self._config = loaded_config
 
     # -- public ---------------------------------------------------------
 
@@ -536,36 +609,112 @@ class ConfigManager:
         """Atomically save configuration to TOML. Returns True on success."""
         save_path = target_path or self._config_path
         try:
-            save_data = {k: v for k, v in self._config.items() if not k.startswith('_')}
-            _save_toml(save_path, save_data)
+            with self._lock:
+                candidate = {
+                    key: copy.deepcopy(value)
+                    for key, value in self._config.items()
+                    if not key.startswith('_')
+                }
+            normalized = validate_config(candidate)
+            _save_toml(save_path, normalized)
+            with self._lock:
+                self._config = copy.deepcopy(normalized)
             return True
         except Exception:
             return False
 
     def get(self, key: str, default=None):
         """Get a single configuration value."""
-        return self._config.get(key, default)
+        with self._lock:
+            return copy.deepcopy(self._config.get(key, default))
 
     def set(self, key: str, value) -> None:
         """Set a single configuration value."""
-        self._config[key] = value
+        with self._lock:
+            self._config[key] = copy.deepcopy(value)
 
     def update(self, updates: dict) -> None:
         """Update multiple configuration values."""
-        self._config.update(updates)
+        with self._lock:
+            self._config.update(copy.deepcopy(updates))
 
     def get_all(self) -> dict:
         """Return all configuration (excluding internal keys)."""
-        return {k: v for k, v in self._config.items() if not k.startswith('_')}
+        return self.snapshot().to_dict()
+
+    def snapshot(self) -> ConfigSnapshot:
+        """Return an isolated snapshot of the current public configuration."""
+        with self._lock:
+            values = {
+                key: copy.deepcopy(value)
+                for key, value in self._config.items()
+                if not key.startswith('_')
+            }
+        return ConfigSnapshot(values)
+
+    def prepare_update(
+        self,
+        candidate: dict | ConfigSnapshot,
+        *,
+        source: str = "unknown",
+    ) -> ConfigChangeSet:
+        """Validate a complete candidate without mutating memory or disk."""
+        raw = candidate.to_dict() if isinstance(candidate, ConfigSnapshot) else copy.deepcopy(candidate)
+        normalized = validate_config(raw)
+        old = self.snapshot()
+        new = ConfigSnapshot(normalized)
+        return ConfigChangeSet(
+            old=old,
+            new=new,
+            changed_paths=diff_config_paths(old.to_dict(), new.to_dict()),
+            source=source,
+        )
+
+    def commit_update(
+        self,
+        change_set: ConfigChangeSet,
+        *,
+        persist: bool = True,
+        target_path: str | None = None,
+    ) -> None:
+        """Commit a prepared update atomically or raise without mutation."""
+        save_path = target_path or self._config_path
+        with self._lock:
+            current = ConfigSnapshot({
+                key: copy.deepcopy(value)
+                for key, value in self._config.items()
+                if not key.startswith('_')
+            })
+            if current != change_set.old:
+                raise ConfigConflictError(
+                    "Configuration changed after this update was prepared"
+                )
+            new_values = change_set.new.to_dict()
+            if persist:
+                _save_toml(save_path, new_values)
+            self._config = new_values
+
+    def replace(
+        self,
+        candidate: dict | ConfigSnapshot,
+        *,
+        source: str = "unknown",
+        persist: bool = True,
+    ) -> ConfigChangeSet:
+        """Validate and commit a complete candidate in one operation."""
+        change_set = self.prepare_update(candidate, source=source)
+        self.commit_update(change_set, persist=persist)
+        return change_set
 
     def reset_to_defaults(self) -> None:
         """Reset configuration to DEFAULT_CONFIG."""
-        self._config = copy.deepcopy(DEFAULT_CONFIG)
+        with self._lock:
+            self._config = copy.deepcopy(DEFAULT_CONFIG)
 
     def validate(self) -> bool:
         """Validate current configuration. Returns True if valid."""
         try:
-            validate_config(self._config)
+            validate_config(self.snapshot().to_dict())
             return True
         except ValueError:
             return False
