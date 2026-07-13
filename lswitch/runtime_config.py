@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
+from typing import Callable
+
+from lswitch.config import ConfigChangeSet, ConfigManager
+from lswitch.core.events import Event, EventType
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -17,6 +26,112 @@ class RuntimeConfigSnapshot:
 class AppliedRuntimeConfig:
     timing: RuntimeConfigSnapshot
     user_dict: object | None
+
+
+@dataclass(frozen=True)
+class ConfigApplyResult:
+    """Outcome returned to GUI, tray actions, and SIGHUP reload."""
+
+    ok: bool
+    changed_paths: frozenset[str] = frozenset()
+    error: str | None = None
+
+
+class RuntimeConfigController:
+    """Validate, persist, apply, roll back, and notify config transitions."""
+
+    def __init__(
+        self,
+        *,
+        config: ConfigManager,
+        apply_runtime: Callable[[ConfigChangeSet], None] | None = None,
+        prepare_runtime: Callable[[ConfigChangeSet], object] | None = None,
+        event_bus=None,
+        log=None,
+    ) -> None:
+        self.config = config
+        self._apply_runtime = apply_runtime or (lambda change_set: None)
+        self._prepare_runtime = prepare_runtime or (lambda change_set: change_set)
+        self.event_bus = event_bus
+        self.log = log or logger
+
+    def apply(
+        self,
+        candidate: dict,
+        *,
+        source: str = "unknown",
+        persist: bool = True,
+    ) -> ConfigApplyResult:
+        """Apply a complete candidate and restore the old state on failure."""
+        try:
+            change_set = self.config.prepare_update(candidate, source=source)
+        except Exception as exc:
+            return ConfigApplyResult(ok=False, error=str(exc))
+
+        if not change_set.changed_paths:
+            return ConfigApplyResult(ok=True)
+
+        try:
+            prepared = self._prepare_runtime(change_set)
+        except Exception as exc:
+            return ConfigApplyResult(
+                ok=False,
+                changed_paths=change_set.changed_paths,
+                error=str(exc),
+            )
+
+        committed = False
+        try:
+            self.config.commit_update(change_set, persist=persist)
+            committed = True
+            self._apply_runtime(prepared)
+        except Exception as exc:
+            if committed:
+                self._rollback(change_set, persist=persist)
+            return ConfigApplyResult(
+                ok=False,
+                changed_paths=change_set.changed_paths,
+                error=str(exc),
+            )
+
+        self._publish_success(change_set)
+        return ConfigApplyResult(
+            ok=True,
+            changed_paths=change_set.changed_paths,
+        )
+
+    def _rollback(self, change_set: ConfigChangeSet, *, persist: bool) -> None:
+        reverse = ConfigChangeSet(
+            old=change_set.new,
+            new=change_set.old,
+            changed_paths=change_set.changed_paths,
+            source="rollback",
+        )
+        try:
+            prepared = self._prepare_runtime(reverse)
+            self.config.commit_update(reverse, persist=persist)
+            self._apply_runtime(prepared)
+        except Exception:
+            self.log.exception("Runtime config rollback failed")
+
+    def _publish_success(self, change_set: ConfigChangeSet) -> None:
+        if self.event_bus is None:
+            return
+        data = {
+            "changed_paths": change_set.changed_paths,
+            "source": change_set.source,
+        }
+        new_values = change_set.new.to_dict()
+        for path in change_set.changed_paths:
+            if "." not in path and path in new_values:
+                data[path] = new_values[path]
+        self.event_bus.publish(
+            Event(
+                type=EventType.CONFIG_CHANGED,
+                data=data,
+                timestamp=time.time(),
+            )
+        )
 
 
 def sync_user_dictionary_components(

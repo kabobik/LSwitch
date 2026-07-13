@@ -2094,6 +2094,62 @@ def test_install_reload_signal_handler_skips_apply_when_reload_is_unchanged(monk
     log.debug.assert_not_called()
 
 
+def test_install_reload_signal_handler_uses_transactional_controller(monkeypatch):
+    registered = {}
+    monkeypatch.setattr(
+        "lswitch.runtime_lifecycle.signal.signal",
+        lambda signum, handler: registered.update({signum: handler}),
+    )
+    candidate = {"debug": True}
+    config = MagicMock()
+    config.read_candidate.return_value = candidate
+    controller = MagicMock()
+    controller.apply.return_value = types.SimpleNamespace(ok=True, error=None)
+    log = MagicMock()
+
+    handler = install_reload_signal_handler(
+        config=config,
+        config_controller=controller,
+        debug=True,
+        log=log,
+    )
+    handler(None, None)
+
+    config.read_candidate.assert_called_once_with()
+    config.reload.assert_not_called()
+    controller.apply.assert_called_once_with(
+        candidate,
+        source="sighup",
+        persist=False,
+    )
+    log.debug.assert_called_once_with("Config reloaded via SIGHUP")
+
+
+def test_install_reload_signal_handler_keeps_runtime_on_invalid_file(monkeypatch):
+    monkeypatch.setattr(
+        "lswitch.runtime_lifecycle.signal.signal",
+        lambda signum, handler: None,
+    )
+    config = MagicMock()
+    config.read_candidate.side_effect = ValueError("invalid config")
+    controller = MagicMock()
+    log = MagicMock()
+
+    handler = install_reload_signal_handler(
+        config=config,
+        config_controller=controller,
+        debug=False,
+        log=log,
+    )
+    handler(None, None)
+
+    controller.apply.assert_not_called()
+    log.error.assert_called_once_with(
+        "Config reload via SIGHUP failed: %s",
+        config.read_candidate.side_effect,
+    )
+
+
 def test_run_evdev_event_loop_dispatches_events_until_stopped():
     device = types.SimpleNamespace(name="keyboard")
     event = object()

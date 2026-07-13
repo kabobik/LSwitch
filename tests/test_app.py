@@ -105,10 +105,10 @@ class TestWireEventBus:
         app._wire_event_bus()
         assert len(app.event_bus._handlers[EventType.MOUSE_CLICK]) > 0
 
-    def test_subscribes_config_changed(self):
+    def test_config_changed_is_notification_only(self):
         app = _make_app()
         app._wire_event_bus()
-        assert len(app.event_bus._handlers[EventType.CONFIG_CHANGED]) > 0
+        assert app.event_bus._handlers[EventType.CONFIG_CHANGED] == []
 
 
 class TestRuntimeConfig:
@@ -122,13 +122,14 @@ class TestRuntimeConfig:
         fake_dict = MagicMock()
         fake_dict.path = ":test:"
 
-        app._wire_event_bus()
-        app.config.set("user_dict_enabled", True)
-        app.config.set("user_dict_min_weight", 4)
+        candidate = app.config.get_all()
+        candidate["user_dict_enabled"] = True
+        candidate["user_dict_min_weight"] = 4
 
         with patch("lswitch.intelligence.user_dictionary.UserDictionary", return_value=fake_dict):
-            app.event_bus.publish(Event(EventType.CONFIG_CHANGED, {"user_dict_enabled": True}, 0.0))
+            result = app.config_controller.apply(candidate, source="test", persist=False)
 
+        assert result.ok is True
         assert app.user_dict is fake_dict
         assert app.auto_detector.user_dict is fake_dict
         assert app.auto_detector.user_dict_min_weight == 4
@@ -141,10 +142,11 @@ class TestRuntimeConfig:
         app.auto_detector = MagicMock()
         app.conversion_engine = MagicMock()
 
-        app._wire_event_bus()
-        app.config.set("user_dict_enabled", False)
-        app.event_bus.publish(Event(EventType.CONFIG_CHANGED, {"user_dict_enabled": False}, 0.0))
+        candidate = app.config.get_all()
+        candidate["user_dict_enabled"] = False
+        result = app.config_controller.apply(candidate, source="test", persist=False)
 
+        assert result.ok is True
         assert app.user_dict is None
         assert app.auto_detector.user_dict is None
         assert app.conversion_engine.user_dict is None
@@ -158,17 +160,12 @@ class TestRuntimeConfig:
         }.get(lang, set())
         app.dictionary = dictionary
 
-        app._wire_event_bus()
-        app.config.set("mid_word_min_prefix_len", 5)
-        app.config.set("system_dict_enabled", False)
-        app.event_bus.publish(
-            Event(
-                EventType.CONFIG_CHANGED,
-                {"mid_word_min_prefix_len": 5},
-                0.0,
-            )
-        )
+        candidate = app.config.get_all()
+        candidate["mid_word_min_prefix_len"] = 5
+        candidate["system_dict_enabled"] = False
+        result = app.config_controller.apply(candidate, source="test", persist=False)
 
+        assert result.ok is True
         assert app.prefix_dictionary.has_prefix("en", "hell") is False
         assert app.prefix_dictionary.has_prefix("en", "hello") is True
         assert app.mid_word_detector.min_prefix_len == 5

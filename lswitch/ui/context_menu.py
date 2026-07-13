@@ -7,6 +7,7 @@ from PyQt6.QtGui import QAction, QIcon
 
 from lswitch.core.events import Event, EventType
 from lswitch.i18n import t
+from lswitch.runtime_config import RuntimeConfigController
 
 
 class ContextMenu:
@@ -16,10 +17,22 @@ class ContextMenu:
     and quit action.
     """
 
-    def __init__(self, config=None, event_bus=None, app=None):
+    def __init__(
+        self,
+        config=None,
+        event_bus=None,
+        app=None,
+        config_controller=None,
+    ):
         self.config = config
         self.event_bus = event_bus
         self._app = app  # LSwitchApp instance for debug monitor
+        self.config_controller = config_controller
+        if self.config_controller is None and self.config is not None:
+            self.config_controller = RuntimeConfigController(
+                config=self.config,
+                event_bus=self.event_bus,
+            )
         self._menu: QMenu | None = None
         self._status_action: QAction | None = None
         self._debug_monitor = None  # DebugMonitorWindow instance
@@ -96,16 +109,10 @@ class ContextMenu:
             return
         current = self.config.get("auto_switch", False)
         new_val = not current
-        self.config.set("auto_switch", new_val)
-        self.config.save()
+        if not self._apply_value("auto_switch", new_val):
+            return
         if hasattr(self, '_auto_switch_action'):
             self._auto_switch_action.setChecked(new_val)
-
-        if self.event_bus is not None:
-            import time
-            self.event_bus.publish(
-                Event(type=EventType.CONFIG_CHANGED, data={"auto_switch": new_val}, timestamp=time.time())
-            )
 
     # -- internals ---------------------------------------------------------
 
@@ -114,16 +121,18 @@ class ContextMenu:
             return
         current = self.config.get("user_dict_enabled", False)
         new_val = not current
-        self.config.set("user_dict_enabled", new_val)
-        self.config.save()
+        if not self._apply_value("user_dict_enabled", new_val):
+            return
         if hasattr(self, '_user_dict_action'):
             self._user_dict_action.setChecked(new_val)
 
-        if self.event_bus is not None:
-            import time
-            self.event_bus.publish(
-                Event(type=EventType.CONFIG_CHANGED, data={"user_dict_enabled": new_val}, timestamp=time.time())
-            )
+    def _apply_value(self, key: str, value) -> bool:
+        if self.config is None or self.config_controller is None:
+            return False
+        candidate = self.config.get_all()
+        candidate[key] = value
+        result = self.config_controller.apply(candidate, source="tray")
+        return result.ok
 
     @staticmethod
     def _show_about() -> None:

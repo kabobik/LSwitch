@@ -11,6 +11,7 @@ from lswitch.core.auto_conversion_session import AutoConversionSessionState
 from lswitch.runtime import (
     ConversionRuntimeFacade,
     PidLock,
+    RuntimeConfigController,
     SelectionPollerThread,
     apply_runtime_config_update,
     create_core_components,
@@ -122,6 +123,12 @@ class LSwitchApp:
         self._mid_word_runtime_signature = None
         self._platform = None
         self._selection_poller: SelectionPollerThread | None = None
+        self.config_controller = RuntimeConfigController(
+            config=self.config,
+            apply_runtime=self._apply_runtime_config,
+            event_bus=self.event_bus,
+            log=logger,
+        )
 
     # ------------------------------------------------------------------
     # Platform initialisation (lazy — for testability)
@@ -199,7 +206,6 @@ class LSwitchApp:
         wire_runtime_event_bus(
             event_bus=self.event_bus,
             input_router=self.input_router,
-            on_config_changed=lambda event: self._apply_runtime_config(),
         )
 
     def _enable_user_dictionary(self):
@@ -210,7 +216,7 @@ class LSwitchApp:
         )
         return self.user_dict
 
-    def _apply_runtime_config(self) -> None:
+    def _apply_runtime_config(self, change_set=None) -> None:
         """Apply config values that affect already-created runtime objects."""
         applied = apply_runtime_config_update(
             config=self.config,
@@ -474,7 +480,7 @@ class LSwitchApp:
 
         install_reload_signal_handler(
             config=self.config,
-            apply_runtime_config=self._apply_runtime_config,
+            config_controller=self.config_controller,
             debug=self.debug,
             log=logger,
         )
@@ -490,6 +496,7 @@ class LSwitchApp:
             event_bus=self.event_bus,
             show_tray=True,
             config=self.config,
+            config_controller=self.config_controller,
             owner_app=self,
             xkb=self.xkb,
             is_running=lambda: self._running,

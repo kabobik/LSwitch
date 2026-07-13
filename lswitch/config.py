@@ -605,6 +605,12 @@ class ConfigManager:
         except Exception:
             return False
 
+    def read_candidate(self, source_path: str | None = None) -> dict:
+        """Strictly read and normalize a config file without mutating state."""
+        path = source_path or self._config_path
+        raw = _load_toml(path)
+        return validate_config(raw)
+
     def save(self, target_path: str | None = None) -> bool:
         """Atomically save configuration to TOML. Returns True on success."""
         save_path = target_path or self._config_path

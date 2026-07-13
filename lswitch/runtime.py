@@ -20,6 +20,8 @@ from lswitch.intelligence.dictionary_service import DictionaryService
 from lswitch.intelligence.ngram_analyzer import NgramAnalyzer
 from lswitch.runtime_config import (
     AppliedRuntimeConfig,
+    ConfigApplyResult,
+    RuntimeConfigController,
     RuntimeConfigSnapshot,
     apply_runtime_config_update,
     apply_runtime_timing_config,
@@ -228,7 +230,12 @@ def create_input_router(
     )
 
 
-def wire_runtime_event_bus(*, event_bus: EventBus, input_router, on_config_changed) -> None:
+def wire_runtime_event_bus(
+    *,
+    event_bus: EventBus,
+    input_router,
+    on_config_changed=None,
+) -> None:
     """Subscribe runtime input and config handlers to the event bus."""
     from lswitch.core.events import EventType
 
@@ -237,7 +244,8 @@ def wire_runtime_event_bus(*, event_bus: EventBus, input_router, on_config_chang
     event_bus.subscribe(EventType.KEY_REPEAT, input_router.on_key_repeat)
     event_bus.subscribe(EventType.MOUSE_CLICK, input_router.on_mouse_click)
     event_bus.subscribe(EventType.MOUSE_RELEASE, input_router.on_mouse_release)
-    event_bus.subscribe(EventType.CONFIG_CHANGED, on_config_changed)
+    if on_config_changed is not None:
+        event_bus.subscribe(EventType.CONFIG_CHANGED, on_config_changed)
 
 
 def create_conversion_runtime(

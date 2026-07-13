@@ -199,6 +199,7 @@ def create_tray_indicator(
     qt_app,
     owner_app,
     xkb,
+    config_controller=None,
 ):
     """Create and show the Qt tray indicator for the running application."""
     from lswitch.ui.context_menu import ContextMenu
@@ -206,7 +207,14 @@ def create_tray_indicator(
 
     tray = TrayIcon(event_bus=event_bus, config=config, app=qt_app)
 
-    menu_obj = ContextMenu(config=config, event_bus=event_bus, app=owner_app)
+    menu_kwargs = {
+        "config": config,
+        "event_bus": event_bus,
+        "app": owner_app,
+    }
+    if config_controller is not None:
+        menu_kwargs["config_controller"] = config_controller
+    menu_obj = ContextMenu(**menu_kwargs)
     menu = menu_obj.build()
     tray.set_context_menu(menu)
 
@@ -254,14 +262,33 @@ def start_runtime_resources(
 def install_reload_signal_handler(
     *,
     config,
-    apply_runtime_config,
+    apply_runtime_config=None,
+    config_controller=None,
     debug: bool,
     log,
 ):
     """Install SIGHUP handler for runtime config reloads."""
     def _reload_handler(signum, frame):
+        if config_controller is not None:
+            try:
+                candidate = config.read_candidate()
+                result = config_controller.apply(
+                    candidate,
+                    source="sighup",
+                    persist=False,
+                )
+            except Exception as exc:
+                log.error("Config reload via SIGHUP failed: %s", exc)
+                return
+            if not result.ok:
+                log.error("Config reload via SIGHUP failed: %s", result.error)
+                return
+            if debug:
+                log.debug("Config reloaded via SIGHUP")
+            return
         if config.reload():
-            apply_runtime_config()
+            if apply_runtime_config is not None:
+                apply_runtime_config()
         if debug:
             log.debug("Config reloaded via SIGHUP")
 
@@ -336,21 +363,26 @@ def run_qt_app_runtime(
     device_manager,
     event_manager,
     stop_runtime,
+    config_controller=None,
 ) -> None:
     """Run full Qt runtime using app-owned adapters and lifecycle callbacks."""
+    def _create_tray():
+        kwargs = {
+            "event_bus": event_bus,
+            "config": config,
+            "qt_app": qt_app,
+            "owner_app": owner_app,
+            "xkb": xkb,
+        }
+        if config_controller is not None:
+            kwargs["config_controller"] = config_controller
+        return create_tray_indicator(**kwargs)
+
     run_qt_runtime_loop(
         qt_app=qt_app,
         event_bus=event_bus,
         show_tray=show_tray,
-        create_tray=(
-            lambda: create_tray_indicator(
-                event_bus=event_bus,
-                config=config,
-                qt_app=qt_app,
-                owner_app=owner_app,
-                xkb=xkb,
-            )
-        ),
+        create_tray=_create_tray,
         run_evdev_loop=(
             lambda: run_evdev_event_loop(
                 is_running=is_running,
